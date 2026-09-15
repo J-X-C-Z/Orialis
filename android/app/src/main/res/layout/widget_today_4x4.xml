@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widgetRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="方寸 · Today" android:textColor="#8DEBDF" android:textSize="12sp" android:textStyle="bold" />
+    <TextView android:id="@+id/widgetNext" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:ellipsize="end" android:maxLines="2" android:text="暂无下一安排" android:textColor="#E8F5F1" android:textSize="20sp" android:textStyle="bold" />
+    <TextView android:id="@+id/widgetNextMeta" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="今天 · 方寸" android:textColor="#9AB5B1" android:textSize="12sp" />
+    <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="14dp" android:background="#293D43" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="13dp" android:text="今日 Focus" android:textColor="#9AB5B1" android:textSize="11sp" />
+    <TextView android:id="@+id/widgetFocus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:ellipsize="end" android:maxLines="3" android:text="今天还没有固定 Focus" android:textColor="#E8F5F1" android:textSize="14sp" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="最近 DDL" android:textColor="#9AB5B1" android:textSize="11sp" />
+    <TextView android:id="@+id/widgetDeadline" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:ellipsize="end" android:maxLines="2" android:text="最近没有 DDL" android:textColor="#FFC978" android:textSize="14sp" />
+    <TextView android:id="@+id/widgetProgress" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:gravity="bottom" android:text="今日完成 0%" android:textColor="#8DEBDF" android:textSize="12sp" />
+</LinearLayout>

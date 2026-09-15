@@ -1,0 +1,30 @@
+[Unit]
+Description=Fangcun personal planning hub
+After=network.target
+
+[Service]
+Type=simple
+User=fangcun
+Group=fangcun
+WorkingDirectory=/opt/fangcun
+Environment=NODE_ENV=production
+Environment=NODE_NO_WARNINGS=1
+Environment=HOST=127.0.0.1
+Environment=PORT=18443
+Environment=DATA_DIR=/var/lib/fangcun
+Environment=TRUST_PROXY=true
+Environment=COOKIE_SECURE=true
+EnvironmentFile=-/etc/fangcun.env
+ExecStart=/usr/bin/node /opt/fangcun/server.js
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fangcun
+CapabilityBoundingSet=
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,110 @@
+<template>
+  <div class="page {{motionClass}}" @swipe="handleSwipe">
+    <scroll class="page-scroll" scroll-y="true" bounces="true">
+      <div class="content column">
+        <div class="app-bar row">
+          <text class="brand">方寸</text>
+          <text class="clock">19:06</text>
+        </div>
+
+        <div class="menu-item row" onclick="routePriority">
+          <div class="menu-icon blue center"><div class="glyph flag-glyph"><div class="flag-pole"></div><div class="flag-top"></div></div></div>
+          <text class="item-title">优先级</text>
+          <text class="chevron">›</text>
+        </div>
+        <div class="menu-item row" onclick="routeProjects">
+          <div class="menu-icon teal center"><div class="glyph project-glyph"><div class="project-back"></div><div class="project-front"></div></div></div>
+          <text class="item-title">长期项目</text>
+          <text class="chevron">›</text>
+        </div>
+        <div class="menu-item row" onclick="routeCalendar">
+          <div class="menu-icon blue center"><div class="glyph calendar-glyph"><div class="calendar-bar"></div><div class="calendar-pin left"></div><div class="calendar-pin right"></div></div></div>
+          <text class="item-title">日历</text>
+          <text class="chevron">›</text>
+        </div>
+        <div class="menu-item row" onclick="routeConfirmations">
+          <div class="menu-icon teal center"><div class="glyph check-glyph"><div class="check-stroke"></div></div></div>
+          <text class="item-title">待确认</text>
+          <div class="badge center"><text class="badge-text">2</text></div>
+          <text class="chevron compact-chevron">›</text>
+        </div>
+        <div class="menu-item row" onclick="routeSettings">
+          <div class="menu-icon slate center"><div class="glyph gear-glyph"><div class="gear-core"></div></div></div>
+          <text class="item-title">设置</text>
+          <text class="chevron">›</text>
+        </div>
+
+        <text class="gesture-hint">右滑返回主页</text>
+      </div>
+    </scroll>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import haptic from "../../common/haptic"
+
+export default {
+  private: { motionClass: "enter-right" },
+  handleSwipe(e) {
+    if (e.direction === "right") {
+      haptic.light()
+      this.motionClass = "exit-right"
+      setTimeout(() => router.back(), 170)
+    }
+  },
+  routePriority() { haptic.light(); router.push({ uri: "/pages/priority" }) },
+  routeProjects() { haptic.light(); router.push({ uri: "/pages/projects" }) },
+  routeCalendar() { haptic.light(); router.push({ uri: "/pages/calendar" }) },
+  routeConfirmations() { haptic.light(); router.push({ uri: "/pages/confirmations" }) },
+  routeSettings() { haptic.light(); router.push({ uri: "/pages/settings" }) }
+}
+</script>
+
+<style>
+text { color: #ffffff; }
+.row { flex-direction: row; }
+.column { flex-direction: column; }
+.center { justify-content: center; align-items: center; }
+.page { width: 100%; height: 100%; padding: 18px; border-radius: 36px; background-color: #000000; }
+.enter-right { animation-name: enterRight; animation-duration: 180ms; animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
+.exit-right { animation-name: exitRight; animation-duration: 180ms; animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
+.page-scroll { width: 100%; height: 100%; border-radius: 24px; }
+.content { width: 300px; height: 590px; padding-bottom: 24px; flex-shrink: 0; }
+.app-bar { width: 300px; height: 54px; padding-left: 4px; padding-right: 4px; justify-content: space-between; align-items: center; }
+.brand { font-size: 27px; font-weight: 700; color: #ffffff; }
+.clock { font-size: 20px; color: #e5e8ef; }
+.menu-item { width: 300px; height: 82px; margin-bottom: 10px; padding-left: 14px; padding-right: 14px; align-items: center; border-radius: 18px; background-color: #1b1f24; flex-shrink: 0; }
+.menu-icon { width: 44px; height: 44px; margin-right: 15px; border-radius: 22px; }
+.blue { background-color: #265d9f; }
+.teal { background-color: #146769; }
+.slate { background-color: #58657b; }
+.glyph { width: 22px; height: 22px; position: relative; }
+.flag-pole { position: absolute; left: 4px; top: 1px; width: 2px; height: 18px; background-color: #ffffff; }
+.flag-top { position: absolute; left: 6px; top: 2px; width: 12px; height: 8px; background-color: #ffffff; border-radius: 1px; }
+.project-back { position: absolute; left: 2px; top: 3px; width: 15px; height: 12px; border: 2px solid #ffffff; border-radius: 3px; }
+.project-front { position: absolute; left: 5px; top: 6px; width: 15px; height: 12px; border: 2px solid #ffffff; border-radius: 3px; background-color: transparent; }
+.calendar-glyph { border: 2px solid #ffffff; border-radius: 4px; }
+.calendar-bar { position: absolute; left: 2px; top: 5px; width: 14px; height: 2px; background-color: #ffffff; }
+.calendar-pin { position: absolute; top: -4px; width: 2px; height: 7px; background-color: #ffffff; }
+.calendar-pin.left { left: 5px; }
+.calendar-pin.right { left: 12px; }
+.check-glyph { width: 16px; height: 9px; }
+.check-stroke { width: 16px; height: 9px; border-left: 3px solid #ffffff; border-bottom: 3px solid #ffffff; transform: rotate(-45deg); }
+.gear-glyph { border: 3px dotted #ffffff; border-radius: 50%; }
+.gear-core { position: absolute; left: 6px; top: 6px; width: 6px; height: 6px; border-radius: 50%; background-color: #ffffff; }
+.item-title { width: 178px; font-size: 24px; font-weight: 700; color: #f2f4f8; }
+.badge { width: 34px; height: 34px; border-radius: 17px; background-color: #3d78cc; }
+.badge-text { font-size: 18px; font-weight: 700; color: #ffffff; }
+.chevron { width: 33px; font-size: 34px; text-align: right; color: #a5adba; }
+.compact-chevron { width: 19px; }
+.gesture-hint { width: 300px; margin-top: 14px; font-size: 16px; text-align: center; color: #7a8391; }
+@keyframes enterRight {
+  0% { transform: translateX(32px); opacity: 0.2; }
+  100% { transform: translateX(0px); opacity: 1; }
+}
+@keyframes exitRight {
+  0% { transform: translateX(0px); opacity: 1; }
+  100% { transform: translateX(32px); opacity: 0.2; }
+}
+</style>

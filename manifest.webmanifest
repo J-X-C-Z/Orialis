@@ -1,0 +1,20 @@
+{
+  "name": "方寸 · 今天行动中枢",
+  "short_name": "方寸",
+  "description": "从今天开始，把课程、截止日期、优先级和长期项目变成下一步行动",
+  "start_url": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#f4f2ed",
+  "theme_color": "#344f42",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">方寸</string>
+    <string name="reminder_channel">方寸提醒</string>
+    <string name="reminder_channel_description">课程、日程与截止事项提醒</string>
+</resources>

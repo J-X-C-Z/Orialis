@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Loading">
+  <title>Loading</title>
+  <style>
+    .tile {
+      transform-box: fill-box;
+      transform-origin: center;
+      animation-duration: 1.6s;
+      animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+      animation-iteration-count: infinite;
+      will-change: transform;
+    }
+
+    /* Clockwise: top-left, top-right, bottom-right, bottom-left. */
+    .tile-1 { animation-name: fangcun-pulse-nw; }
+    .tile-2 { animation-name: fangcun-pulse-ne; animation-delay: -1.2s; }
+    .tile-3 { animation-name: fangcun-pulse-se; animation-delay: -.8s; }
+    .tile-4 { animation-name: fangcun-pulse-sw; animation-delay: -.4s; }
+
+    @keyframes fangcun-pulse-nw {
+      0%, 100% { transform: scale(.94); fill: #526c82; }
+      22% { transform: translate(-2px, -2px) scale(1); fill: #aab6c8; }
+      32% { transform: translate(-4px, -4px) scale(1.04); fill: #d2d7df; }
+      48% { transform: translate(-2px, -2px) scale(.99); fill: #b7c1cf; }
+      70% { transform: scale(.96); fill: #71879d; }
+    }
+
+    @keyframes fangcun-pulse-ne {
+      0%, 100% { transform: scale(.94); fill: #526c82; }
+      22% { transform: translate(2px, -2px) scale(1); fill: #aab6c8; }
+      32% { transform: translate(4px, -4px) scale(1.04); fill: #d2d7df; }
+      48% { transform: translate(2px, -2px) scale(.99); fill: #b7c1cf; }
+      70% { transform: scale(.96); fill: #71879d; }
+    }
+
+    @keyframes fangcun-pulse-se {
+      0%, 100% { transform: scale(.94); fill: #526c82; }
+      22% { transform: translate(2px, 2px) scale(1); fill: #aab6c8; }
+      32% { transform: translate(4px, 4px) scale(1.04); fill: #d2d7df; }
+      48% { transform: translate(2px, 2px) scale(.99); fill: #b7c1cf; }
+      70% { transform: scale(.96); fill: #71879d; }
+    }
+
+    @keyframes fangcun-pulse-sw {
+      0%, 100% { transform: scale(.94); fill: #526c82; }
+      22% { transform: translate(-2px, 2px) scale(1); fill: #aab6c8; }
+      32% { transform: translate(-4px, 4px) scale(1.04); fill: #d2d7df; }
+      48% { transform: translate(-2px, 2px) scale(.99); fill: #b7c1cf; }
+      70% { transform: scale(.96); fill: #71879d; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .tile {
+        animation-name: fangcun-pulse-reduced;
+        animation-timing-function: linear;
+      }
+
+      @keyframes fangcun-pulse-reduced {
+        0%, 100% { fill: #526c82; opacity: .82; }
+        32% { fill: #d2d7df; opacity: 1; }
+        70% { fill: #71879d; opacity: .88; }
+      }
+    }
+  </style>
+
+  <!-- Transparent canvas; the original 3° icon tilt is retained. -->
+  <g transform="translate(106 106) rotate(3 150 150)">
+    <rect class="tile tile-1" x="0" y="0" width="138" height="138" rx="24" fill="#526c82"/>
+    <rect class="tile tile-2" x="162" y="0" width="138" height="138" rx="24" fill="#71879d"/>
+    <rect class="tile tile-3" x="162" y="162" width="138" height="138" rx="24" fill="#d2d7df"/>
+    <rect class="tile tile-4" x="0" y="162" width="138" height="138" rx="24" fill="#aab6c8"/>
+  </g>
+</svg>

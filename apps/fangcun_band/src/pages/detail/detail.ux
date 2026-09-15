@@ -1,0 +1,64 @@
+<template>
+  <div class="page column {{motionClass}}" @swipe="handleSwipe">
+    <div class="top-bar row"><text class="back" onclick="goBack">‹</text><text class="spacer"></text><text class="clock">19:06</text></div>
+    <div class="time-row row"><div class="dot"></div><text class="time">今天 14:00–15:30</text></div>
+    <text class="title">大学物理</text>
+    <div class="detail-row row"><div class="detail-icon center"><div class="glyph pin-glyph center"><div class="pin-core"></div></div></div><text class="detail-text">东校 A301</text></div>
+    <div class="detail-row row"><div class="detail-icon center"><div class="glyph person-glyph"><div class="person-head"></div><div class="person-body"></div></div></div><text class="detail-text">教师：罗觉论</text></div>
+    <input class="complete-button" type="button" value="{{completed ? '已完成' : '完成'}}" onclick="toggleComplete" />
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import haptic from "../../common/haptic"
+export default {
+  private: { completed: false, motionClass: "enter-right" },
+<<<<<<< HEAD
+  toggleComplete() {
+    const wasCompleted = this.completed
+    this.completed = !this.completed
+    if (!wasCompleted && this.completed) haptic.complete()
+  },
+=======
+  toggleComplete() { haptic.medium(); this.completed = !this.completed },
+>>>>>>> c64843a8c7ef9e0eac318215525082a9111c2b89
+  goBack() { haptic.light(); router.back() },
+  handleSwipe(e) {
+    if (e.direction === "right") {
+      haptic.light()
+      this.motionClass = "exit-right"
+      setTimeout(() => router.back(), 170)
+    }
+  }
+}
+</script>
+
+<style>
+text { color: #ffffff; }
+.row { flex-direction: row; }
+.column { flex-direction: column; }
+.center { justify-content: center; align-items: center; }
+.page { width: 100%; height: 100%; padding: 20px; border-radius: 36px; background-color: #000000; }
+.enter-right { animation-name: enterRight; animation-duration: 180ms; animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
+.exit-right { animation-name: exitRight; animation-duration: 180ms; animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
+.top-bar { width: 296px; height: 56px; align-items: center; }
+.back { width: 36px; font-size: 40px; color: #ffffff; }
+.spacer { width: 184px; }
+.clock { width: 76px; font-size: 21px; text-align: right; color: #e3e6ec; }
+.time-row { width: 296px; margin-top: 20px; align-items: center; }
+.dot { width: 14px; height: 14px; margin-right: 12px; border-radius: 7px; background-color: #2e7cf6; }
+.time { font-size: 21px; color: #9fb2d8; }
+.title { width: 296px; margin-top: 17px; font-size: 38px; font-weight: 700; color: #ffffff; }
+.detail-row { width: 296px; margin-top: 26px; align-items: center; }
+.detail-icon { width: 44px; height: 44px; margin-right: 13px; border-radius: 14px; background-color: #252b35; }
+.glyph { width: 22px; height: 22px; position: relative; }
+.pin-glyph { border: 2px solid #adb7ca; border-radius: 11px; }
+.pin-core { width: 6px; height: 6px; border-radius: 3px; background-color: #adb7ca; }
+.person-head { position: absolute; left: 7px; top: 1px; width: 8px; height: 8px; border: 2px solid #adb7ca; border-radius: 4px; }
+.person-body { position: absolute; left: 2px; bottom: 1px; width: 18px; height: 9px; border: 2px solid #adb7ca; border-radius: 9px 9px 3px 3px; }
+.detail-text { width: 242px; font-size: 21px; color: #b7bfce; }
+.complete-button { width: 296px; height: 68px; margin-top: 56px; border-radius: 20px; background-color: #2878f2; font-size: 24px; font-weight: 700; color: #ffffff; }
+@keyframes enterRight { 0% { transform: translateX(32px); opacity: 0.2; } 100% { transform: translateX(0px); opacity: 1; } }
+@keyframes exitRight { 0% { transform: translateX(0px); opacity: 1; } 100% { transform: translateX(32px); opacity: 0.2; } }
+</style>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widgetRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="方寸 · 下一步" android:textColor="#8DEBDF" android:textSize="11sp" android:textStyle="bold" />
+    <TextView android:id="@+id/widgetNext" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:ellipsize="end" android:maxLines="2" android:text="暂无下一安排" android:textColor="#E8F5F1" android:textSize="17sp" android:textStyle="bold" />
+    <TextView android:id="@+id/widgetNextMeta" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:ellipsize="end" android:maxLines="1" android:text="今天 · 方寸" android:textColor="#9AB5B1" android:textSize="11sp" />
+    <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="10dp" android:background="#293D43" />
+    <TextView android:id="@+id/widgetDeadline" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:ellipsize="end" android:maxLines="1" android:text="最近没有 DDL" android:textColor="#FFC978" android:textSize="11sp" />
+</LinearLayout>

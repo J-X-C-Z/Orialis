@@ -1,0 +1,75 @@
+<template>
+  <div class="page {{motionClass}}" @swipe="handleSwipe">
+    <scroll class="page-scroll" scroll-y="true" bounces="true">
+      <div class="content column">
+        <div class="top-bar row"><text class="back" onclick="goBack">‹</text><text class="page-title">9/14 周三</text><text class="clock">19:06</text></div>
+
+        <div class="day column">
+          <div class="day-head row"><div class="day-dot blue"></div><text class="day-title">今天</text></div>
+          <div class="event column" onclick="routeDetail"><text class="event-time">14:00–15:30</text><text class="event-title">大学物理</text><text class="event-meta">东校 · A301</text></div>
+          <div class="event column"><text class="event-time">19:30–20:30</text><text class="event-title">RoboMaster 会议</text><text class="event-meta">线上会议</text></div>
+        </div>
+
+        <div class="day column">
+          <div class="day-head row"><div class="day-dot green"></div><text class="day-title">明天</text></div>
+          <div class="event column"><text class="event-time">10:00–11:30</text><text class="event-title">大学物理</text><text class="event-meta">南校 · A201</text></div>
+        </div>
+
+        <div class="day column">
+          <div class="day-head row"><div class="day-dot purple"></div><text class="day-title">后天</text></div>
+          <div class="empty center"><text class="empty-text">暂无安排</text></div>
+        </div>
+        <text class="hint">上下滑动查看日期 · 右滑返回</text>
+      </div>
+    </scroll>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import haptic from "../../common/haptic"
+export default {
+  private: { motionClass: "enter-right" },
+  goBack() { haptic.light(); router.back() },
+  routeDetail() { haptic.light(); router.push({ uri: "/pages/detail" }) },
+  handleSwipe(e) {
+    if (e.direction === "right") {
+      haptic.light()
+      this.motionClass = "exit-right"
+      setTimeout(() => router.back(), 170)
+    }
+  }
+}
+</script>
+
+<style>
+text { color: #ffffff; }
+.row { flex-direction: row; }
+.column { flex-direction: column; }
+.center { justify-content: center; align-items: center; }
+.page { width: 100%; height: 100%; padding: 18px; border-radius: 36px; background-color: #000000; }
+.enter-right { animation-name: enterRight; animation-duration: 180ms; animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
+.exit-right { animation-name: exitRight; animation-duration: 180ms; animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
+.page-scroll { width: 100%; height: 100%; border-radius: 24px; }
+.content { width: 300px; height: 820px; flex-shrink: 0; padding-bottom: 24px; }
+.top-bar { width: 300px; height: 56px; flex-shrink: 0; align-items: center; }
+.back { width: 34px; flex-shrink: 0; font-size: 42px; color: #ffffff; }
+.page-title { width: 192px; flex-shrink: 0; font-size: 27px; font-weight: 700; color: #ffffff; }
+.clock { width: 74px; flex-shrink: 0; font-size: 21px; text-align: right; color: #e3e6ec; }
+.day { width: 300px; flex-shrink: 0; margin-bottom: 14px; padding: 15px; border-radius: 18px; background-color: #191d22; }
+.day-head { width: 270px; height: 36px; flex-shrink: 0; align-items: center; }
+.day-dot { width: 12px; height: 12px; margin-right: 10px; border-radius: 6px; }
+.blue { background-color: #2e7cf6; }
+.green { background-color: #35d586; }
+.purple { background-color: #9c82ff; }
+.day-title { font-size: 22px; font-weight: 700; color: #bdc5d2; }
+.event { width: 270px; height: 104px; flex-shrink: 0; padding: 12px; margin-top: 9px; border-radius: 14px; background-color: #22272e; }
+.event-time { flex-shrink: 0; font-size: 19px; color: #8fa8d6; }
+.event-title { flex-shrink: 0; margin-top: 5px; font-size: 24px; font-weight: 700; color: #ffffff; }
+.event-meta { flex-shrink: 0; margin-top: 4px; font-size: 18px; color: #8d96a5; }
+.empty { width: 270px; height: 74px; flex-shrink: 0; }
+.empty-text { font-size: 21px; color: #727a87; }
+.hint { width: 300px; flex-shrink: 0; font-size: 16px; text-align: center; color: #7a8391; }
+@keyframes enterRight { 0% { transform: translateX(32px); opacity: 0.2; } 100% { transform: translateX(0px); opacity: 1; } }
+@keyframes exitRight { 0% { transform: translateX(0px); opacity: 1; } 100% { transform: translateX(32px); opacity: 0.2; } }
+</style>

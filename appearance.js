@@ -1,0 +1,178 @@
+/* Appearance owns only device preferences and decorative interaction; no app data. */
+(() => {
+  "use strict";
+  const root = document.documentElement;
+  // Touch layouts use the shared GPU optical layer in touch-material.js.
+  // Desktop pointer optics retain their existing adapter.
+  const compact = matchMedia("(max-width: 900px), (pointer: coarse), (hover: none)");
+  const nativeAndroid = () => typeof window.FangcunNative?.syncReminders === "function"
+    || /Android/i.test(navigator.userAgent || "");
+  const updatePerformance = () => {
+    const profile = compact.matches || nativeAndroid() ? "touch" : "dynamic";
+    if (root.dataset.materialPerformance !== profile) root.dataset.materialPerformance = profile;
+  };
+  updatePerformance();
+  const read = (key, fallback) => { try { return localStorage.getItem(key) || fallback; } catch { return fallback; } };
+  root.dataset.skin = read("fangcun-skin", "classic") === "liquid" ? "liquid" : "classic";
+  root.dataset.mode = read("fangcun-theme", "light") === "dark" ? "dark" : "light";
+  document.addEventListener("DOMContentLoaded", () => {
+    const modal = document.getElementById("appearanceModal");
+    document.body.classList.toggle("dark", root.dataset.mode === "dark");
+    if (!modal) return;
+    const status = document.getElementById("appearanceStatus");
+    const mode = document.getElementById("appearanceMode");
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+    const forced = matchMedia("(forced-colors: active)");
+    const effectsEnabled = () => root.dataset.materialPerformance === "dynamic"
+      && !reduced.matches && !forced.matches && !document.hidden;
+    let active = null;
+    let frame = 0;
+    let latest = null;
+    let lastTrail = 0;
+    let renderer = null, rendererLoading = null, rendererFailed = false;
+    let rendererFactory = null;
+    // Extension point for native DOM, custom elements, or framework-mounted controls.
+    window.FangcunAppearance = Object.freeze({
+      registerRenderer(factory) {
+        if (typeof factory !== 'function') throw new TypeError('Renderer factory must be a function');
+        clear(); renderer?.dispose(); renderer=null; rendererLoading=null; rendererFactory=factory; rendererFailed=false;
+      },
+      get skin() { return root.dataset.skin; },
+      get effectsEnabled() { return effectsEnabled(); }
+    });
+    async function ensureRenderer(state) {
+      if (rendererFailed || !effectsEnabled()) return;
+      try {
+        if (!renderer) {
+          rendererLoading ||= rendererFactory ? Promise.resolve(rendererFactory) : import('./liquid-renderer.js').then(module => module.createRenderer);
+          const factory = await rendererLoading;
+          if (active !== state || !effectsEnabled() || root.dataset.skin !== 'liquid') return;
+          renderer ||= factory();
+        }
+        if (active === state) renderer.mount(state.lens, state.rect);
+      } catch { rendererFailed=true; renderer?.dispose(); renderer=null; }
+    }
+    function releaseRenderer() { clear(); renderer?.dispose(); renderer=null; }
+    const save = (key, value) => {
+      try { localStorage.setItem(key, value); status.textContent = "已保存，仅在当前设备生效。"; }
+      catch { status.textContent = "已应用。浏览器无法保存偏好，下次打开需重新选择。"; }
+    };
+    const sync = () => {
+      document.body.classList.toggle("dark", root.dataset.mode === "dark");
+      mode.value = root.dataset.mode;
+      modal.querySelectorAll('[name="skin"]').forEach(input => { input.checked = input.value === root.dataset.skin; });
+      document.querySelector('meta[name="theme-color"]').content = root.dataset.mode === "dark" ? (root.dataset.skin === "liquid" ? "#202934" : "#1f211f") : root.dataset.skin === "liquid" ? "#e8edf2" : "#f4f2ed";
+    };
+    document.getElementById("appearanceSettingsBtn").addEventListener("click", () => { sync(); modal.showModal(); });
+    modal.addEventListener("change", event => {
+      if (event.target.name === "skin") { root.dataset.skin = event.target.value; save("fangcun-skin", root.dataset.skin); releaseRenderer(); }
+      if (event.target === mode) { root.dataset.mode = mode.value; save("fangcun-theme", mode.value); }
+      sync();
+    });
+    // Observe the existing theme shortcut so it and the settings always agree.
+    new MutationObserver(() => {
+      const nextMode = document.body.classList.contains("dark") ? "dark" : "light";
+      if (root.dataset.mode !== nextMode) root.dataset.mode = nextMode;
+      mode.value = root.dataset.mode;
+      document.querySelector('meta[name="theme-color"]').content = root.dataset.mode === "dark" ? (root.dataset.skin === "liquid" ? "#202934" : "#1f211f") : root.dataset.skin === "liquid" ? "#e8edf2" : "#f4f2ed";
+    }).observe(document.body, { attributes:true, attributeFilter:["class"] });
+    window.addEventListener("storage", event => {
+      if (event.key === "fangcun-skin") root.dataset.skin = event.newValue === "liquid" ? "liquid" : "classic";
+      if (event.key === "fangcun-theme") root.dataset.mode = event.newValue === "dark" ? "dark" : "light";
+      releaseRenderer(); sync();
+    });
+    function clear() {
+      cancelAnimationFrame(frame); frame = 0;
+      renderer?.unmount();
+      if (!active) return;
+      active.animations.forEach(animation => animation.cancel());
+      active.lens.remove();
+      if (active.positionChanged) active.target.style.position = active.position;
+      active = null;
+    }
+    function surface(target) {
+      if (root.dataset.skin !== "liquid" || !effectsEnabled()) return null;
+      if (!(target instanceof Element) || target.closest("#scheduleView")) return null;
+      const control = target.closest('[data-material="glass"], button, input, textarea, select, summary, a[href], [contenteditable="true"], [role="button"], [role="tab"], [role="switch"], [role="checkbox"], [role="radio"], [role="option"], [role="combobox"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], .skin-option, .switch-label, .import-choice label, .import-label');
+      if (!control || control.disabled || control.matches('[aria-disabled="true"],.liquid-select-native,.sidebar-backdrop') || control.closest('[inert], [data-material="none"], [data-material="paper"], .task-card, .list-row, .today-class, .today-timeline-row, .today-ddl-row, .day-course-card, .day-task-card, .agenda-course, .overview-course, .course-block, .calendar-week-event, .calendar-entry, .month-day, [data-calendar-date]')) return null;
+      if (active?.target === control) return active;
+      clear();
+      const rect = control.getBoundingClientRect();
+      const lens = document.createElement("span");
+      lens.className = "liquid-lens"; lens.setAttribute("aria-hidden", "true");
+      const caustic = document.createElement("span"); caustic.className = "liquid-caustic"; lens.append(caustic);
+      const computed = getComputedStyle(control);
+      const dialog = control.closest("dialog");
+      const dialogRect = dialog?.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+      active = { target:control, lens, rect, position:control.style.position, positionChanged:false, animations:new Set() };
+      if (dialog) {
+        // A backdrop-filter makes the dialog a fixed-position containing block.
+        // Use its padding-box coordinates; never move/resize the real control.
+        lens.style.cssText = `position:absolute;inset:auto;pointer-events:none;left:${rect.left - dialogRect.left - dialog.clientLeft + dialog.scrollLeft}px;top:${rect.top - dialogRect.top - dialog.clientTop + dialog.scrollTop}px;width:${rect.width}px;height:${rect.height}px;border-radius:${computed.borderRadius};z-index:250;`;
+        dialog.append(lens);
+      } else if (control.matches('input,textarea,select')) {
+        lens.style.cssText = `position:fixed;inset:auto;pointer-events:none;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;border-radius:${computed.borderRadius};z-index:250;`;
+        document.body.append(lens);
+      } else {
+        if (computed.position === "static") { control.style.position = "relative"; active.positionChanged = true; }
+        control.append(lens);
+      }
+      ensureRenderer(active);
+      return active;
+    }
+    function particle(state, x, y, trail) {
+      renderer?.pulse(x/state.rect.width, y/state.rect.height, trail ? .3 : 1);
+      if (state.lens.childElementCount > 16) return;
+      const node = document.createElement("span"); node.className = trail ? "liquid-trail" : "liquid-wave";
+      node.style.left = `${x}px`; node.style.top = `${y}px`; state.lens.append(node);
+      const scale = trail ? 2.8 : Math.max(state.rect.width, state.rect.height) / 10;
+      const animation = node.animate([
+        { transform:"translate(-50%,-50%) scale(.3)", opacity:trail ? .5 : .8 },
+        { transform:`translate(-50%,-50%) scale(${scale})`, opacity:0 }
+      ], { duration:trail ? 650 : 900, easing:"cubic-bezier(.22,1,.36,1)" });
+      state.animations.add(animation);
+      animation.onfinish = () => { node.remove(); state.animations.delete(animation); };
+    }
+    document.addEventListener("pointermove", event => {
+      if (event.pointerType === "touch" || !effectsEnabled()) return;
+      latest = event;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const state = surface(latest.target); if (!state) { clear(); return; }
+        const x = latest.clientX - state.rect.left, y = latest.clientY - state.rect.top;
+        state.lens.style.setProperty("--water-x", `${x}px`); state.lens.style.setProperty("--water-y", `${y}px`);
+        renderer?.move(x/state.rect.width,y/state.rect.height);
+        // Shape response stays in the decorative lens, preserving circular controls
+        // and segmented ends in the functional DOM.
+        state.lens.style.borderRadius = getComputedStyle(state.target).borderRadius;
+        if (performance.now() - lastTrail > 65) { particle(state, x, y, true); lastTrail = performance.now(); }
+      });
+    }, { passive:true });
+    document.addEventListener("pointerdown", event => {
+      const state = surface(event.target); if (!state) return;
+      particle(state, event.clientX - state.rect.left, event.clientY - state.rect.top, false);
+    }, { passive:true });
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const state = surface(event.target); if (!state) return;
+      particle(state, state.rect.width / 2, state.rect.height / 2, false);
+    });
+    // Keep a lens for the lifetime of its target, including idle hover. Cleanup
+    // follows real boundaries rather than a timer that mutates focused controls.
+    document.addEventListener("pointerout", event => { if (!event.relatedTarget) clear(); }, { passive:true });
+    document.addEventListener("focusout", event => { if (active?.target === event.target && event.relatedTarget !== event.target) clear(); });
+    document.addEventListener("close", event => { if (event.target.contains(active?.lens)) clear(); }, true);
+    window.addEventListener("blur", clear);
+    document.addEventListener("scroll", clear, { capture:true, passive:true });
+    document.addEventListener("visibilitychange", releaseRenderer);
+    function refreshPerformance() { updatePerformance(); releaseRenderer(); }
+    window.addEventListener("resize", refreshPerformance);
+    compact.addEventListener("change", refreshPerformance);
+    forced.addEventListener("change", releaseRenderer);
+    reduced.addEventListener("change", releaseRenderer);
+    window.addEventListener("pagehide", releaseRenderer);
+    sync();
+  });
+})();

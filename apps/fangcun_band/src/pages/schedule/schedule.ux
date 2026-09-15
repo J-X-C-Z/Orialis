@@ -1,0 +1,93 @@
+<template>
+  <div class="page" @swipe="handleSwipe">
+    <scroll class="page-scroll" scroll-y="true" bounces="true">
+      <div class="content column">
+        <div class="header column">
+          <text class="eyebrow">周三 · 9月14日</text>
+          <text class="title">日程</text>
+        </div>
+        <div class="schedule column">
+          <div class="event row" for="{{item in schedule}}">
+            <text class="event-time {{item.active ? 'active-time' : ''}}">{{item.time}}</text>
+            <div class="rail column">
+              <div class="dot {{item.active ? 'active-dot' : ''}}"></div>
+              <div class="line"></div>
+            </div>
+            <div class="event-copy column">
+              <text class="event-title">{{item.title}}</text>
+              <text class="event-note">{{item.location}} · {{item.duration}}</text>
+            </div>
+          </div>
+        </div>
+        <text class="gesture-hint">右滑返回功能菜单</text>
+      </div>
+    </scroll>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import haptic from "../../common/haptic"
+import link from "../../utils/interconnect.js"
+import { snapshotSchedule } from "../../utils/snapshot.js"
+
+export default {
+  private: {
+<<<<<<< HEAD
+    schedule: []
+  },
+  onShow() {
+    this.updateSnapshot(link.getSnapshot())
+    this.stopLinkListener = link.on((event, snapshot) => {
+      if (event === "snapshot") this.updateSnapshot(snapshot)
+    })
+  },
+  onHide() {
+    if (this.stopLinkListener) this.stopLinkListener()
+    this.stopLinkListener = null
+  },
+  updateSnapshot(snapshot) {
+    const schedule = snapshotSchedule(snapshot)
+    this.schedule = schedule
+=======
+    schedule: [
+      { time: "10:00", title: "英语", location: "语音室", duration: "90 分钟", active: false },
+      { time: "14:32", title: "大学物理", location: "A301", duration: "88 分钟", active: true },
+      { time: "16:00", title: "高等数学", location: "B204", duration: "90 分钟", active: false },
+      { time: "19:30", title: "社团会议", location: "线上", duration: "60 分钟", active: false }
+    ]
+  },
+  onShow() {
+    const schedule = snapshotSchedule(link.getSnapshot())
+    if (schedule.length) this.schedule = schedule
+>>>>>>> c64843a8c7ef9e0eac318215525082a9111c2b89
+  },
+  handleSwipe(e) {
+    if (e.direction === "right") { haptic.light(); router.back() }
+  }
+}
+</script>
+
+<style>
+text { color: #ffffff; }
+.row { flex-direction: row; }
+.column { flex-direction: column; }
+.page { width: 100%; height: 100%; padding: 24px; border-radius: 36px; background-color: #000000; }
+.page-scroll { width: 100%; height: 100%; border-radius: 24px; }
+.content { width: 288px; padding-bottom: 24px; }
+.header { width: 288px; height: 84px; }
+.eyebrow { font-size: 18px; color: #a0a0a0; }
+.title { margin-top: 4px; font-size: 42px; font-weight: 700; color: #ffffff; }
+.schedule { width: 288px; }
+.event { width: 288px; height: 94px; }
+.event-time { width: 66px; padding-top: 5px; font-size: 20px; color: #a0a0a0; }
+.active-time { color: #c7e755; }
+.rail { width: 28px; align-items: center; }
+.dot { width: 11px; height: 11px; margin-top: 8px; border-radius: 6px; background-color: #575757; }
+.active-dot { background-color: #c7e755; }
+.line { width: 2px; height: 75px; background-color: #2f2f2f; }
+.event-copy { width: 194px; padding-left: 10px; }
+.event-title { font-size: 24px; color: #ffffff; }
+.event-note { margin-top: 6px; font-size: 17px; color: #979797; }
+.gesture-hint { width: 288px; margin-top: 18px; font-size: 16px; text-align: center; color: #858585; }
+</style>

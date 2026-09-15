@@ -1,0 +1,15 @@
+<script>
+import link from "./utils/interconnect.js"
+
+export default {
+  onCreate() {
+    link.on((event, snapshot) => {
+      if (event === "snapshot") console.log("fangcun snapshot received", snapshot.sync && snapshot.sync.revision)
+      else console.log("fangcun link", event)
+    })
+  },
+  onDestroy() {
+    console.log("app destroyed")
+  }
+}
+</script>
