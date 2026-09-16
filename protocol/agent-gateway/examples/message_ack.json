@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "type": "message.ack",
+  "message_id": "msg_001",
+  "status": "received"
+}

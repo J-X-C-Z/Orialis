@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "type": "message.send",
+  "message_id": "msg_001",
+  "conversation_id": "conv_001",
+  "content": "你好 Hermes"
+}

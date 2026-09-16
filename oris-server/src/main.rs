@@ -1,6 +1,7 @@
 mod agent_gateway;
 mod mobile_realtime;
 
+use agent_gateway::AgentRegistry;
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -22,7 +23,6 @@ use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use std::{env, net::SocketAddr, sync::Arc};
 use tracing::info;
 use uuid::Uuid;
-use agent_gateway::AgentRegistry;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 

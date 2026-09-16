@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "type": "message.reply",
+  "message_id": "msg_002",
+  "reply_to": "msg_001",
+  "conversation_id": "conv_001",
+  "content": "你好，我是 Hermes。"
+}

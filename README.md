@@ -1,6 +1,6 @@
-# Oris
+# Orialis
 
-Oris（Orialis）从纯服务端基础开始建设。oris-refactor 只保留 Oris 自己的代码；方寸完整项目保存在 fangcun-backup 分支，后续按需抽取，不直接整体复制。
+Orialis 从纯服务端基础开始建设。`oris-refactor` 只保留 Orialis 自己的代码；方寸完整项目保存在 `fangcun-backup` 分支，后续按需抽取，不直接整体复制。
 
 ## 当前范围（第一轮）
 
@@ -28,12 +28,21 @@ API：
     GET/POST/PATCH/DELETE /api/v1/projects
     GET/POST/PATCH/DELETE /api/v1/projects/{project_id}/milestones
     GET/POST/PATCH/DELETE /api/v1/calendar-events
+    GET/POST /api/v1/conversations/{conversation_id}/messages
     GET /api/v1/sync/events?after=<cursor>&limit=<n>
     GET /api/v1/sync/snapshot
+    GET /api/v1/ws                    # mobile heartbeat/change channel
+    GET /api/v1/mobile/ws             # compatible alias
+    GET /api/v1/agent/ws
+    POST /api/v1/agent/debug/message  # development only
 
 任务只表达作业、项目行动和每日任务的截止信息，不自动进入日历；课程等有明确开始/结束时间的内容写入 calendar_events。
 
 更新请求使用 baseVersion 做乐观并发控制，版本冲突返回 409。同步事件返回用户级递增 cursor，删除事件保留 tombstone。
+
+Agent Track（M0–M5）已落地：服务器提供 WebSocket Agent Gateway、开发触发器、ACK、去重和自动重连；Hermes 插件源代码位于 `integrations/hermes/orialis/`，本机插件目录为 `~/.hermes/plugins/orialis/`。
+
+生产接入时，在服务端设置 `ORIS_AGENT_DEVICE_TOKEN`，并在 Hermes 插件设置对应的 `ORIALIS_DEVICE_TOKEN`；插件会通过 `Authorization: Bearer` 发送令牌。开发环境未配置服务端令牌时允许本地无认证联调。
 
 ## 本地运行
 
@@ -43,7 +52,12 @@ API：
 
 自定义配置：
 
-    ORIS_HOST=127.0.0.1 +    ORIS_PORT=18443 +    ORIS_ENV=development +    ORIS_PUBLIC_URL=https://orialis.jxcz.top +    ORIS_DATABASE_URL=sqlite://./oris.db?mode=rwc +    cargo run -p oris-server
+    ORIS_HOST=127.0.0.1 \
+    ORIS_PORT=18443 \
+    ORIS_ENV=development \
+    ORIS_PUBLIC_URL=https://orialis.jxcz.top \
+    ORIS_DATABASE_URL=sqlite://./oris.db?mode=rwc \
+    cargo run -p oris-server
 
 验证：
 
@@ -56,4 +70,4 @@ API：
 
     ORIS_DATABASE_URL=sqlite:///var/lib/oris/oris.db?mode=rwc
 
-当前迭代暂不包含网页、Agent、Hermes、LLM 和第三方日历连接。手机端第一阶段边界见 docs/architecture.md、docs/mobile-architecture.md 和 docs/sync.md；旧项目的迁移边界见 docs/fangcun-migration.md。
+当前迭代暂不包含网页、LLM 和第三方日历连接。手机端第一阶段边界见 docs/architecture.md、docs/mobile-architecture.md 和 docs/sync.md；旧项目的迁移边界见 docs/fangcun-migration.md。

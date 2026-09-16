@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "type": "error",
+  "code": "INVALID_MESSAGE",
+  "message": "missing content",
+  "reply_to": "msg_001"
+}
