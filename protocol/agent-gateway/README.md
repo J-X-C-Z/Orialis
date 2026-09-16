@@ -35,7 +35,10 @@ server token is unset. The token must never be committed or written to logs.
 
 ## Multiple Agent devices
 
-Each Hermes installation must use its own stable `ORIALIS_DEVICE_ID`. The
+Each Hermes installation must use its own stable `ORIALIS_DEVICE_ID` in the
+`<USER>_<DEVICE>_<Agent>` form. Each segment uses letters or numbers; case is
+not significant. For example: `JXCZ_MBA_Hermes` or `jxcZ_mba_hermes`.
+The
 server records each device and keeps the selected device per Orialis account.
 The authenticated mobile client can query and change the selection through:
 

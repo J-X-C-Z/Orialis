@@ -13,7 +13,7 @@ requires_env:
     prompt: "Orialis Server WebSocket URL"
     password: false
   - name: ORIALIS_DEVICE_ID
-    description: "Stable device identifier reported to Orialis Server"
+    description: "Stable ID in <USER>_<DEVICE>_<Agent> form, for example JXCZ_MBA_Hermes"
     prompt: "Orialis device ID"
     password: false
 optional_env:

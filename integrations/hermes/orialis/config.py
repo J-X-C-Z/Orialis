@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from gateway.platforms._shared import extra_or_secret, seed_extra_from_env
+from .protocol import is_valid_agent_device_id
 
 
 _ENV_SPEC = (
@@ -37,4 +38,4 @@ def env_enablement() -> dict:
 
 def validate(platform_config: Any) -> bool:
     config = OrialisConfig.from_platform_config(platform_config)
-    return bool(config.server_url and config.device_id)
+    return bool(config.server_url and is_valid_agent_device_id(config.device_id))

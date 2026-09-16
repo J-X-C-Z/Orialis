@@ -35,7 +35,7 @@
 
 ```env
 ORIALIS_SERVER_URL=wss://orialis.jxcz.top/api/v1/agent/ws
-ORIALIS_DEVICE_ID=<这台设备的稳定 ID>
+ORIALIS_DEVICE_ID=JXCZ_MBA_Hermes
 ORIALIS_DEVICE_TOKEN=<与服务器相同的令牌>
 ```
 

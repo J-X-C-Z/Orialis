@@ -57,7 +57,7 @@ async def run(args: argparse.Namespace) -> None:
         await agent.send(json.dumps({
             "version": 1,
             "type": "hello",
-            "device_id": "smoke-hermes",
+            "device_id": "JXCZ_SMOKE_Hermes",
             "client": "orialis-chat-bridge-smoke",
             "plugin_version": "0.1.0",
             "platform": "test",

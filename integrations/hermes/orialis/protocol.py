@@ -21,6 +21,25 @@ class ProtocolError(ValueError):
         self.code = code
 
 
+def is_valid_agent_device_id(value: str) -> bool:
+    """Validate the stable <USER>_<DEVICE>_<Agent> naming convention."""
+    parts = value.split("_")
+    if len(parts) != 3 or len(value) > 80:
+        return False
+    owner, device, agent = parts
+    return (
+        2 <= len(owner) <= 24
+        and 2 <= len(device) <= 24
+        and 2 <= len(agent) <= 24
+        and owner.isascii()
+        and device.isascii()
+        and agent.isascii()
+        and owner.isalnum()
+        and device.isalnum()
+        and agent.isalnum()
+    )
+
+
 def _object(raw: Any) -> dict[str, Any]:
     if isinstance(raw, bytes):
         try:
@@ -61,6 +80,11 @@ def parse_message(raw: Any) -> dict[str, Any]:
     if message_type == "hello":
         for field in ("device_id", "client", "plugin_version", "platform"):
             _required_text(message, field)
+        if not is_valid_agent_device_id(message["device_id"]):
+            raise ProtocolError(
+                "device_id must use <USER>_<DEVICE>_<Agent> format",
+                code="INVALID_DEVICE_ID",
+            )
     elif message_type == "message.send":
         for field in ("message_id", "conversation_id", "content"):
             _required_text(message, field)

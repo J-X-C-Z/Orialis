@@ -36,15 +36,15 @@ class AdapterTests(unittest.TestCase):
     def test_config_reads_platform_extra(self):
         config = OrialisConfig.from_platform_config(SimpleNamespace(extra={
             "server_url": "ws://127.0.0.1:18443/api/v1/agent/ws",
-            "device_id": "macbook-dev",
+            "device_id": "JXCZ_MBA_Hermes",
         }))
         self.assertTrue(config.server_url.endswith("/api/v1/agent/ws"))
-        self.assertEqual(config.device_id, "macbook-dev")
+        self.assertEqual(config.device_id, "JXCZ_MBA_Hermes")
 
     def test_hello_and_message_reply_builders(self):
         from ..protocol import ack, hello, parse_message, reply
 
-        self.assertEqual(parse_message(hello("macbook-dev"))["type"], "hello")
+        self.assertEqual(parse_message(hello("JXCZ_MBA_Hermes"))["type"], "hello")
         self.assertEqual(parse_message(reply(
             message_id="msg_2", reply_to="msg_1", conversation_id="conv_1", content="2"
         ))["reply_to"], "msg_1")
@@ -84,7 +84,7 @@ class AdapterTests(unittest.TestCase):
             port = server.sockets[0].getsockname()[1]
             adapter = OrialisAdapter(SimpleNamespace(extra={
                 "server_url": f"ws://127.0.0.1:{port}",
-                "device_id": "test-device",
+                "device_id": "JXCZ_TEST_Hermes",
             }))
 
             async def handle_message(event):
@@ -104,7 +104,7 @@ class AdapterTests(unittest.TestCase):
                 await server.wait_closed()
 
             self.assertEqual(received["hello"]["type"], "hello")
-            self.assertEqual(received["hello"]["device_id"], "test-device")
+            self.assertEqual(received["hello"]["device_id"], "JXCZ_TEST_Hermes")
             self.assertEqual(received["ack"]["type"], "message.ack")
             self.assertEqual(received["ack"]["message_id"], "msg_1")
             self.assertEqual(received["reply"]["type"], "message.reply")

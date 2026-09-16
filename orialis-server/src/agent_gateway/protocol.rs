@@ -6,6 +6,30 @@ use std::{fmt, str::FromStr};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// Stable Agent device IDs use `<USER>_<DEVICE>_<Agent>`, for example
+/// `JXCZ_MBA_Hermes`. Case is intentionally not significant.
+pub fn is_valid_agent_device_id(value: &str) -> bool {
+    if value.len() > 80 {
+        return false;
+    }
+    let mut segments = value.split('_');
+    let (Some(owner), Some(device), Some(agent)) =
+        (segments.next(), segments.next(), segments.next())
+    else {
+        return false;
+    };
+    if segments.next().is_some()
+        || !(2..=24).contains(&owner.len())
+        || !(2..=24).contains(&device.len())
+        || !(2..=24).contains(&agent.len())
+        || !owner.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        || !device.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    {
+        return false;
+    }
+    agent.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
 /// Stable envelope used by the ordinary mobile WebSocket channel.
 ///
 /// The Hermes channel below intentionally keeps its legacy wire shape. Mobile
@@ -171,6 +195,7 @@ pub enum ProtocolError {
     UnsupportedVersion(u32),
     UnknownType(String),
     InvalidMessage,
+    InvalidDeviceId,
 }
 
 impl fmt::Display for ProtocolError {
@@ -185,6 +210,9 @@ impl fmt::Display for ProtocolError {
             Self::UnknownType(message_type) => write!(f, "unknown message type {message_type}"),
             Self::InvalidMessage => {
                 f.write_str("message is missing required fields or has invalid fields")
+            }
+            Self::InvalidDeviceId => {
+                f.write_str("device_id must use <USER>_<DEVICE>_<Agent> format")
             }
         }
     }
@@ -246,6 +274,9 @@ fn validate_message(message: &GatewayMessage) -> Result<(), ProtocolError> {
             for value in [device_id, client, plugin_version, platform] {
                 validate_text(value)?;
             }
+            if !is_valid_agent_device_id(device_id) {
+                return Err(ProtocolError::InvalidDeviceId);
+            }
         }
         GatewayMessage::MessageSend {
             message_id,
@@ -297,6 +328,7 @@ pub fn error_for(error: &ProtocolError, reply_to: Option<String>) -> GatewayMess
     let code = match error {
         ProtocolError::UnknownType(_) => "UNKNOWN_TYPE",
         ProtocolError::UnsupportedVersion(_) => "UNSUPPORTED_VERSION",
+        ProtocolError::InvalidDeviceId => "INVALID_DEVICE_ID",
         _ => "INVALID_MESSAGE",
     };
     GatewayMessage::Error {
@@ -334,6 +366,15 @@ mod tests {
                 content: "你好 Hermes".into(),
             }
         );
+    }
+
+    #[test]
+    fn agent_device_ids_follow_the_owner_device_agent_convention() {
+        assert!(is_valid_agent_device_id("JXCZ_MBA_Hermes"));
+        assert!(is_valid_agent_device_id("JXCZ_WIN_Hermes"));
+        assert!(is_valid_agent_device_id("jxcZ_mba_hermes"));
+        assert!(!is_valid_agent_device_id("orialis-hermes-macbook"));
+        assert!(!is_valid_agent_device_id("JXCZ_MBA_Hermes_Extra"));
     }
 
     #[test]

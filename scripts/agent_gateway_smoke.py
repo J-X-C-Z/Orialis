@@ -40,7 +40,7 @@ async def run(args: argparse.Namespace) -> None:
         await socket.send(json.dumps({
             "version": 1,
             "type": "hello",
-            "device_id": "smoke-device",
+            "device_id": "JXCZ_SMOKE_Hermes",
             "client": "orialis-gateway-smoke",
             "plugin_version": "0.1.0",
             "platform": "test",

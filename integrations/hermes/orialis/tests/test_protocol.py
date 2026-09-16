@@ -9,6 +9,14 @@ EXAMPLES = Path(__file__).resolve().parents[4] / "protocol" / "agent-gateway" / 
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_agent_device_id_convention(self):
+        from ..protocol import is_valid_agent_device_id
+
+        self.assertTrue(is_valid_agent_device_id("JXCZ_MBA_Hermes"))
+        self.assertTrue(is_valid_agent_device_id("JXCZ_WIN_Hermes"))
+        self.assertTrue(is_valid_agent_device_id("jxcZ_mba_hermes"))
+        self.assertFalse(is_valid_agent_device_id("orialis-hermes-macbook"))
+
     def test_shared_examples_are_valid(self):
         for name in (
             "hello", "hello_ack", "ping", "pong", "message_send", "message_reply", "message_ack", "error"
