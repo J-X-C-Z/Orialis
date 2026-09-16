@@ -21,12 +21,7 @@ use serde::{de::DeserializeOwned, de::Error as DeError, Deserialize, Deserialize
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
-use std::{
-    env,
-    net::SocketAddr,
-    path::{Path as FsPath, PathBuf},
-    sync::Arc,
-};
+use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::io::AsyncWriteExt;
 use tracing::info;
 use uuid::Uuid;
@@ -187,6 +182,7 @@ struct Task {
     important: bool,
     urgent: bool,
     completed: bool,
+    completed_at: Option<String>,
     due: Option<String>,
     due_time: Option<String>,
     reminder_minutes: Option<i64>,
@@ -1586,9 +1582,12 @@ async fn upload_attachments(
         let Some(file_name) = field.file_name() else {
             continue;
         };
-        let name = FsPath::new(file_name)
-            .file_name()
-            .and_then(|value| value.to_str())
+        // Multipart clients on Windows may send a backslash-separated path,
+        // while Unix Path::file_name only strips forward slashes. Normalize
+        // both separators at the HTTP boundary before persisting metadata.
+        let name = file_name
+            .rsplit(|character| character == '/' || character == '\\')
+            .next()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or("文件")
             .chars()
@@ -1798,7 +1797,7 @@ async fn list_tasks(
     let fetch_limit = limit + 1;
     let mut tasks = if let Some(cursor) = cursor {
         sqlx::query_as::<_, Task>(
-            "SELECT id,title,notes,important,urgent,completed,due,due_time,
+            "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
                     reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
              FROM tasks
              WHERE user_id=? AND deleted_at IS NULL
@@ -1819,7 +1818,7 @@ async fn list_tasks(
         .await?
     } else {
         sqlx::query_as::<_, Task>(
-            "SELECT id,title,notes,important,urgent,completed,due,due_time,
+            "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
                     reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
              FROM tasks WHERE user_id=? AND deleted_at IS NULL
              ORDER BY due IS NULL,due,due_time IS NULL,due_time,created_at,id
@@ -1885,7 +1884,7 @@ where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
     sqlx::query_as::<_, Task>(
-        "SELECT id,title,notes,important,urgent,completed,due,due_time,
+        "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
                 reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
          FROM tasks WHERE user_id=? AND id=? AND deleted_at IS NULL",
     )
@@ -1922,12 +1921,14 @@ async fn create_task(
     }
     let id = input.id.unwrap_or_else(new_id);
     let timestamp = now();
+    let completed = input.completed.unwrap_or(false);
+    let completed_at = completed.then(|| timestamp.clone());
     let mut tx = state.pool.begin().await?;
     let result = sqlx::query(
         "INSERT INTO tasks
-         (id,user_id,title,notes,important,urgent,completed,due,due_time,
+         (id,user_id,title,notes,important,urgent,completed,completed_at,due,due_time,
           reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
          ON CONFLICT(id) DO NOTHING",
     )
     .bind(&id)
@@ -1936,7 +1937,8 @@ async fn create_task(
     .bind(input.notes)
     .bind(input.important.unwrap_or(false))
     .bind(input.urgent.unwrap_or(false))
-    .bind(input.completed.unwrap_or(false))
+    .bind(completed)
+    .bind(completed_at)
     .bind(input.due)
     .bind(input.due_time)
     .bind(input.reminder_minutes)
@@ -1985,6 +1987,12 @@ async fn update_task(
     let important = resolve_required(input.important, current.important, "important")?;
     let urgent = resolve_required(input.urgent, current.urgent, "urgent")?;
     let completed = resolve_required(input.completed, current.completed, "completed")?;
+    let completed_at = match (current.completed, completed) {
+        (false, true) => Some(now()),
+        (true, false) => None,
+        (true, true) => current.completed_at,
+        (false, false) => None,
+    };
     let due = resolve_nullable(input.due, current.due);
     let due_time = resolve_nullable(input.due_time, current.due_time);
     let reminder_minutes = resolve_nullable(input.reminder_minutes, current.reminder_minutes);
@@ -2005,7 +2013,7 @@ async fn update_task(
     }
     let mut tx = state.pool.begin().await?;
     let result = sqlx::query(
-        "UPDATE tasks SET title=?,notes=?,important=?,urgent=?,completed=?,due=?,due_time=?,
+        "UPDATE tasks SET title=?,notes=?,important=?,urgent=?,completed=?,completed_at=?,due=?,due_time=?,
          reminder_minutes=?,project_id=?,recurrence_rule=?,updated_at=?,version=version+1
          WHERE user_id=? AND id=? AND version=?",
     )
@@ -2014,6 +2022,7 @@ async fn update_task(
     .bind(important)
     .bind(urgent)
     .bind(completed)
+    .bind(completed_at)
     .bind(due)
     .bind(due_time)
     .bind(reminder_minutes)
@@ -2302,7 +2311,7 @@ async fn project_summary(
     .fetch_one(&state.pool)
     .await?;
     let next_action = sqlx::query_as::<_, Task>(
-        "SELECT id,title,notes,important,urgent,completed,due,due_time,
+        "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
                 reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
          FROM tasks
          WHERE user_id=? AND project_id=? AND deleted_at IS NULL AND completed=0
@@ -3033,7 +3042,7 @@ async fn sync_snapshot(
     let user_id = authenticated_user(&headers, &state.pool).await?;
     let mut tx = state.pool.begin().await?;
     let tasks = sqlx::query_as::<_, Task>(
-        "SELECT id,title,notes,important,urgent,completed,due,due_time,
+        "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
                 reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
          FROM tasks WHERE user_id=? AND deleted_at IS NULL ORDER BY created_at",
     )

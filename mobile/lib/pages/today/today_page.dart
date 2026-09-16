@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app.dart';
-import '../../app/theme/app_theme.dart';
+import '../../app/design/design_components.dart';
+import '../../app/design/design_tokens.dart';
 import '../../core/database/app_database.dart';
 
 class TodayPage extends ConsumerWidget {
@@ -12,21 +13,10 @@ class TodayPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final repository = ref.watch(eventRepositoryProvider);
     final today = DateTime.now();
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Orialis'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.page),
-            child: Text(
-              _dateLabel(today),
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(color: AppColors.muted),
-            ),
-          ),
-        ],
-      ),
+    return OrialisPageScaffold(
+      title: 'Orialis',
+      subtitle: _dateLabel(today),
+      padding: EdgeInsets.zero,
       body: StreamBuilder(
         stream: repository.watchTodayTasks(today),
         builder: (context, snapshot) {
@@ -50,6 +40,7 @@ class TodayPage extends ConsumerWidget {
               const SizedBox(height: AppSpacing.section),
               _TodaySection(
                 title: '到期事项',
+                description: '这里是任务，只关注今天需要完成的内容。',
                 child: tasks.isEmpty
                     ? const _EmptyState()
                     : Column(
@@ -65,6 +56,7 @@ class TodayPage extends ConsumerWidget {
                   final events = eventSnapshot.data ?? const [];
                   return _TodaySection(
                     title: '今日安排',
+                    description: '这里是日程，只展示今天已经安排的时间段。',
                     child: events.isEmpty
                         ? const _EmptyState(text: '今天没有已安排的时间段。')
                         : Column(
@@ -100,16 +92,29 @@ class TodayPage extends ConsumerWidget {
 }
 
 class _TodaySection extends StatelessWidget {
-  const _TodaySection({required this.title, required this.child});
+  const _TodaySection({
+    required this.title,
+    required this.description,
+    required this.child,
+  });
   final String title;
+  final String description;
   final Widget child;
 
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(title, style: Theme.of(context).textTheme.titleMedium),
-      const SizedBox(height: 10),
+      OrialisSectionHeader(title: title),
+      Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.item),
+        child: Text(
+          description,
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: AppColors.muted),
+        ),
+      ),
       child,
     ],
   );
@@ -136,10 +141,5 @@ class _EmptyState extends StatelessWidget {
   const _EmptyState({this.text = '今天没有到期事项。'});
   final String text;
   @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(18),
-      child: Text(text, style: const TextStyle(color: AppColors.muted)),
-    ),
-  );
+  Widget build(BuildContext context) => OrialisEmptyState(text: text);
 }

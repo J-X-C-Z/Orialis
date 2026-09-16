@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app.dart';
-import '../../app/theme/app_theme.dart';
+import '../../app/design/design_components.dart';
+import '../../app/design/design_tokens.dart';
 import '../../core/database/app_database.dart';
 
 class EventsPage extends ConsumerWidget {
@@ -11,8 +12,10 @@ class EventsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final repository = ref.watch(eventRepositoryProvider);
-    return Scaffold(
-      appBar: AppBar(title: const Text('事件')),
+    return OrialisPageScaffold(
+      title: '事件',
+      subtitle: '任务清单 · 只管理要完成的事',
+      padding: EdgeInsets.zero,
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _createTask(context, ref),
         icon: const Icon(Icons.add),
@@ -23,7 +26,10 @@ class EventsPage extends ConsumerWidget {
         builder: (context, snapshot) {
           final tasks = snapshot.data ?? const [];
           if (tasks.isEmpty) {
-            return const Center(child: Text('还没有事件，先记录一件要做的事。'));
+            return const OrialisEmptyState(
+              text: '还没有事件，先记录一件要做的事。',
+              card: false,
+            );
           }
           return ListView.separated(
             padding: const EdgeInsets.fromLTRB(

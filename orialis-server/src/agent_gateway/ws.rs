@@ -749,17 +749,34 @@ pub(crate) async fn dispatch_message(
             return;
         }
     };
-    let receiver = match state
-        .agent
-        .send_request_for_user(&user_id, active_device_id.as_deref(), request)
-        .await
-    {
-        Ok(receiver) => receiver,
-        Err(error) => {
-            tracing::warn!(%error, %message_id, "could not dispatch mobile message to Hermes");
-            fail_delivery(&state, &message_id, attempts, error.to_string()).await;
-            return;
+    // A mobile POST can race the final handshake bookkeeping on a freshly
+    // connected Agent. Give that connection a short grace window before
+    // rescheduling the durable delivery for a much longer retry interval.
+    let mut receiver = None;
+    let mut last_error = None;
+    for attempt in 0..4 {
+        match state
+            .agent
+            .send_request_for_user(&user_id, active_device_id.as_deref(), request.clone())
+            .await
+        {
+            Ok(value) => {
+                receiver = Some(value);
+                break;
+            }
+            Err(error) => {
+                last_error = Some(error);
+                if attempt < 3 {
+                    tokio::time::sleep(Duration::from_millis(50 * (attempt + 1))).await;
+                }
+            }
         }
+    }
+    let Some(receiver) = receiver else {
+        let error = last_error.unwrap_or(RegistryError::ConnectionClosed);
+        tracing::warn!(%error, %message_id, "could not dispatch mobile message to Hermes");
+        fail_delivery(&state, &message_id, attempts, error.to_string()).await;
+        return;
     };
     let reply = match tokio::time::timeout(DEBUG_REPLY_TIMEOUT, receiver).await {
         Ok(Ok(reply)) => reply,

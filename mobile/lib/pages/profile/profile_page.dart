@@ -4,7 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app.dart';
-import '../../app/theme/app_theme.dart';
+import '../../app/design/design_components.dart';
+import '../../app/design/design_tokens.dart';
 import '../../core/config/app_config.dart';
 import '../../core/network/orialis_api_client.dart';
 import '../../core/sync/sync_engine.dart';
@@ -48,7 +49,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Future<void> _loadSession() async {
-    final token = await ref.read(appConfigProvider).sessionToken();
+    final config = ref.read(appConfigProvider);
+    final token = await config.sessionToken();
+    final cachedUsername = await config.sessionUsername();
     if (!mounted) return;
     if (token == null || token.isEmpty) {
       setState(() => _loadingSession = false);
@@ -62,11 +65,22 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           _loadingSession = false;
         });
       }
-    } catch (_) {
-      await ref.read(appConfigProvider).clearSessionToken();
+      await config.setSessionUsername(session['username'] as String);
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 401) {
+        await config.clearSessionToken();
+        await config.clearSessionUsername();
+      }
       if (mounted) {
         setState(() {
-          _username = null;
+          _username = cachedUsername;
+          _loadingSession = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _username = cachedUsername;
           _loadingSession = false;
         });
       }
@@ -89,7 +103,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       // A local logout should still succeed when the server is unavailable.
       await ref.read(appConfigProvider).clearSessionToken();
     }
+    await ref.read(appConfigProvider).clearSessionUsername();
     if (mounted) setState(() => _username = null);
+  }
+
+  Future<void> _openAuth() async {
+    final authenticated = await context.push<bool>('/auth');
+    if (authenticated == true && mounted) {
+      setState(() => _loadingSession = true);
+      await _loadSession();
+    }
   }
 
   Future<void> _editServerUrl() async {
@@ -142,8 +165,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('我的')),
+    return OrialisPageScaffold(
+      title: '我的',
+      subtitle: '账户、设备与同步',
+      padding: EdgeInsets.zero,
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.page),
         children: [
@@ -171,7 +196,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 title: const Text('未登录'),
                 subtitle: const Text('登录后可在不同设备间同步你的数据'),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () => context.push('/auth'),
+                onTap: _openAuth,
               ),
             )
           else
@@ -318,7 +343,8 @@ class _AuthPageState extends ConsumerState<AuthPage> {
       } else {
         await api.login(username: username, password: password);
       }
-      if (mounted) context.go('/profile');
+      await config.setSessionUsername(username);
+      if (mounted) context.pop(true);
     } on DioException catch (error) {
       final status = error.response?.statusCode;
       setState(() => _error = status == 409 ? '用户名已存在' : '登录信息不正确或服务器暂不可用');

@@ -51,11 +51,27 @@ class Messages extends Table {
   TextColumn get role => text()();
   TextColumn get content => text()();
   TextColumn get createdAt => text()();
+  TextColumn get attachmentsJson => text().withDefault(const Constant('[]'))();
   TextColumn get syncStatus => text().withDefault(const Constant('synced'))();
   IntColumn get remoteVersion => integer().withDefault(const Constant(0))();
 
   @override
   Set<Column<Object>> get primaryKey => {conversationId, id};
+}
+
+class Conversations extends Table {
+  TextColumn get id => text()();
+  TextColumn get title => text()();
+  TextColumn get type => text().withDefault(const Constant('normal'))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+  IntColumn get version => integer().withDefault(const Constant(1))();
+  IntColumn get remoteVersion => integer().withDefault(const Constant(0))();
+  TextColumn get deletedAt => text().nullable()();
+  TextColumn get syncStatus => text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
 }
 
 class SyncMetadata extends Table {
@@ -66,12 +82,14 @@ class SyncMetadata extends Table {
   Set<Column<Object>> get primaryKey => {key};
 }
 
-@DriftDatabase(tables: [Tasks, CalendarEvents, Messages, SyncMetadata])
+@DriftDatabase(
+  tables: [Tasks, CalendarEvents, Messages, Conversations, SyncMetadata],
+)
 class AppDatabase extends _$AppDatabase {
   AppDatabase({QueryExecutor? executor}) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -83,6 +101,12 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 3) {
         await m.createTable(messages);
+      }
+      if (from < 4) {
+        await m.addColumn(messages, messages.attachmentsJson);
+      }
+      if (from < 5) {
+        await m.createTable(conversations);
       }
     },
   );
@@ -98,6 +122,20 @@ class AppDatabase extends _$AppDatabase {
     return (select(calendarEvents)
           ..where((row) => row.deletedAt.isNull())
           ..orderBy([(row) => OrderingTerm(expression: row.startAt)]))
+        .watch();
+  }
+
+  Stream<List<Conversation>> watchActiveConversations() {
+    return (select(conversations)
+          ..where((row) => row.deletedAt.isNull())
+          ..orderBy([
+            (row) =>
+                OrderingTerm(expression: row.type, mode: OrderingMode.desc),
+            (row) => OrderingTerm(
+              expression: row.updatedAt,
+              mode: OrderingMode.desc,
+            ),
+          ]))
         .watch();
   }
 

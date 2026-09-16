@@ -2,8 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app.dart';
-import '../../app/theme/app_theme.dart';
+import '../../app/design/design_components.dart';
+import '../../app/design/design_tokens.dart';
 import '../../core/database/app_database.dart';
+
+// The storage/API migration keeps CalendarEvent for compatibility. The page
+// speaks in the product term: Schedule. Task never enters this screen.
+typedef Schedule = CalendarEvent;
 
 class CalendarPage extends ConsumerStatefulWidget {
   const CalendarPage({super.key});
@@ -18,38 +23,41 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   @override
   Widget build(BuildContext context) {
     final repository = ref.watch(eventRepositoryProvider);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('${_date.year}/${_date.month}/${_date.day}'),
-        actions: [
-          IconButton(
-            tooltip: '选择日期',
-            onPressed: () async {
-              final picked = await showDatePicker(
-                context: context,
-                firstDate: DateTime(2020),
-                lastDate: DateTime(2035),
-                initialDate: _date,
-              );
-              if (picked != null) {
-                setState(() => _date = picked);
-              }
-            },
-            icon: const Icon(Icons.event_outlined),
-          ),
-        ],
-      ),
+    return OrialisPageScaffold(
+      title: '${_date.year}/${_date.month}/${_date.day}',
+      subtitle: '日程 · 只显示已安排的时间段',
+      padding: EdgeInsets.zero,
+      actions: [
+        IconButton(
+          tooltip: '选择日期',
+          onPressed: () async {
+            final picked = await showDatePicker(
+              context: context,
+              firstDate: DateTime(2020),
+              lastDate: DateTime(2035),
+              initialDate: _date,
+            );
+            if (picked != null) {
+              setState(() => _date = picked);
+            }
+          },
+          icon: const Icon(Icons.event_outlined),
+        ),
+      ],
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _createEvent(context),
         icon: const Icon(Icons.add),
         label: const Text('新增日程'),
       ),
-      body: StreamBuilder<List<CalendarEvent>>(
+      body: StreamBuilder<List<Schedule>>(
         stream: repository.watchCalendarEventsForDate(_date),
         builder: (context, snapshot) {
           final events = snapshot.data ?? const [];
           if (events.isEmpty) {
-            return const Center(child: Text('今天没有已安排的时间段。'));
+            return OrialisEmptyState(
+              text: '${_date.month}月${_date.day}日没有已安排的时间段。',
+              card: false,
+            );
           }
           return ListView.separated(
             padding: const EdgeInsets.fromLTRB(

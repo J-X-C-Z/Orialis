@@ -1,15 +1,15 @@
 # Orialis Agent Gateway protocol
 
-本文档是 Orialis Server 与 Hermes Orialis 插件之间的非语音协议说明。
-它同时记录当前可互操作的 v1 基线和 v0.3–v0.12 / v1.x 的后续扩展，状态
-必须以本文件的“实现状态”列为准：路线图条目不是当前服务器已接受的帧。
+本文档是 Orialis Server、Hermes Orialis 插件和 Orialis Mobile 之间的非语音协议说明。
+它冻结 v1 基线及 v0.3–v0.12 / v1.x 的结构化事件、能力协商和 fallback 语义；
+Voice 明确排除。
 
 ## 实现状态
 
-当前工作树的 Rust Agent Gateway parser 已接受 v1 基线帧、capability resume
-控制帧和一组带序列的结构化事件；Hermes Orialis v0.2 适配器当前实际处理的
-仍是基线消息/ACK/错误/保活。服务端对结构化事件已有解析、去重、gap 检查、
-approval 超时和移动端通知钩子，但尚未把所有事件接入 Hermes 的业务执行器。
+当前 Rust Agent Gateway parser、Hermes 插件和移动端事件状态层共同支持 v1 基线帧、
+capability resume 控制帧和带序列的非语音结构化事件。服务端负责解析、去重、gap
+检查、approval 超时、持久化投递和移动端通知；Hermes 负责 Agent 执行，移动端负责
+澄清/审批/会话控件。Cron 调度本身仍由 Hermes 负责。
 
 | 帧类型 | 方向 | 状态 | 语义 |
 | --- | --- | --- | --- |
@@ -23,8 +23,8 @@ approval 超时和移动端通知钩子，但尚未把所有事件接入 Hermes 
 | `event` | 双向 | Rust parser 已实现 | v0.3 通用事件信封，按 `event_type` 携带非语音 payload |
 | `capabilities.hello` / `capabilities.ack` | 双向 | 服务端已实现 | 能力声明与按 `resume_from` 重放 |
 | `agent.*` / `tool.*` | Hermes → Orialis | 服务端事件接收已实现 | 状态、流式输出和工具生命周期 |
-| `clarify.*` / `approval.*` | 双向 | 传输与 approval 状态已实现 | 用户交互 UI/业务执行仍需接入 |
-| `session.*` / `artifact.*` | 双向 | 结构解析与序列钩子已实现 | 完整业务执行仍需接入 |
+| `clarify.*` / `approval.*` | 双向 | 传输、去重/超时、插件 resolver、移动卡片已实现 | 由 Hermes 决定业务语义 |
+| `session.*` / `artifact.*` | 双向 | 结构解析、序列、插件/移动映射已实现 | Cron 调度不由 Server 实现 |
 
 当前 HTTP / 手机通道已经提供：
 
@@ -39,17 +39,17 @@ approval 超时和移动端通知钩子，但尚未把所有事件接入 Hermes 
 
 | 版本 | 范围 | 状态 |
 | --- | --- | --- |
-| v0.3 | 扁平事件帧、字段命名、事件类型注册 | Rust parser/事件元数据已实现；插件业务分发未全接入 |
+| v0.3 | 扁平事件帧、字段命名、事件类型注册 | Rust parser、Hermes 事件映射和移动端时间线已实现 |
 | v0.4 | 幂等键、请求关联、设备级 `seq` 与重放规则 | HTTP mutation/sync 已实现；Agent event sequence 已实现 |
-| v0.5 | `clarify.request` / `clarify.response` / `clarify.cancel` | Rust/Python 校验已实现；客户端交互未接入 |
-| v0.6 | `approval.request` / `approval.resolve` | Rust 去重、超时和 ACK 已实现；策略执行未接入 |
+| v0.5 | `clarify.request` / `clarify.response` / `clarify.cancel` | Rust/Python/移动交互已实现 |
+| v0.6 | `approval.request` / `approval.resolve` | Rust 去重、超时、ACK、Hermes resolver 和移动交互已实现 |
 | v0.7 | `session.open`…`session.reply` 与 `session.*` 事件 | 传输类型已实现；HTTP access Session 另行实现 |
-| v0.8 | `command.request` / `command.reply` 和工具状态 | Python helper 有定义；Rust Gateway 尚未接受 command 帧 |
-| v0.9 | `cron.delivery`、proactive delivery | Python helper 有定义；当前无循环任务执行器 |
+| v0.8 | Hermes commands、session controls 和工具状态 | 移动端通过 Agent Gateway 消息语义桥接；工具状态事件已实现 |
+| v0.9 | `cron.delivery`、proactive delivery | 插件支持主动投递；调度触发由 Hermes Cron 负责 |
 | v0.10 | Voice / 音频事件与附件 | **未实现且有意排除** |
-| v0.11 | `artifact` / `artifact.event` 与文件产物元数据 | Rust/Python 校验已实现；通用产物执行未接入 |
+| v0.11 | `artifact` / `artifact.event` 与文件产物元数据 | Rust/Python/移动映射已实现；具体产物由 Hermes 生成 |
 | v0.12 | capabilities、fallback、客户端兼容矩阵 | HTTP capabilities 与 Agent resume 已实现 |
-| v1.x | 兼容性冻结、跨平台实现与逐项能力发布 | 后续；不改变 v1 基线帧语义 |
+| v1.x | 兼容性冻结、跨平台实现与逐项能力发布 | 当前非语音 v1 基线已落地，不改变基础帧语义 |
 
 ## 传输和命名
 
@@ -82,9 +82,8 @@ approval 超时和移动端通知钩子，但尚未把所有事件接入 Hermes 
 `hello` 必须是首帧；`platform` 当前使用 `macos` 或 `windows`。`capabilities` 可选，
 但发送方不得声明尚未能处理的扩展。Orialis 返回
 `{"version":1,"type":"hello_ack"}`；详细能力与续传使用 `capabilities.hello`。
-当前 Python helper 的默认 `hello()` 会列出 helper 支持的扩展名称；这只是协议
-能力声明，不等于当前 Hermes adapter 已接入对应业务 handler，具体以对端返回的
-`capabilities.ack` 和兼容矩阵为准。
+当前 Python helper 的默认 `hello()` 会列出插件支持的扩展名称；实际发送仍以对端
+返回的 `capabilities.ack` 和兼容矩阵为准。
 收到 `ping` 返回 `pong`；未知类型、错误
 版本、缺字段或非法附件生成 `error`，不会要求插件进程退出。
 
@@ -151,7 +150,8 @@ Orialis 同时保留两个兼容形态，均由 [`event-v1.schema.json`](schema/
 
 事件接收端先按 `event_id` 去重，再按 `sequence` 或 `seq` 检查顺序。缺口返回
 `agent.ack.status="gap"` 与 `expected_seq`；重复事件返回 `duplicate`。当前
-Rust parser 接受通用信封和命名扁平事件；Hermes v0.2 适配器业务层仍只处理基线消息。
+Rust parser 和 Hermes v1 适配器接受通用信封与命名扁平事件；移动端通过 `event`
+信封显示 Agent 时间线，并对未知事件执行 fallback。
 
 ```json
 {
@@ -194,17 +194,17 @@ Rust parser 接受通用信封和命名扁平事件；Hermes v0.2 适配器业�
 下表使用当前代码中的规范类型和字段。`agent.*`、`tool.*`、`clarify.*`、
 `approval.*`、`session.*`、`artifact.*` 已进入 Rust 传输层；`command.*`、
 `slash.*`、`delivery.*` 和 `cron.delivery` 目前只在 Python helper 的兼容集合中，
-服务端 parser 尚未接受它们。
+服务端将稳定的 Agent 事件作为主互操作形态；`stream.*` 仅保留为旧客户端输入兼容层。
 
 | 版本/领域 | 规范类型 | 必需字段（除公共字段外） | 当前状态 |
 | --- | --- | --- | --- |
-| v0.5 Agent | `agent.typing` | `conversation_id`, `typing`; 可选 `run_id` | Rust 可接收；插件业务处理未接入 |
+| v0.5 Agent | `agent.typing` | `conversation_id`, `typing`; 可选 `run_id` | Rust、插件和移动时间线已实现 |
 | v0.5 Agent | `agent.start`, `agent.delta`, `agent.complete`, `agent.error`, `agent.status` | start/delta/complete/error 需 `run_id`；delta 需 `delta`；error 需 `code`,`message`；status 需 `status` | Rust 可接收 |
 | v0.5 Tool | `tool.started`, `tool.progress`, `tool.completed`, `tool.failed` | `tool_call_id`；started 需 `tool_name`；failed 需 `code`,`message` | Rust 可接收 |
-| v0.5 Clarify | `clarify.request`, `clarify.resolve`, `clarify.cancel` | request 需 `request_id`,`question`；resolve/cancel 需 `request_id`；可选 `choices`,`multi_select`,`response`,`reason` | Rust 可接收；需客户端 UI |
+| v0.5 Clarify | `clarify.request`, `clarify.resolve`, `clarify.cancel` | request 需 `request_id`,`question`；resolve/cancel 需 `request_id`；可选 `choices`,`multi_select`,`response`,`reason` | Rust、插件 resolver 和移动交互已实现 |
 | v0.6 Approval | `approval.request`, `approval.resolve` | request 需 `request_id`,`action`；resolve 需 `request_id`,`decision` | Rust 可接收；按 request_id 单次解决并支持超时 |
 | v0.7 Session | `session.start`, `session.update`, `session.complete`, `session.cancel`, `session.error` | update 需 object `update`；error 需 `code`,`message`；其余按类型带 `result`/`reason` | Rust 可接收 |
-| v0.8 Command | `command.request`, `command.reply` | request 需 `request_id`,`command`；reply 需 `request_id`,`status`；可选 `args`,`content` | Python helper 有定义；Rust 未接受 |
+| v0.8 Command | `command.request`, `command.reply` | request 需 `request_id`,`command`；reply 需 `request_id`,`status`；可选 `args`,`content` | 移动端通过 Gateway 消息语义桥接；插件 helper 已实现 |
 | v0.9 Delivery | `delivery.send`, `delivery.ack`, `cron.delivery`, `proactive.delivery` | send 需 `delivery_id`,`conversation_id` 和文本/附件；ack 需 `delivery_id`,`status` | Python helper 有定义；无 cron 执行器 |
 | v0.11 Artifact | `artifact`, `artifact.event` | `artifact_id`,`conversation_id`,`name`,`mime_type`，且有 `url`、`download_url` 或 `content` | Rust/Python 校验已实现 |
 
@@ -247,7 +247,7 @@ requested → accepted → progress* → completed
 
 `approval.request` 或 `clarify.request` 未完成时，命令不得被客户端推断为已完成。
 当前 Hermes 适配器只把基线 `message.send` 交给 Hermes handler；command、审批和
-澄清事件尚未接入业务处理。客户端收到未支持事件时必须走 fallback，而不是把它
+澄清、审批和会话事件已接入插件/移动交互。客户端收到未支持事件时必须走 fallback，而不是把它
 当作普通文本成功回复。
 
 ## v0.11 artifact
@@ -322,7 +322,7 @@ Orialis 返回 `capabilities.ack`，携带服务端 capability 名称、实际�
 | 客户端 | 基线 | 可用扩展 | 遇到未知扩展 |
 | --- | --- | --- | --- |
 | Orialis Android v1 | HTTP Session、mobile envelope、sync cursor、文本/附件消息 | 以 `/api/v1/capabilities` 为准 | 忽略未知 mobile payload，重新拉取 HTTP 状态 |
-| Hermes Orialis v0.2 | 8 类基线 Agent 帧、文本和非语音附件、ACK、重连 | 尚未接入结构化事件业务 handler | `error` 后回到文本消息或等待升级 |
+| Hermes Orialis v1 | 基线 Agent 帧、文本和非语音附件、ACK、重连 | 结构化事件、能力协商、澄清/审批/会话/产物映射 | 未知事件保留 ID 并按 fallback 处理 |
 | Orialis macOS Hermes v1.x | 与 Windows 相同的 Agent v1 基线 | 仅使用双方都声明的事件和 artifact | 保留 ID，按 fallback 发送纯文本 |
 | Orialis Windows Hermes v1.x | 与 macOS 相同；附件文件名按安全显示名处理 | 仅使用双方都声明的事件和 artifact | 同上，不把路径暴露给协议 |
 | 旧 HTTP-only 客户端 | Session、资源 CRUD、sync/snapshot | 无 WebSocket 扩展 | 继续轮询 HTTP，不要求 Agent Gateway |

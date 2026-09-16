@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../config/app_config.dart';
@@ -42,13 +43,41 @@ class MobileRealtimeClient {
   final _events = StreamController<MobileEnvelope>.broadcast();
   WebSocketChannel? _channel;
   StreamSubscription<Object?>? _subscription;
+  Future<void>? _connectFuture;
+  Set<String> _capabilities = const {};
+  bool _capabilitiesNegotiated = false;
 
   Stream<MobileEnvelope> get events => _events.stream;
 
   bool get isConnected => _channel != null;
+  bool get capabilitiesNegotiated => _capabilitiesNegotiated;
+  Set<String> get capabilities => _capabilities;
+
+  static const clientCapabilities = <String>{
+    'agent.typing',
+    'markdown.safe',
+    'stream.delta',
+    'agent.status',
+    'tool.timeline',
+    'clarify.card',
+    'approval.card',
+    'hermes.command',
+    'delivery.notification',
+    'session.controls',
+    'artifact.created',
+  };
 
   Future<void> connect() async {
     if (_channel != null) return;
+    _connectFuture ??= _connect();
+    try {
+      await _connectFuture;
+    } finally {
+      _connectFuture = null;
+    }
+  }
+
+  Future<void> _connect() async {
     final server = Uri.parse(await config.serverUrl());
     final uri = server.replace(
       scheme: server.scheme == 'https' ? 'wss' : 'ws',
@@ -56,15 +85,27 @@ class MobileRealtimeClient {
       query: '',
       fragment: '',
     );
-    final channel = WebSocketChannel.connect(uri);
+    final token = await config.sessionToken();
+    final channel = IOWebSocketChannel.connect(
+      uri,
+      headers: {
+        'X-Orialis-Device-Id': await config.deviceId(),
+        if (token != null) 'Authorization': 'Session $token',
+      },
+      connectTimeout: const Duration(seconds: 4),
+    );
     _channel = channel;
+    _capabilities = const {};
+    _capabilitiesNegotiated = false;
     _subscription = channel.stream.listen(
       _receive,
       onDone: () {
         _channel = null;
+        _capabilitiesNegotiated = false;
       },
       onError: (_, _) {
         _channel = null;
+        _capabilitiesNegotiated = false;
       },
     );
     _send(
@@ -74,6 +115,8 @@ class MobileRealtimeClient {
           'device_id': await config.deviceId(),
           'platform': 'android',
           'client': 'orialis_mobile',
+          'client_version': '0.1.0',
+          'capabilities': clientCapabilities.toList()..sort(),
         },
       ),
     );
@@ -85,6 +128,14 @@ class MobileRealtimeClient {
       final envelope = MobileEnvelope.fromJson(
         jsonDecode(value) as Map<String, dynamic>,
       );
+      if (envelope.type == 'hello.ack') {
+        final declared =
+            envelope.payload['capabilities'] ?? envelope.payload['features'];
+        if (declared is List) {
+          _capabilities = declared.whereType<String>().toSet();
+          _capabilitiesNegotiated = true;
+        }
+      }
       if (envelope.type == 'ping') {
         _send(
           MobileEnvelope(
@@ -104,6 +155,24 @@ class MobileRealtimeClient {
 
   void _send(MobileEnvelope envelope) {
     _channel?.sink.add(jsonEncode(envelope.toJson()));
+  }
+
+  /// Sends an optional extension event through the existing mobile envelope.
+  /// Older servers accept and ignore `event`, so the core message API remains
+  /// fully compatible while newer servers may return a result event.
+  Future<void> sendEvent({
+    required String kind,
+    Map<String, dynamic> payload = const {},
+    String? requestId,
+  }) async {
+    if (_channel == null) await connect();
+    _send(
+      MobileEnvelope(
+        type: 'event',
+        requestId: requestId,
+        payload: {'kind': kind, ...payload},
+      ),
+    );
   }
 
   Future<void> disconnect() async {

@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 import '../config/app_config.dart';
+import '../attachments/attachment_bridge.dart';
 import '../database/app_database.dart';
 import '../network/orialis_api_client.dart';
 
@@ -39,8 +40,10 @@ class SyncEngine {
     final deviceId = await config.deviceId();
     final api = OrialisApiClient(baseUrl: baseUrl, deviceId: deviceId);
     try {
+      await _pushConversations(api);
       await _pushTasks(api);
       await _pushCalendarEvents(api);
+      await _pullConversations(api);
       await _pushMessages(api);
       await _pullMessages(api);
       await _pull(api);
@@ -56,6 +59,90 @@ class SyncEngine {
       return SyncState.error;
     } catch (_) {
       return SyncState.error;
+    }
+  }
+
+  Future<void> _pushConversations(OrialisApiClient api) async {
+    final pending = await (database.select(
+      database.conversations,
+    )..where((row) => row.syncStatus.isNotIn(const ['synced']))).get();
+    for (final conversation in pending) {
+      final mutationId = const Uuid().v7();
+      Map<String, dynamic> result;
+      if (conversation.syncStatus == 'pendingCreate') {
+        result = await api.createConversation(
+          id: conversation.id,
+          title: conversation.title,
+          mutationId: mutationId,
+        );
+      } else if (conversation.syncStatus == 'pendingDelete') {
+        try {
+          await api.deleteConversation(conversation.id, mutationId);
+        } on DioException catch (error) {
+          if (error.response?.statusCode != 404) rethrow;
+        }
+        result = <String, dynamic>{};
+      } else {
+        result = await api.renameConversation(
+          conversation.id,
+          conversation.title,
+          mutationId,
+        );
+      }
+      final remoteVersion =
+          (result['version'] as num?)?.toInt() ?? conversation.remoteVersion;
+      await (database.update(
+        database.conversations,
+      )..where((row) => row.id.equals(conversation.id))).write(
+        ConversationsCompanion(
+          remoteVersion: Value(remoteVersion),
+          syncStatus: const Value('synced'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _pullConversations(OrialisApiClient api) async {
+    final remote = await api.listConversations();
+    for (final value in remote) {
+      final id = value['id'] as String?;
+      final title = value['title'] as String?;
+      final createdAt = value['createdAt'] as String?;
+      final updatedAt = value['updatedAt'] as String?;
+      if (id == null ||
+          title == null ||
+          createdAt == null ||
+          updatedAt == null) {
+        continue;
+      }
+      final remoteVersion = (value['version'] as num?)?.toInt() ?? 1;
+      final existing = await (database.select(
+        database.conversations,
+      )..where((row) => row.id.equals(id))).getSingleOrNull();
+      if (!shouldApplyRemote(
+        existing?.syncStatus,
+        existing?.remoteVersion,
+        remoteVersion,
+      )) {
+        continue;
+      }
+      final type =
+          value['type'] as String? ??
+          ((value['isDefault'] as bool? ?? false) ? 'main' : 'normal');
+      await database
+          .into(database.conversations)
+          .insertOnConflictUpdate(
+            ConversationsCompanion.insert(
+              id: id,
+              title: title,
+              type: Value(type),
+              createdAt: createdAt,
+              updatedAt: updatedAt,
+              version: Value(remoteVersion),
+              remoteVersion: Value(remoteVersion),
+              syncStatus: const Value('synced'),
+            ),
+          );
     }
   }
 
@@ -184,6 +271,7 @@ class SyncEngine {
                 notes: Value(value['notes'] as String?),
                 due: Value(value['due'] as String?),
                 dueTime: Value(value['dueTime'] as String?),
+                completedAt: Value(value['completedAt'] as String?),
                 projectId: Value(value['projectId'] as String?),
                 important: Value(value['important'] as bool? ?? false),
                 urgent: Value(value['urgent'] as bool? ?? false),
@@ -239,10 +327,66 @@ class SyncEngine {
       database.messages,
     )..where((row) => row.syncStatus.isNotIn(const ['synced']))).get();
     for (final message in pending) {
+      final records = AttachmentBridge.decode(message.attachmentsJson);
+      final attachments = <Map<String, dynamic>>[];
+      for (var index = 0; index < records.length; index++) {
+        var record = records[index];
+        if (!record.isUploaded) {
+          final attempt = record.attempts + 1;
+          record = record.copyWith(
+            status: AttachmentStatus.uploading,
+            attempts: attempt,
+            lastAttemptAt: DateTime.now().toUtc().toIso8601String(),
+            lastError: null,
+          );
+          records[index] = record;
+          await _saveAttachmentRecords(message, records);
+          try {
+            final uploaded = await api.uploadAttachments(
+              conversationId: message.conversationId,
+              idempotencyKey: '${message.id}:attachment:$index',
+              files: [
+                AttachmentUpload(
+                  path: record.localPath,
+                  name: record.name,
+                  mimeType: record.mimeType,
+                ),
+              ],
+            );
+            if (uploaded.isEmpty) {
+              throw StateError('attachment upload returned no item');
+            }
+            final value = uploaded.single;
+            record = record.copyWith(
+              status: AttachmentStatus.uploaded,
+              id: value['id'] as String?,
+              downloadUrl: value['downloadUrl'] as String?,
+              lastError: null,
+            );
+            records[index] = record;
+            await _saveAttachmentRecords(message, records);
+          } catch (error) {
+            records[index] = record.copyWith(
+              status: AttachmentStatus.failed,
+              lastError: error.toString(),
+            );
+            await _saveAttachmentRecords(message, records);
+            rethrow;
+          }
+        }
+        if (record.id == null) throw StateError('attachment has no server id');
+        attachments.add(
+          record.toMessageJson({
+            'id': record.id,
+            'downloadUrl': record.downloadUrl,
+          }),
+        );
+      }
       final result = await api.createMessage(
         conversationId: message.conversationId,
         id: message.id,
         content: message.content,
+        attachments: attachments,
       );
       await (database.update(database.messages)..where(
             (row) =>
@@ -260,14 +404,39 @@ class SyncEngine {
     }
   }
 
+  Future<void> _saveAttachmentRecords(
+    Message message,
+    List<AttachmentRecord> records,
+  ) async {
+    await (database.update(database.messages)..where(
+          (row) =>
+              row.conversationId.equals(message.conversationId) &
+              row.id.equals(message.id),
+        ))
+        .write(
+          MessagesCompanion(
+            attachmentsJson: Value(AttachmentBridge.encode(records)),
+          ),
+        );
+  }
+
   Future<void> _pullMessages(OrialisApiClient api) async {
-    final localConversationIds =
+    final conversationIdsFromConversations =
+        await (database.selectOnly(database.conversations)
+              ..addColumns([database.conversations.id]))
+            .map((row) => row.read(database.conversations.id)!)
+            .get();
+    final conversationIdsFromMessages =
         await (database.selectOnly(database.messages)
               ..addColumns([database.messages.conversationId])
               ..groupBy([database.messages.conversationId]))
             .map((row) => row.read(database.messages.conversationId)!)
             .get();
-    final conversationIds = {'default', ...localConversationIds};
+    final conversationIds = {
+      'default',
+      ...conversationIdsFromConversations,
+      ...conversationIdsFromMessages,
+    };
     for (final conversationId in conversationIds) {
       final remote = await api.listMessages(conversationId);
       for (final value in remote) {
@@ -297,6 +466,9 @@ class SyncEngine {
                 role: value['role'] as String,
                 content: value['content'] as String,
                 createdAt: value['createdAt'] as String,
+                attachmentsJson: Value(
+                  jsonEncode(value['attachments'] ?? const []),
+                ),
                 remoteVersion: Value(remoteVersion),
                 syncStatus: const Value('synced'),
               ),
@@ -336,16 +508,16 @@ class SyncEngine {
       };
       Map<String, dynamic> result;
       if (event.syncStatus == 'pendingCreate') {
-        result = await api.createCalendarEvent(payload, mutationId);
+        result = await api.createSchedule(payload, mutationId);
       } else if (event.syncStatus == 'pendingDelete') {
         try {
-          await api.deleteCalendarEvent(event.id, mutationId);
+          await api.deleteSchedule(event.id, mutationId);
         } on DioException catch (error) {
           if (error.response?.statusCode != 404) rethrow;
         }
         result = <String, dynamic>{};
       } else {
-        result = await api.updateCalendarEvent(event.id, {
+        result = await api.updateSchedule(event.id, {
           ...payload,
           'baseVersion': event.remoteVersion,
         }, mutationId);

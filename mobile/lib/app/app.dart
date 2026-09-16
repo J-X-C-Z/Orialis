@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,7 +10,7 @@ import '../features/chat/data/chat_repository.dart';
 import '../core/realtime/mobile_realtime_client.dart';
 import '../core/sync/sync_engine.dart';
 import 'router/app_router.dart';
-import 'theme/app_theme.dart';
+import 'design/app_theme.dart';
 
 final databaseProvider = Provider<AppDatabase>((ref) {
   final database = AppDatabase();
@@ -38,6 +40,13 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
 
 final realtimeClientProvider = Provider<MobileRealtimeClient>((ref) {
   final client = MobileRealtimeClient(config: ref.watch(appConfigProvider));
+  final chatRepository = ref.watch(chatRepositoryProvider);
+  final subscription = client.events.listen((event) {
+    if (event.type == 'message') {
+      unawaited(chatRepository.applyRemoteMessage(event.payload));
+    }
+  });
+  ref.onDispose(subscription.cancel);
   ref.onDispose(client.dispose);
   return client;
 });

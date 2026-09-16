@@ -26,9 +26,12 @@ API：
     GET /api/v1/auth/session
     GET/POST/PATCH/DELETE /api/v1/tasks
     GET/POST/PATCH/DELETE /api/v1/projects
+    GET /api/v1/projects/{id}/summary
     GET/POST/PATCH/DELETE /api/v1/projects/{project_id}/milestones
     GET/POST/PATCH/DELETE /api/v1/calendar-events
     GET/POST /api/v1/conversations/{conversation_id}/messages
+    POST /api/v1/conversations/{conversation_id}/attachments
+    GET /api/v1/attachments/{id}/download
     GET /api/v1/sync/events?after=<cursor>&limit=<n>
     GET /api/v1/sync/snapshot
     GET /api/v1/ws                    # mobile authenticated realtime/change channel
@@ -41,6 +44,13 @@ API：
 更新请求使用 baseVersion 做乐观并发控制，版本冲突返回 409。同步事件返回用户级递增 cursor，删除事件保留 tombstone。
 
 Agent Track（M0–M5）已落地：服务器提供 WebSocket Agent Gateway、ACK、去重和自动重连；手机消息提交后会异步投递给已连接的 Hermes，助手回复会持久化并通过手机实时通道推送。开发触发器仍仅用于本地协议测试；Hermes 插件源代码位于 `integrations/hermes/orialis/`，本机插件目录为 `~/.hermes/plugins/orialis/`。
+
+非语音 Agent Gateway 的 v0.3–v0.12 / v1.x 字段、事件 Schema、幂等、序列、
+fallback、客户端兼容矩阵以及 Windows/macOS 配置见
+[`protocol/agent-gateway/README.md`](protocol/agent-gateway/README.md)。当前实现
+非语音 v1 基线消息、结构化 Agent 事件、移动端事件卡片、HTTP Session、能力协商、
+同步和附件；Hermes 命令/会话控制通过移动事件桥接，Cron 调度由 Hermes 负责。
+v0.10 Voice 明确未实现且有意排除。
 
 生产接入时，在服务端设置 `ORIALIS_AGENT_DEVICE_TOKEN`，并在 Hermes 插件设置对应的 `ORIALIS_DEVICE_TOKEN`；插件会通过 `Authorization: Bearer` 发送令牌。开发环境未配置服务端令牌时允许本地无认证联调。
 
@@ -70,4 +80,7 @@ Agent Track（M0–M5）已落地：服务器提供 WebSocket Agent Gateway、AC
 
     ORIALIS_DATABASE_URL=sqlite:///var/lib/orialis/orialis.db?mode=rwc
 
-当前迭代暂不包含网页、内置 LLM 和第三方日历连接；Hermes 是外部 Agent 执行端。手机端第一阶段边界见 docs/architecture.md、docs/mobile-architecture.md 和 docs/sync.md；旧项目的迁移边界见 docs/fangcun-migration.md。
+Agent 离线时，手机消息进入服务端持久化投递队列，连接恢复后自动重试。方寸历史数据可使用
+`scripts/import-fangcun.py --dry-run` 预览，再以单事务导入；历史导入不会伪造实时同步事件。
+
+当前迭代暂不包含网页、内置 LLM、第三方日历连接和循环任务执行器；Hermes 是外部 Agent 执行端。手机端第一阶段边界见 docs/architecture.md、docs/mobile-architecture.md 和 docs/sync.md；旧项目的迁移边界见 docs/fangcun-migration.md。

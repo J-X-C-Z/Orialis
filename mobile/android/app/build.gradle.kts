@@ -6,7 +6,8 @@ plugins {
 
 android {
     namespace = "app.orialis"
-    compileSdk = flutter.compileSdkVersion
+    // file_picker's Android lifecycle dependency requires API 36 at compile time.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

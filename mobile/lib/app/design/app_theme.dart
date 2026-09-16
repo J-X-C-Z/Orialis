@@ -1,25 +1,6 @@
 import 'package:flutter/material.dart';
 
-class AppColors {
-  static const ink = Color(0xFF14201F);
-  static const paper = Color(0xFFF7F7F3);
-  static const surface = Colors.white;
-  static const accent = Color(0xFF287A70);
-  static const accentSoft = Color(0xFFDDEEE8);
-  static const muted = Color(0xFF687572);
-  static const danger = Color(0xFFB34D48);
-}
-
-class AppSpacing {
-  static const page = 20.0;
-  static const section = 24.0;
-  static const item = 12.0;
-}
-
-class AppRadius {
-  static const card = 18.0;
-  static const control = 12.0;
-}
+import 'design_tokens.dart';
 
 ThemeData buildOrialisTheme() {
   final scheme = ColorScheme.fromSeed(
@@ -54,11 +35,38 @@ ThemeData buildOrialisTheme() {
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadius.control),
-        borderSide: const BorderSide(color: Color(0xFFE0E7E2)),
+        borderSide: const BorderSide(color: AppColors.outline),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadius.control),
         borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
+      ),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: AppColors.paper,
+      indicatorColor: AppColors.accentSoft,
+      labelTextStyle: WidgetStatePropertyAll(
+        ThemeData.light().textTheme.labelMedium?.copyWith(
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ),
+    floatingActionButtonTheme: const FloatingActionButtonThemeData(
+      backgroundColor: AppColors.accent,
+      foregroundColor: Colors.white,
+    ),
+    dialogTheme: DialogThemeData(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.card),
+      ),
+    ),
+    bottomSheetTheme: const BottomSheetThemeData(
+      backgroundColor: AppColors.surface,
+      showDragHandle: true,
+    ),
+    chipTheme: ChipThemeData(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.control),
       ),
     ),
   );

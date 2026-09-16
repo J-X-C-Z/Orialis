@@ -1,12 +1,17 @@
 name: orialis-hermes
 label: Orialis
 kind: platform
-version: 0.1.0
+version: 1.0.0
 description: >
-  Text-only Agent Gateway adapter connecting Hermes to an Orialis Server over
-  WebSocket. This MVP covers hello, ping/pong, message.send, message.reply,
-  and protocol errors without modifying Hermes Core.
+  Agent Gateway adapter connecting Hermes to an Orialis Server over WebSocket.
+  This bridge preserves the v1 message, attachment, ACK, reconnect, and device
+  authentication contract, and negotiates non-voice typing, streaming, agent/tool
+  state, clarify, approval, slash commands, delivery, sessions, and artifacts.
+  Voice, STT, and TTS are intentionally not supported. Also exposes a read-only
+  capability-discovery tool so Hermes can inspect the server API contract.
 author: Orialis
+provides_tools:
+  - orialis_capabilities
 requires_env:
   - name: ORIALIS_SERVER_URL
     description: "Orialis Agent Gateway WebSocket URL (for example ws://127.0.0.1:18443/api/v1/agent/ws)"
@@ -21,3 +26,7 @@ optional_env:
     description: "Orialis Agent Gateway device token; required when the server enables Agent authentication"
     prompt: "Orialis device token (or empty)"
     password: true
+  - name: ORIALIS_HOME_CHANNEL
+    description: "Conversation ID used by standalone Hermes cron delivery"
+    prompt: "Orialis home channel (or empty)"
+    password: false

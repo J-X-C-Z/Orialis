@@ -22,6 +22,18 @@ class SessionResponse {
   }
 }
 
+class AttachmentUpload {
+  const AttachmentUpload({
+    required this.path,
+    required this.name,
+    required this.mimeType,
+  });
+
+  final String path;
+  final String name;
+  final String mimeType;
+}
+
 class OrialisApiClient {
   OrialisApiClient({
     required this.baseUrl,
@@ -96,6 +108,121 @@ class OrialisApiClient {
   Future<Map<String, dynamic>> health() async {
     final response = await _dio.get<Map<String, dynamic>>('/api/v1/health');
     return response.data ?? <String, dynamic>{};
+  }
+
+  Future<List<Map<String, dynamic>>> listConversations() async {
+    final response = await _dio.get<List<dynamic>>('/api/v1/conversations');
+    return (response.data ?? const [])
+        .map((value) => Map<String, dynamic>.from(value as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> createConversation({
+    required String title,
+    String? id,
+    String? mutationId,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/conversations',
+      data: {
+        'title': title,
+        ...?id == null ? null : {'id': id},
+      },
+      options: mutationId == null
+          ? null
+          : Options(headers: {'Idempotency-Key': mutationId}),
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> renameConversation(
+    String id,
+    String title,
+    String mutationId,
+  ) async {
+    final response = await _dio.patch<Map<String, dynamic>>(
+      '/api/v1/conversations/${Uri.encodeComponent(id)}',
+      data: {'title': title},
+      options: Options(headers: {'Idempotency-Key': mutationId}),
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<void> deleteConversation(String id, String mutationId) async {
+    await _dio.delete<void>(
+      '/api/v1/conversations/${Uri.encodeComponent(id)}',
+      options: Options(headers: {'Idempotency-Key': mutationId}),
+    );
+  }
+
+  /// Canonical Schedule naming. The legacy methods below remain for old
+  /// callers and currently use the backwards-compatible server route.
+  Future<Map<String, dynamic>> createSchedule(
+    Map<String, dynamic> payload,
+    String mutationId,
+  ) async {
+    try {
+      final response = await _dio.post<Map<String, dynamic>>(
+        '/api/v1/schedules',
+        data: payload,
+        options: Options(headers: {'Idempotency-Key': mutationId}),
+      );
+      return response.data ?? <String, dynamic>{};
+    } on DioException catch (error) {
+      if (error.response?.statusCode != 404) rethrow;
+      return createCalendarEvent(payload, mutationId);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> listSchedules() async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/api/v1/schedules',
+      );
+      return _items(response.data);
+    } on DioException catch (error) {
+      if (error.response?.statusCode != 404) rethrow;
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/api/v1/calendar-events',
+      );
+      return _items(response.data);
+    }
+  }
+
+  List<Map<String, dynamic>> _items(Map<String, dynamic>? data) {
+    return (data?['items'] as List<dynamic>? ?? const [])
+        .map((value) => Map<String, dynamic>.from(value as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> updateSchedule(
+    String id,
+    Map<String, dynamic> payload,
+    String mutationId,
+  ) async {
+    try {
+      final response = await _dio.patch<Map<String, dynamic>>(
+        '/api/v1/schedules/${Uri.encodeComponent(id)}',
+        data: payload,
+        options: Options(headers: {'Idempotency-Key': mutationId}),
+      );
+      return response.data ?? <String, dynamic>{};
+    } on DioException catch (error) {
+      if (error.response?.statusCode != 404) rethrow;
+      return updateCalendarEvent(id, payload, mutationId);
+    }
+  }
+
+  Future<void> deleteSchedule(String id, String mutationId) async {
+    try {
+      await _dio.delete<void>(
+        '/api/v1/schedules/${Uri.encodeComponent(id)}',
+        options: Options(headers: {'Idempotency-Key': mutationId}),
+      );
+    } on DioException catch (error) {
+      if (error.response?.statusCode != 404) rethrow;
+      await deleteCalendarEvent(id, mutationId);
+    }
   }
 
   Future<Map<String, dynamic>> createTask(
@@ -179,14 +306,45 @@ class OrialisApiClient {
         .toList();
   }
 
+  Future<List<Map<String, dynamic>>> uploadAttachments({
+    required String conversationId,
+    required List<AttachmentUpload> files,
+    String? idempotencyKey,
+  }) async {
+    final form = FormData();
+    for (final file in files) {
+      form.files.add(
+        MapEntry(
+          'files',
+          await MultipartFile.fromFile(
+            file.path,
+            filename: file.name,
+            contentType: DioMediaType.parse(file.mimeType),
+          ),
+        ),
+      );
+    }
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/conversations/${Uri.encodeComponent(conversationId)}/attachments',
+      data: form,
+      options: idempotencyKey == null
+          ? null
+          : Options(headers: {'Idempotency-Key': idempotencyKey}),
+    );
+    return (response.data?['items'] as List<dynamic>? ?? const [])
+        .map((value) => Map<String, dynamic>.from(value as Map))
+        .toList();
+  }
+
   Future<Map<String, dynamic>> createMessage({
     required String conversationId,
     required String id,
     required String content,
+    List<Map<String, dynamic>> attachments = const [],
   }) async {
     final response = await _dio.post<Map<String, dynamic>>(
       '/api/v1/conversations/${Uri.encodeComponent(conversationId)}/messages',
-      data: {'id': id, 'content': content},
+      data: {'id': id, 'content': content, 'attachments': attachments},
       options: Options(headers: {'Idempotency-Key': id}),
     );
     return response.data ?? <String, dynamic>{};

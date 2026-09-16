@@ -140,6 +140,39 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(len(handled), 1)
         self.assertEqual([item["type"] for item in sent], ["message.ack", "message.ack"])
 
+    def test_inbound_attachment_is_local_only_during_dispatch_and_then_cleaned(self):
+        Platform._add_pseudo_member("orialis")
+        adapter = OrialisAdapter(SimpleNamespace(extra={
+            "server_url": "https://orialis.test/api/v1/agent/ws",
+            "device_id": "JXCZ_TEST_Hermes",
+        }))
+        sent, observed = [], []
+
+        async def send_wire(message):
+            sent.append(message)
+
+        adapter._send_wire = send_wire
+
+        async def handle(event):
+            observed.append((event.media_urls[0], event.media_types[0]))
+            self.assertTrue(Path(event.media_urls[0]).exists())
+
+        from pathlib import Path
+        adapter.handle_message = handle
+        message = {"version": 1, "type": "message.send", "message_id": "m-media",
+                   "conversation_id": "conv", "content": "read",
+                   "attachments": [{"id": "a", "name": "../notes.txt", "mime_type": "text/plain",
+                                    "size": 4, "download_url": "https://orialis.test/a"}]}
+
+        def fake_download(item, server_url, destination, token=None, device_id=None):
+            destination.write_bytes(b"test")
+            return "text/plain"
+
+        with patch("integrations.hermes.orialis.adapter._download_attachment", fake_download):
+            asyncio.run(adapter._dispatch_message(message))
+        self.assertEqual(observed[0][1], "text/plain")
+        self.assertFalse(Path(observed[0][0]).exists())
+
     def test_reconnect_uses_bounded_exponential_backoff(self):
         Platform._add_pseudo_member("orialis")
         adapter = OrialisAdapter(SimpleNamespace(extra={}))

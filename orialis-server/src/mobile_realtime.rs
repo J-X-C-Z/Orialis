@@ -5,10 +5,14 @@ use axum::{
     response::IntoResponse,
 };
 use futures_util::StreamExt;
+use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, Mutex};
 
-use crate::{agent_gateway::protocol::MobileEnvelope, authenticated_user, AppState};
+use crate::{
+    agent_gateway::{protocol, protocol::MobileEnvelope, AgentRegistry, RegistryError},
+    authenticated_user, AppState,
+};
 
 const PROTOCOL_VERSION: u32 = 1;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -111,7 +115,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>, user_id: Str
         tokio::select! {
             incoming = socket.next() => match incoming {
                 Some(Ok(Message::Text(text))) => {
-                    if handle_text(&mut socket, text.as_str()).await.is_err() { break; }
+                    if handle_text(&mut socket, &state, &user_id, text.as_str()).await.is_err() { break; }
                 }
                 Some(Ok(Message::Ping(payload))) => {
                     if socket.send(Message::Pong(payload)).await.is_err() { break; }
@@ -147,7 +151,12 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>, user_id: Str
     }
 }
 
-async fn handle_text(socket: &mut WebSocket, text: &str) -> Result<(), ()> {
+async fn handle_text(
+    socket: &mut WebSocket,
+    state: &Arc<AppState>,
+    user_id: &str,
+    text: &str,
+) -> Result<(), ()> {
     let envelope = serde_json::from_str::<MobileEnvelope>(text).map_err(|_| ())?;
     if envelope.version != PROTOCOL_VERSION || !envelope.payload.is_object() {
         return send_error(
@@ -171,7 +180,8 @@ async fn handle_text(socket: &mut WebSocket, text: &str) -> Result<(), ()> {
             )
             .await
         }
-        "pong" | "event" | "message" | "sync.change_hint" => Ok(()),
+        "pong" | "message" | "sync.change_hint" => Ok(()),
+        "event" => handle_agent_event(socket, state, user_id, &envelope).await,
         _ => {
             send_error(
                 socket,
@@ -181,6 +191,243 @@ async fn handle_text(socket: &mut WebSocket, text: &str) -> Result<(), ()> {
             )
             .await
         }
+    }
+}
+
+async fn handle_agent_event(
+    socket: &mut WebSocket,
+    state: &Arc<AppState>,
+    user_id: &str,
+    envelope: &MobileEnvelope,
+) -> Result<(), ()> {
+    let kind = envelope
+        .payload
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let conversation_id = envelope
+        .payload
+        .get("conversationId")
+        .and_then(Value::as_str)
+        .unwrap_or("default")
+        .to_owned();
+    let request_id = envelope
+        .request_id
+        .clone()
+        .unwrap_or_else(|| format!("mobile_{}", uuid::Uuid::now_v7()));
+    let session_id = envelope
+        .payload
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .unwrap_or(&conversation_id)
+        .to_owned();
+
+    let result = match kind {
+        "clarify.response" => {
+            let answer = envelope
+                .payload
+                .get("answer")
+                .cloned()
+                .unwrap_or_else(|| Value::String(String::new()));
+            let message = protocol::GatewayMessage::ClarifyResolve {
+                version: protocol::PROTOCOL_VERSION,
+                event_id: format!("mobile-event-{}", uuid::Uuid::now_v7()),
+                seq: 0,
+                session_id,
+                request_id: request_id.clone(),
+                answer,
+            };
+            state
+                .agent
+                .send_event_for_user(user_id, None, message)
+                .await
+                .map(|_| ())
+                .map_err(registry_error_message)
+        }
+        "approval.response" => {
+            let decision = match envelope
+                .payload
+                .get("decision")
+                .and_then(Value::as_str)
+                .unwrap_or("deny")
+            {
+                "once" => protocol::ApprovalDecision::Once,
+                "session" => protocol::ApprovalDecision::Session,
+                "always" => protocol::ApprovalDecision::Always,
+                "deny" => protocol::ApprovalDecision::Deny,
+                _ => {
+                    return send_error(
+                        socket,
+                        Some(request_id),
+                        "invalid_approval_decision",
+                        "approval decision must be once, session, always, or deny",
+                    )
+                    .await;
+                }
+            };
+            let message = protocol::GatewayMessage::ApprovalResolve {
+                version: protocol::PROTOCOL_VERSION,
+                event_id: format!("mobile-event-{}", uuid::Uuid::now_v7()),
+                seq: 0,
+                session_id,
+                request_id: request_id.clone(),
+                decision,
+                reason: envelope
+                    .payload
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+            };
+            state
+                .agent
+                .send_event_for_user(user_id, None, message)
+                .await
+                .map(|_| ())
+                .map_err(registry_error_message)
+        }
+        "hermes.command" => {
+            let command = envelope
+                .payload
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            if command.is_empty() {
+                return send_error(
+                    socket,
+                    Some(request_id),
+                    "invalid_command",
+                    "command must not be empty",
+                )
+                .await;
+            }
+            let message = protocol::GatewayMessage::MessageSend {
+                version: protocol::PROTOCOL_VERSION,
+                message_id: request_id.clone(),
+                conversation_id: conversation_id.clone(),
+                content: if command.starts_with('/') {
+                    command.clone()
+                } else {
+                    format!("/{command}")
+                },
+                attachments: vec![],
+            };
+            let response = send_agent_request(&state.agent, user_id, message).await;
+            let payload = match response {
+                Ok(protocol::GatewayMessage::MessageReply { content, .. }) => {
+                    serde_json::json!({
+                        "kind": "hermes.command.result",
+                        "id": request_id,
+                        "command": command,
+                        "status": "completed",
+                        "content": content,
+                    })
+                }
+                Ok(other) => serde_json::json!({
+                    "kind": "hermes.command.result",
+                    "id": request_id,
+                    "command": command,
+                    "status": "failed",
+                    "content": format!("unexpected Agent response: {other:?}"),
+                }),
+                Err(error) => serde_json::json!({
+                    "kind": "hermes.command.result",
+                    "id": request_id,
+                    "command": command,
+                    "status": "failed",
+                    "content": error,
+                }),
+            };
+            return send_envelope(socket, protocol::mobile_event(payload)).await;
+        }
+        "session.create" | "session.reset" | "session.resume" | "session.status"
+        | "session.title" => {
+            let command = match kind {
+                "session.create" | "session.reset" => "/new".to_owned(),
+                "session.resume" => "/resume".to_owned(),
+                "session.status" => "/status".to_owned(),
+                "session.title" => envelope
+                    .payload
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(|title| format!("/title {title}"))
+                    .unwrap_or_else(|| "/status".to_owned()),
+                _ => unreachable!(),
+            };
+            let message = protocol::GatewayMessage::MessageSend {
+                version: protocol::PROTOCOL_VERSION,
+                message_id: request_id.clone(),
+                conversation_id: conversation_id.clone(),
+                content: command.clone(),
+                attachments: vec![],
+            };
+            return match send_agent_request(&state.agent, user_id, message).await {
+                Ok(protocol::GatewayMessage::MessageReply { content, .. }) => {
+                    send_envelope(
+                        socket,
+                        protocol::mobile_event(serde_json::json!({
+                            "kind": "session.status",
+                            "id": session_id,
+                            "event": kind,
+                            "status": "completed",
+                            "message": content,
+                        })),
+                    )
+                    .await
+                }
+                Ok(_) => {
+                    send_error(
+                        socket,
+                        Some(request_id),
+                        "invalid_agent_response",
+                        "Agent returned an unexpected session response",
+                    )
+                    .await
+                }
+                Err(error) => {
+                    send_error(socket, Some(request_id), "agent_unavailable", &error).await
+                }
+            };
+        }
+        "delivery.notification" => Ok(()),
+        _ => {
+            return send_error(
+                socket,
+                Some(request_id),
+                "unsupported_agent_action",
+                "this Agent action is not supported by the connected Orialis Server",
+            )
+            .await;
+        }
+    };
+
+    if let Err(error) = result {
+        return send_error(socket, Some(request_id), "agent_unavailable", &error).await;
+    }
+    Ok(())
+}
+
+async fn send_agent_request(
+    agent: &AgentRegistry,
+    user_id: &str,
+    message: protocol::GatewayMessage,
+) -> Result<protocol::GatewayMessage, String> {
+    let receiver = agent
+        .send_request_for_user(user_id, None, message)
+        .await
+        .map_err(registry_error_message)?;
+    tokio::time::timeout(Duration::from_secs(60), receiver)
+        .await
+        .map_err(|_| "Agent response timed out".to_owned())?
+        .map_err(|_| "Agent connection closed before responding".to_owned())
+}
+
+fn registry_error_message(error: RegistryError) -> String {
+    match error {
+        RegistryError::NoConnection => "no Orialis Hermes plugin is connected".to_owned(),
+        RegistryError::ConnectionClosed => "Orialis Hermes plugin connection closed".to_owned(),
+        RegistryError::DuplicateMessage => "request has already been processed".to_owned(),
     }
 }
 
