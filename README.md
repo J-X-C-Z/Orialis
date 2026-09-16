@@ -12,6 +12,7 @@ Oris（Orialis）从纯服务端基础开始建设。oris-refactor 只保留 Ori
 - 版本控制、软删除墓碑和用户级增量同步事件
 - 默认监听 127.0.0.1:18443
 - 生产公网地址：https://orialis.jxcz.top
+- Flutter Android 优先客户端：mobile/
 
 API：
 
@@ -27,6 +28,7 @@ API：
     GET/POST/PATCH/DELETE /api/v1/projects
     GET/POST/PATCH/DELETE /api/v1/calendar-events
     GET /api/v1/sync/events?after=<cursor>&limit=<n>
+    GET /api/v1/sync/snapshot
 
 任务只表达作业、项目行动和每日任务的截止信息，不自动进入日历；课程等有明确开始/结束时间的内容写入 calendar_events。
 
@@ -53,4 +55,4 @@ API：
 
     ORIS_DATABASE_URL=sqlite:///var/lib/oris/oris.db?mode=rwc
 
-当前迭代暂不包含网页、Agent、Hermes、LLM、第三方日历连接和移动端功能。旧项目的迁移边界见 docs/fangcun-migration.md。
+当前迭代暂不包含网页、Agent、Hermes、LLM 和第三方日历连接。手机端第一阶段边界见 docs/architecture.md、docs/mobile-architecture.md 和 docs/sync.md；旧项目的迁移边界见 docs/fangcun-migration.md。

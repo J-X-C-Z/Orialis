@@ -101,7 +101,9 @@ impl IntoResponse for AppError {
         };
         (
             status,
-            Json(serde_json::json!({ "error": code, "message": message })),
+            Json(serde_json::json!({
+                "error": { "code": code, "message": message }
+            })),
         )
             .into_response()
     }
@@ -131,8 +133,11 @@ struct Credentials {
 
 #[derive(Serialize)]
 struct SessionResponse {
+    #[serde(rename = "userId")]
     user_id: String,
+    #[serde(rename = "accessToken")]
     access_token: String,
+    #[serde(rename = "expiresAt")]
     expires_at: String,
 }
 
@@ -275,6 +280,7 @@ struct SyncEvent {
     operation: String,
     entity_version: i64,
     tombstone: bool,
+    mutation_id: Option<String>,
     payload_json: Option<String>,
     created_at: String,
 }
@@ -292,29 +298,56 @@ struct SyncResponse {
     next_cursor: i64,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncSnapshot {
+    cursor: i64,
+    tasks: Vec<Task>,
+    projects: Vec<Project>,
+    calendar_events: Vec<CalendarEvent>,
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(env::var("RUST_LOG").unwrap_or_else(|_| "oris_server=info".into()))
         .init();
     let config = Config::from_env().unwrap_or_else(|error| panic!("configuration error: {error}"));
-    let address = config.address().unwrap_or_else(|error| panic!("configuration error: {error}"));
+    let address = config
+        .address()
+        .unwrap_or_else(|error| panic!("configuration error: {error}"));
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect(&config.database_url)
         .await
         .expect("failed to connect to SQLite");
-    sqlx::query("PRAGMA journal_mode = WAL").execute(&pool).await.expect("failed to enable WAL mode");
-    sqlx::query("PRAGMA synchronous = NORMAL").execute(&pool).await.expect("failed to configure SQLite sync");
-    sqlx::query("PRAGMA busy_timeout = 5000").execute(&pool).await.expect("failed to configure SQLite busy timeout");
-    sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await.expect("failed to enable foreign keys");
+    sqlx::query("PRAGMA journal_mode = WAL")
+        .execute(&pool)
+        .await
+        .expect("failed to enable WAL mode");
+    sqlx::query("PRAGMA synchronous = NORMAL")
+        .execute(&pool)
+        .await
+        .expect("failed to configure SQLite sync");
+    sqlx::query("PRAGMA busy_timeout = 5000")
+        .execute(&pool)
+        .await
+        .expect("failed to configure SQLite busy timeout");
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&pool)
+        .await
+        .expect("failed to enable foreign keys");
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
         .expect("failed to run database migrations");
 
     let state = Arc::new(AppState {
-        metadata: metadata(VERSION, config.environment.clone(), config.public_url.clone()),
+        metadata: metadata(
+            VERSION,
+            config.environment.clone(),
+            config.public_url.clone(),
+        ),
         pool,
     });
     let app = Router::new()
@@ -329,10 +362,20 @@ async fn main() {
         .route("/api/v1/tasks", get(list_tasks).post(create_task))
         .route("/api/v1/tasks/{id}", patch(update_task).delete(delete_task))
         .route("/api/v1/projects", get(list_projects).post(create_project))
-        .route("/api/v1/projects/{id}", patch(update_project).delete(delete_project))
-        .route("/api/v1/calendar-events", get(list_events).post(create_event))
-        .route("/api/v1/calendar-events/{id}", patch(update_event).delete(delete_event))
+        .route(
+            "/api/v1/projects/{id}",
+            patch(update_project).delete(delete_project),
+        )
+        .route(
+            "/api/v1/calendar-events",
+            get(list_events).post(create_event),
+        )
+        .route(
+            "/api/v1/calendar-events/{id}",
+            patch(update_event).delete(delete_event),
+        )
         .route("/api/v1/sync/events", get(sync_events))
+        .route("/api/v1/sync/snapshot", get(sync_snapshot))
         .fallback(not_found)
         .with_state(state);
     info!(service = SERVICE_NAME, %address, public_url = %config.public_url, "Oris server listening");
@@ -387,12 +430,48 @@ fn hash_token(token: &str) -> String {
     format!("{:x}", Sha256::digest(token.as_bytes()))
 }
 
+fn mutation_id(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+async fn reject_replayed_mutation(
+    pool: &SqlitePool,
+    user_id: &str,
+    headers: &HeaderMap,
+) -> Result<(), AppError> {
+    let Some(mutation_id) = mutation_id(headers) else {
+        return Ok(());
+    };
+    let already_used = sqlx::query_scalar::<_, i64>(
+        "SELECT EXISTS(SELECT 1 FROM sync_events WHERE user_id=? AND mutation_id=?)",
+    )
+    .bind(user_id)
+    .bind(mutation_id)
+    .fetch_one(pool)
+    .await?;
+    if already_used != 0 {
+        return Err(AppError::Conflict(
+            "Idempotency-Key was already used".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_credentials(username: &str, password: &str) -> Result<(), AppError> {
     if !(3..=32).contains(&username.chars().count()) {
-        return Err(AppError::BadRequest("username must be 3-32 characters".into()));
+        return Err(AppError::BadRequest(
+            "username must be 3-32 characters".into(),
+        ));
     }
     if !(8..=128).contains(&password.chars().count()) {
-        return Err(AppError::BadRequest("password must be 8-128 characters".into()));
+        return Err(AppError::BadRequest(
+            "password must be 8-128 characters".into(),
+        ));
     }
     Ok(())
 }
@@ -426,8 +505,8 @@ async fn authenticated_user(headers: &HeaderMap, pool: &SqlitePool) -> Result<St
                         .split(';')
                         .find_map(|item| item.trim().strip_prefix("oris_session="))
                 })
-        })
-        .ok_or(AppError::Unauthorized)?;
+        });
+    let token = token.ok_or(AppError::Unauthorized)?;
     sqlx::query_scalar::<_, String>(
         "SELECT user_id FROM user_sessions
          WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?",
@@ -447,13 +526,14 @@ async fn append_event(
     operation: &str,
     entity_version: i64,
     payload_json: Option<String>,
+    mutation_id: Option<String>,
 ) -> Result<(), AppError> {
     let timestamp = now();
     let tombstone = operation == "delete";
     sqlx::query(
         "INSERT INTO sync_events
-         (id,user_id,cursor,entity_type,entity_id,operation,entity_version,tombstone,payload_json,deleted_at,created_at,updated_at,version)
-         VALUES (?,?,(SELECT COALESCE(MAX(cursor),0)+1 FROM sync_events WHERE user_id=?),?,?,?,?,?,?,?,?,?,1)",
+         (id,user_id,cursor,entity_type,entity_id,operation,entity_version,tombstone,payload_json,mutation_id,deleted_at,created_at,updated_at,version)
+         VALUES (?,?,(SELECT COALESCE(MAX(cursor),0)+1 FROM sync_events WHERE user_id=?),?,?,?,?,?,?,?,?,?,?,1)",
     )
     .bind(new_id())
     .bind(user_id)
@@ -464,6 +544,7 @@ async fn append_event(
     .bind(entity_version)
     .bind(tombstone)
     .bind(payload_json)
+    .bind(mutation_id)
     .bind(if tombstone { Some(timestamp.clone()) } else { None::<String> })
     .bind(&timestamp)
     .bind(&timestamp)
@@ -496,7 +577,10 @@ async fn register(
         }
     }
     result?;
-    Ok((StatusCode::CREATED, Json(create_session(&state.pool, &id).await?)))
+    Ok((
+        StatusCode::CREATED,
+        Json(create_session(&state.pool, &id).await?),
+    ))
 }
 
 async fn login(
@@ -562,14 +646,14 @@ async fn current_session(
     headers: HeaderMap,
 ) -> Result<Json<Value>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
-    let row = sqlx::query_as::<_, (String, String)>(
-        "SELECT id,username FROM users WHERE id = ?",
-    )
-    .bind(&user_id)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or(AppError::Unauthorized)?;
-    Ok(Json(serde_json::json!({ "userId": row.0, "username": row.1 })))
+    let row = sqlx::query_as::<_, (String, String)>("SELECT id,username FROM users WHERE id = ?")
+        .bind(&user_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+    Ok(Json(
+        serde_json::json!({ "userId": row.0, "username": row.1 }),
+    ))
 }
 
 async fn list_tasks(
@@ -609,6 +693,7 @@ async fn create_task(
     Json(input): Json<TaskInput>,
 ) -> Result<(StatusCode, Json<Task>), AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     if input.title.trim().is_empty() {
         return Err(AppError::BadRequest("title is required".into()));
     }
@@ -640,7 +725,17 @@ async fn create_task(
     .execute(&state.pool)
     .await?;
     let task = fetch_task(&state.pool, &user_id, &id).await?;
-    append_event(&state.pool, &user_id, "task", &id, "upsert", task.version, Some(serde_json::to_string(&task).unwrap())).await?;
+    append_event(
+        &state.pool,
+        &user_id,
+        "task",
+        &id,
+        "upsert",
+        task.version,
+        Some(serde_json::to_string(&task).unwrap()),
+        mutation_id(&headers),
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(task)))
 }
 
@@ -651,6 +746,7 @@ async fn update_task(
     Json(input): Json<TaskPatch>,
 ) -> Result<Json<Task>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let current = fetch_task(&state.pool, &user_id, &id).await?;
     if current.version != input.base_version {
         return Err(AppError::Conflict("task version changed".into()));
@@ -685,7 +781,17 @@ async fn update_task(
     .execute(&state.pool)
     .await?;
     let task = fetch_task(&state.pool, &user_id, &id).await?;
-    append_event(&state.pool, &user_id, "task", &id, "upsert", task.version, Some(serde_json::to_string(&task).unwrap())).await?;
+    append_event(
+        &state.pool,
+        &user_id,
+        "task",
+        &id,
+        "upsert",
+        task.version,
+        Some(serde_json::to_string(&task).unwrap()),
+        mutation_id(&headers),
+    )
+    .await?;
     Ok(Json(task))
 }
 
@@ -695,15 +801,36 @@ async fn delete_task(
     Path(id): Path<String>,
 ) -> Result<StatusCode, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let task = fetch_task(&state.pool, &user_id, &id).await?;
     let timestamp = now();
-    sqlx::query("UPDATE tasks SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?")
-        .bind(&timestamp).bind(&timestamp).bind(&user_id).bind(&id).execute(&state.pool).await?;
-    append_event(&state.pool, &user_id, "task", &id, "delete", task.version + 1, None).await?;
+    sqlx::query(
+        "UPDATE tasks SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?",
+    )
+    .bind(&timestamp)
+    .bind(&timestamp)
+    .bind(&user_id)
+    .bind(&id)
+    .execute(&state.pool)
+    .await?;
+    append_event(
+        &state.pool,
+        &user_id,
+        "task",
+        &id,
+        "delete",
+        task.version + 1,
+        None,
+        mutation_id(&headers),
+    )
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn list_projects(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<Json<Vec<Project>>, AppError> {
+async fn list_projects(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<Project>>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     Ok(Json(sqlx::query_as::<_, Project>(
         "SELECT id,name,goal,status,start_date,due,next_action_task_id,created_at,updated_at,version
@@ -718,39 +845,100 @@ async fn fetch_project(pool: &SqlitePool, user_id: &str, id: &str) -> Result<Pro
     ).bind(user_id).bind(id).fetch_optional(pool).await?.ok_or(AppError::NotFound)
 }
 
-async fn create_project(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(input): Json<ProjectInput>) -> Result<(StatusCode, Json<Project>), AppError> {
+async fn create_project(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(input): Json<ProjectInput>,
+) -> Result<(StatusCode, Json<Project>), AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
-    if input.name.trim().is_empty() { return Err(AppError::BadRequest("name is required".into())); }
-    let id = new_id(); let timestamp = now();
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
+    if input.name.trim().is_empty() {
+        return Err(AppError::BadRequest("name is required".into()));
+    }
+    let id = new_id();
+    let timestamp = now();
     sqlx::query("INSERT INTO projects (id,user_id,name,goal,status,start_date,due,next_action_task_id,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,?,?,?,1)")
         .bind(&id).bind(&user_id).bind(input.name.trim()).bind(input.goal).bind(input.status.unwrap_or_else(|| "active".into())).bind(input.start_date).bind(input.due).bind(input.next_action_task_id).bind(&timestamp).bind(&timestamp).execute(&state.pool).await?;
     let project = fetch_project(&state.pool, &user_id, &id).await?;
-    append_event(&state.pool, &user_id, "project", &id, "upsert", project.version, Some(serde_json::to_string(&project).unwrap())).await?;
+    append_event(
+        &state.pool,
+        &user_id,
+        "project",
+        &id,
+        "upsert",
+        project.version,
+        Some(serde_json::to_string(&project).unwrap()),
+        mutation_id(&headers),
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(project)))
 }
 
-async fn update_project(State(state): State<Arc<AppState>>, headers: HeaderMap, Path(id): Path<String>, Json(input): Json<ProjectPatch>) -> Result<Json<Project>, AppError> {
+async fn update_project(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<ProjectPatch>,
+) -> Result<Json<Project>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let current = fetch_project(&state.pool, &user_id, &id).await?;
-    if current.version != input.base_version { return Err(AppError::Conflict("project version changed".into())); }
+    if current.version != input.base_version {
+        return Err(AppError::Conflict("project version changed".into()));
+    }
     sqlx::query("UPDATE projects SET name=COALESCE(?,name),goal=COALESCE(?,goal),status=COALESCE(?,status),start_date=COALESCE(?,start_date),due=COALESCE(?,due),next_action_task_id=COALESCE(?,next_action_task_id),updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
         .bind(input.name).bind(input.goal).bind(input.status).bind(input.start_date).bind(input.due).bind(input.next_action_task_id).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&state.pool).await?;
     let project = fetch_project(&state.pool, &user_id, &id).await?;
-    append_event(&state.pool, &user_id, "project", &id, "upsert", project.version, Some(serde_json::to_string(&project).unwrap())).await?;
+    append_event(
+        &state.pool,
+        &user_id,
+        "project",
+        &id,
+        "upsert",
+        project.version,
+        Some(serde_json::to_string(&project).unwrap()),
+        mutation_id(&headers),
+    )
+    .await?;
     Ok(Json(project))
 }
 
-async fn delete_project(State(state): State<Arc<AppState>>, headers: HeaderMap, Path(id): Path<String>) -> Result<StatusCode, AppError> {
+async fn delete_project(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let project = fetch_project(&state.pool, &user_id, &id).await?;
     let timestamp = now();
-    sqlx::query("UPDATE projects SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?")
-        .bind(&timestamp).bind(&timestamp).bind(&user_id).bind(&id).execute(&state.pool).await?;
-    append_event(&state.pool, &user_id, "project", &id, "delete", project.version + 1, None).await?;
+    sqlx::query(
+        "UPDATE projects SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?",
+    )
+    .bind(&timestamp)
+    .bind(&timestamp)
+    .bind(&user_id)
+    .bind(&id)
+    .execute(&state.pool)
+    .await?;
+    append_event(
+        &state.pool,
+        &user_id,
+        "project",
+        &id,
+        "delete",
+        project.version + 1,
+        None,
+        mutation_id(&headers),
+    )
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn list_events(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<Json<Vec<CalendarEvent>>, AppError> {
+async fn list_events(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<CalendarEvent>>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     Ok(Json(sqlx::query_as::<_, CalendarEvent>(
         "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version
@@ -758,73 +946,185 @@ async fn list_events(State(state): State<Arc<AppState>>, headers: HeaderMap) -> 
     ).bind(user_id).fetch_all(&state.pool).await?))
 }
 
-async fn fetch_event(pool: &SqlitePool, user_id: &str, id: &str) -> Result<CalendarEvent, AppError> {
+async fn fetch_event(
+    pool: &SqlitePool,
+    user_id: &str,
+    id: &str,
+) -> Result<CalendarEvent, AppError> {
     sqlx::query_as::<_, CalendarEvent>(
         "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version
          FROM calendar_events WHERE user_id=? AND id=? AND deleted_at IS NULL",
     ).bind(user_id).bind(id).fetch_optional(pool).await?.ok_or(AppError::NotFound)
 }
 
-async fn create_event(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(input): Json<CalendarEventInput>) -> Result<(StatusCode, Json<CalendarEvent>), AppError> {
+async fn create_event(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(input): Json<CalendarEventInput>,
+) -> Result<(StatusCode, Json<CalendarEvent>), AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
-    if input.title.trim().is_empty() { return Err(AppError::BadRequest("title is required".into())); }
-    if input.end_at < input.start_at { return Err(AppError::BadRequest("end_at must not precede start_at".into())); }
-    let id = new_id(); let timestamp = now();
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
+    if input.title.trim().is_empty() {
+        return Err(AppError::BadRequest("title is required".into()));
+    }
+    if input.end_at < input.start_at {
+        return Err(AppError::BadRequest(
+            "end_at must not precede start_at".into(),
+        ));
+    }
+    let id = new_id();
+    let timestamp = now();
     sqlx::query("INSERT INTO calendar_events (id,user_id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,?,?,?,?,1)")
         .bind(&id).bind(&user_id).bind(input.title.trim()).bind(input.description).bind(input.location).bind(input.start_at).bind(input.end_at).bind(input.all_day.unwrap_or(false)).bind(input.reminder_minutes).bind(&timestamp).bind(&timestamp).execute(&state.pool).await?;
     let event = fetch_event(&state.pool, &user_id, &id).await?;
-    append_event(&state.pool, &user_id, "calendar_event", &id, "upsert", event.version, Some(serde_json::to_string(&event).unwrap())).await?;
+    append_event(
+        &state.pool,
+        &user_id,
+        "calendar_event",
+        &id,
+        "upsert",
+        event.version,
+        Some(serde_json::to_string(&event).unwrap()),
+        mutation_id(&headers),
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(event)))
 }
 
-async fn update_event(State(state): State<Arc<AppState>>, headers: HeaderMap, Path(id): Path<String>, Json(input): Json<CalendarEventPatch>) -> Result<Json<CalendarEvent>, AppError> {
+async fn update_event(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<CalendarEventPatch>,
+) -> Result<Json<CalendarEvent>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let current = fetch_event(&state.pool, &user_id, &id).await?;
-    if current.version != input.base_version { return Err(AppError::Conflict("calendar event version changed".into())); }
+    if current.version != input.base_version {
+        return Err(AppError::Conflict("calendar event version changed".into()));
+    }
     let start_at = input.start_at.unwrap_or(current.start_at);
     let end_at = input.end_at.unwrap_or(current.end_at);
-    if end_at < start_at { return Err(AppError::BadRequest("end_at must not precede start_at".into())); }
+    if end_at < start_at {
+        return Err(AppError::BadRequest(
+            "end_at must not precede start_at".into(),
+        ));
+    }
     sqlx::query("UPDATE calendar_events SET title=COALESCE(?,title),description=COALESCE(?,description),location=COALESCE(?,location),start_at=?,end_at=?,all_day=COALESCE(?,all_day),reminder_minutes=COALESCE(?,reminder_minutes),updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
         .bind(input.title).bind(input.description).bind(input.location).bind(start_at).bind(end_at).bind(input.all_day).bind(input.reminder_minutes).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&state.pool).await?;
     let event = fetch_event(&state.pool, &user_id, &id).await?;
-    append_event(&state.pool, &user_id, "calendar_event", &id, "upsert", event.version, Some(serde_json::to_string(&event).unwrap())).await?;
+    append_event(
+        &state.pool,
+        &user_id,
+        "calendar_event",
+        &id,
+        "upsert",
+        event.version,
+        Some(serde_json::to_string(&event).unwrap()),
+        mutation_id(&headers),
+    )
+    .await?;
     Ok(Json(event))
 }
 
-async fn delete_event(State(state): State<Arc<AppState>>, headers: HeaderMap, Path(id): Path<String>) -> Result<StatusCode, AppError> {
+async fn delete_event(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let event = fetch_event(&state.pool, &user_id, &id).await?;
     let timestamp = now();
     sqlx::query("UPDATE calendar_events SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?")
         .bind(&timestamp).bind(&timestamp).bind(&user_id).bind(&id).execute(&state.pool).await?;
-    append_event(&state.pool, &user_id, "calendar_event", &id, "delete", event.version + 1, None).await?;
+    append_event(
+        &state.pool,
+        &user_id,
+        "calendar_event",
+        &id,
+        "delete",
+        event.version + 1,
+        None,
+        mutation_id(&headers),
+    )
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn sync_events(State(state): State<Arc<AppState>>, headers: HeaderMap, Query(query): Query<CursorQuery>) -> Result<Json<SyncResponse>, AppError> {
+async fn sync_events(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<CursorQuery>,
+) -> Result<Json<SyncResponse>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     let after = query.after.unwrap_or(0);
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
     let events = sqlx::query_as::<_, SyncEvent>(
-        "SELECT cursor,entity_type,entity_id,operation,entity_version,tombstone,payload_json,created_at
+        "SELECT cursor,entity_type,entity_id,operation,entity_version,tombstone,mutation_id,payload_json,created_at
          FROM sync_events WHERE user_id=? AND cursor>? ORDER BY cursor LIMIT ?",
     ).bind(&user_id).bind(after).bind(limit).fetch_all(&state.pool).await?;
     let next_cursor = events.last().map(|event| event.cursor).unwrap_or(after);
-    Ok(Json(SyncResponse { events, next_cursor }))
+    Ok(Json(SyncResponse {
+        events,
+        next_cursor,
+    }))
+}
+
+async fn sync_snapshot(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<SyncSnapshot>, AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    let tasks = sqlx::query_as::<_, Task>(
+        "SELECT id,title,notes,important,urgent,completed,due,due_time,
+                reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
+         FROM tasks WHERE user_id=? AND deleted_at IS NULL ORDER BY created_at",
+    )
+    .bind(&user_id)
+    .fetch_all(&state.pool)
+    .await?;
+    let projects = sqlx::query_as::<_, Project>(
+        "SELECT id,name,goal,status,start_date,due,next_action_task_id,created_at,updated_at,version
+         FROM projects WHERE user_id=? AND deleted_at IS NULL ORDER BY created_at",
+    ).bind(&user_id).fetch_all(&state.pool).await?;
+    let calendar_events = sqlx::query_as::<_, CalendarEvent>(
+        "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version
+         FROM calendar_events WHERE user_id=? AND deleted_at IS NULL ORDER BY start_at",
+    ).bind(&user_id).fetch_all(&state.pool).await?;
+    let cursor =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(cursor) FROM sync_events WHERE user_id=?")
+            .bind(&user_id)
+            .fetch_one(&state.pool)
+            .await?
+            .unwrap_or(0);
+    Ok(Json(SyncSnapshot {
+        cursor,
+        tasks,
+        projects,
+        calendar_events,
+    }))
 }
 
 async fn not_found() -> impl IntoResponse {
-    (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "route_not_found", "service": SERVICE_NAME })))
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({ "error": "route_not_found", "service": SERVICE_NAME })),
+    )
 }
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
     };
     #[cfg(unix)]
     let terminate = async {
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler").recv().await;
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
     };
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
