@@ -1,0 +1,23 @@
+[Unit]
+Description=Oris API Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oris
+Group=oris
+WorkingDirectory=/opt/oris
+EnvironmentFile=/etc/oris.env
+ExecStart=/opt/oris/bin/oris-server
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/oris
+
+[Install]
+WantedBy=multi-user.target
+

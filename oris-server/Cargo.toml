@@ -1,0 +1,16 @@
+[package]
+name = "oris-server"
+version = "0.1.0"
+edition = "2021"
+description = "Oris foundation API server"
+license = "UNLICENSED"
+
+[dependencies]
+axum = "0.8"
+oris-core = { path = "../oris-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
