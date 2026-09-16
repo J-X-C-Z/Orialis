@@ -216,7 +216,8 @@ Content-Type: application/json
 ```
 
 成功返回 `201 Created` 和任务对象。`title` 为空或只有空白字符返回
-`400 Bad Request`；只提供 `dueTime` 而没有 `due` 也返回 `400`。
+`400 Bad Request`；只提供 `dueTime` 而没有 `due` 也返回 `400`。`due` 使用
+`YYYY-MM-DD`，`dueTime` 使用本地时间 `HH:MM`，格式不合法返回 `400`。
 
 ### 4.4 更新任务
 
@@ -236,9 +237,9 @@ Content-Type: application/json
 ```
 
 `baseVersion` 必须等于服务端当前版本；成功后版本递增并返回更新后的任务。
-版本不一致返回 `409 Conflict`。当前 PATCH 是部分更新，但由于使用普通
-`Option` 反序列化，省略字段和显式 `null` 无法稳定区分；客户端暂不应
-依赖用 `null` 清空可选字段。
+版本不一致返回 `409 Conflict`。当前 PATCH 是部分更新：省略字段表示保持
+原值，显式 `null` 可清空可选字段；对不可为空字段传入 `null` 返回
+`400 Bad Request`。
 
 ### 4.5 删除任务
 
@@ -390,7 +391,8 @@ Content-Type: application/json
 }
 ```
 
-`title` 不能为空，`endAt` 不能早于 `startAt`，否则返回 `400 Bad Request`。
+`title` 不能为空，`startAt` 和 `endAt` 必须是带时区的 RFC 3339 时间戳，且
+`endAt` 不能早于 `startAt`，否则返回 `400 Bad Request`。
 成功返回 `201 Created`。
 
 ### 6.4 更新和删除日程
@@ -405,8 +407,8 @@ PATCH 支持日程创建字段，并要求 `baseVersion`。更新时间范围时
 `endAt` 仍不能早于新的 `startAt`。版本冲突返回 `409 Conflict`；DELETE
 返回 `204 No Content` 并写入删除同步事件。
 
-当前实现按输入字符串比较 `startAt` 和 `endAt`，客户端应发送带时区且
-格式统一的 RFC 3339 值，避免不同表示法造成比较歧义。
+服务端按实际时间点比较 `startAt` 和 `endAt`，因此不同 UTC 偏移的合法表示
+也能正确判断先后；响应暂时保留客户端提交的 RFC 3339 表示。
 
 ## 7. 增量同步事件
 
@@ -597,12 +599,12 @@ JSON 解析失败等由 Axum 提取器直接生成的错误，当前不一定符
 
 当前 API 可以支撑第一轮服务端基础，但以下事项不应被误认为已完成：
 
-- PATCH 尚不能可靠区分“省略字段”和“显式清空字段”。
-- 日期和时间输入尚未做完整格式校验。
+- 任务、项目、里程碑和日程的 PATCH 已区分字段省略与显式 `null`。
+- 任务/项目日期、任务截止时间和日程 RFC3339 时间戳已做格式校验。
 - 任务 `recurrence` 当前只作为字符串保存，没有循环任务执行器。
 - 里程碑通过项目嵌套路由提供 CRUD、乐观并发控制和删除墓碑事件。
 - `sync/snapshot` 当前未包含独立的生成时间字段；客户端应以返回的 `cursor`
   作为恢复边界。
 - 当前没有分页和时间范围查询，列表接口不适合大数据量长期使用。
 
-建议下一步顺序：补齐严格字段校验、列表分页/筛选和项目进度摘要。
+建议下一步顺序：列表分页/筛选和项目进度摘要。

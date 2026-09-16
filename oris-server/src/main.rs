@@ -5,13 +5,13 @@ use axum::{
     routing::{get, patch, post},
     Json, Router,
 };
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{DateTime, Duration, FixedOffset, NaiveDate, NaiveTime, Utc};
 use oris_core::{metadata, ServiceMetadata, API_VERSION, SERVICE_NAME};
 use scrypt::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Scrypt,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, de::Error as DeError, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
@@ -179,16 +179,26 @@ struct TaskInput {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TaskPatch {
-    title: Option<String>,
-    notes: Option<String>,
-    important: Option<bool>,
-    urgent: Option<bool>,
-    completed: Option<bool>,
-    due: Option<String>,
-    due_time: Option<String>,
-    reminder_minutes: Option<i64>,
-    project_id: Option<String>,
-    recurrence: Option<Value>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    title: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    notes: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    important: Option<PatchValue<bool>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    urgent: Option<PatchValue<bool>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    completed: Option<PatchValue<bool>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    due: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    due_time: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    reminder_minutes: Option<PatchValue<i64>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    project_id: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    recurrence: Option<PatchValue<Value>>,
     base_version: i64,
 }
 
@@ -221,12 +231,18 @@ struct ProjectInput {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProjectPatch {
-    name: Option<String>,
-    goal: Option<String>,
-    status: Option<String>,
-    start_date: Option<String>,
-    due: Option<String>,
-    next_action_task_id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    name: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    goal: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    status: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    start_date: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    due: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    next_action_task_id: Option<PatchValue<String>>,
     base_version: i64,
 }
 
@@ -261,13 +277,20 @@ struct CalendarEventInput {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CalendarEventPatch {
-    title: Option<String>,
-    description: Option<String>,
-    location: Option<String>,
-    start_at: Option<String>,
-    end_at: Option<String>,
-    all_day: Option<bool>,
-    reminder_minutes: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    title: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    description: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    location: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    start_at: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    end_at: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    all_day: Option<PatchValue<bool>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    reminder_minutes: Option<PatchValue<i64>>,
     base_version: i64,
 }
 
@@ -337,11 +360,36 @@ struct MilestoneInput {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MilestonePatch {
-    title: Option<String>,
-    due: Option<Option<String>>,
-    completed: Option<bool>,
-    position: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    title: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    due: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    completed: Option<PatchValue<bool>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    position: Option<PatchValue<i64>>,
     base_version: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PatchValue<T> {
+    Value(T),
+    Null(()),
+}
+
+fn deserialize_patch<'de, D, T>(deserializer: D) -> Result<Option<PatchValue<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    let raw = Value::deserialize(deserializer)?;
+    if raw.is_null() {
+        return Ok(Some(PatchValue::Null(())));
+    }
+    T::deserialize(raw)
+        .map(|value| Some(PatchValue::Value(value)))
+        .map_err(D::Error::custom)
 }
 
 #[tokio::main]
@@ -753,6 +801,9 @@ async fn create_task(
     if input.due.is_none() && input.due_time.is_some() {
         return Err(AppError::BadRequest("due_time requires due".into()));
     }
+    validate_date("due", input.due.as_deref())?;
+    validate_time("dueTime", input.due_time.as_deref())?;
+    validate_reminder(input.reminder_minutes)?;
     let id = new_id();
     let timestamp = now();
     let mut tx = state.pool.begin().await?;
@@ -806,30 +857,42 @@ async fn update_task(
     if current.version != input.base_version {
         return Err(AppError::Conflict("task version changed".into()));
     }
-    let due = input.due.clone().or(current.due.clone());
-    let due_time = input.due_time.clone().or(current.due_time.clone());
+    let title = resolve_required(input.title, current.title, "title")?;
+    let notes = resolve_nullable(input.notes, current.notes);
+    let important = resolve_required(input.important, current.important, "important")?;
+    let urgent = resolve_required(input.urgent, current.urgent, "urgent")?;
+    let completed = resolve_required(input.completed, current.completed, "completed")?;
+    let due = resolve_nullable(input.due, current.due);
+    let due_time = resolve_nullable(input.due_time, current.due_time);
+    let reminder_minutes = resolve_nullable(input.reminder_minutes, current.reminder_minutes);
+    let project_id = resolve_nullable(input.project_id, current.project_id);
+    let recurrence = match input.recurrence {
+        None => current.recurrence_rule,
+        Some(PatchValue::Value(value)) => Some(value.to_string()),
+        Some(PatchValue::Null(())) => None,
+    };
+    validate_date("due", due.as_deref())?;
+    validate_time("dueTime", due_time.as_deref())?;
+    validate_reminder(reminder_minutes)?;
     if due.is_none() && due_time.is_some() {
         return Err(AppError::BadRequest("due_time requires due".into()));
     }
     let mut tx = state.pool.begin().await?;
     let result = sqlx::query(
-        "UPDATE tasks SET title=COALESCE(?,title),notes=COALESCE(?,notes),
-         important=COALESCE(?,important),urgent=COALESCE(?,urgent),
-         completed=COALESCE(?,completed),due=?,due_time=?,
-         reminder_minutes=COALESCE(?,reminder_minutes),project_id=COALESCE(?,project_id),
-         recurrence_rule=COALESCE(?,recurrence_rule),updated_at=?,version=version+1
+        "UPDATE tasks SET title=?,notes=?,important=?,urgent=?,completed=?,due=?,due_time=?,
+         reminder_minutes=?,project_id=?,recurrence_rule=?,updated_at=?,version=version+1
          WHERE user_id=? AND id=? AND version=?",
     )
-    .bind(input.title)
-    .bind(input.notes)
-    .bind(input.important)
-    .bind(input.urgent)
-    .bind(input.completed)
+    .bind(title.trim())
+    .bind(notes)
+    .bind(important)
+    .bind(urgent)
+    .bind(completed)
     .bind(due)
     .bind(due_time)
-    .bind(input.reminder_minutes)
-    .bind(input.project_id)
-    .bind(input.recurrence.map(|value| value.to_string()))
+    .bind(reminder_minutes)
+    .bind(project_id)
+    .bind(recurrence)
     .bind(now())
     .bind(&user_id)
     .bind(&id)
@@ -923,6 +986,8 @@ async fn create_project(
     if input.name.trim().is_empty() {
         return Err(AppError::BadRequest("name is required".into()));
     }
+    validate_date("startDate", input.start_date.as_deref())?;
+    validate_date("due", input.due.as_deref())?;
     let id = new_id();
     let timestamp = now();
     let mut tx = state.pool.begin().await?;
@@ -956,9 +1021,18 @@ async fn update_project(
     if current.version != input.base_version {
         return Err(AppError::Conflict("project version changed".into()));
     }
+    let name = resolve_required(input.name, current.name, "name")?;
+    let goal = resolve_nullable(input.goal, current.goal);
+    let status = resolve_required(input.status, current.status, "status")?;
+    let start_date = resolve_nullable(input.start_date, current.start_date);
+    let due = resolve_nullable(input.due, current.due);
+    let next_action_task_id =
+        resolve_nullable(input.next_action_task_id, current.next_action_task_id);
+    validate_date("startDate", start_date.as_deref())?;
+    validate_date("due", due.as_deref())?;
     let mut tx = state.pool.begin().await?;
-    let result = sqlx::query("UPDATE projects SET name=COALESCE(?,name),goal=COALESCE(?,goal),status=COALESCE(?,status),start_date=COALESCE(?,start_date),due=COALESCE(?,due),next_action_task_id=COALESCE(?,next_action_task_id),updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
-        .bind(input.name).bind(input.goal).bind(input.status).bind(input.start_date).bind(input.due).bind(input.next_action_task_id).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&mut *tx).await?;
+    let result = sqlx::query("UPDATE projects SET name=?,goal=?,status=?,start_date=?,due=?,next_action_task_id=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
+        .bind(name.trim()).bind(goal).bind(status).bind(start_date).bind(due).bind(next_action_task_id).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&mut *tx).await?;
     if result.rows_affected() != 1 {
         return Err(AppError::Conflict("project version changed".into()));
     }
@@ -1044,6 +1118,66 @@ async fn delete_project(
     Ok(StatusCode::NO_CONTENT)
 }
 
+fn resolve_required<T>(
+    value: Option<PatchValue<T>>,
+    current: T,
+    field: &str,
+) -> Result<T, AppError> {
+    match value {
+        None => Ok(current),
+        Some(PatchValue::Value(value)) => Ok(value),
+        Some(PatchValue::Null(())) => Err(AppError::BadRequest(format!("{field} cannot be null"))),
+    }
+}
+
+fn resolve_nullable<T>(value: Option<PatchValue<T>>, current: Option<T>) -> Option<T> {
+    match value {
+        None => current,
+        Some(PatchValue::Value(value)) => Some(value),
+        Some(PatchValue::Null(())) => None,
+    }
+}
+
+fn validate_date(field: &str, value: Option<&str>) -> Result<(), AppError> {
+    if let Some(value) = value {
+        NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .map_err(|_| AppError::BadRequest(format!("{field} must be YYYY-MM-DD")))?;
+    }
+    Ok(())
+}
+
+fn validate_time(field: &str, value: Option<&str>) -> Result<(), AppError> {
+    if let Some(value) = value {
+        NaiveTime::parse_from_str(value, "%H:%M")
+            .map_err(|_| AppError::BadRequest(format!("{field} must be HH:MM")))?;
+    }
+    Ok(())
+}
+
+fn validate_reminder(value: Option<i64>) -> Result<(), AppError> {
+    if value.is_some_and(|minutes| minutes < 0) {
+        return Err(AppError::BadRequest(
+            "reminderMinutes must be non-negative".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_calendar_range(start: &str, end: &str) -> Result<(), AppError> {
+    let start = start
+        .parse::<DateTime<FixedOffset>>()
+        .map_err(|_| AppError::BadRequest("startAt must be a valid RFC 3339 timestamp".into()))?;
+    let end = end
+        .parse::<DateTime<FixedOffset>>()
+        .map_err(|_| AppError::BadRequest("endAt must be a valid RFC 3339 timestamp".into()))?;
+    if end < start {
+        return Err(AppError::BadRequest(
+            "endAt must not precede startAt".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_milestone(title: &str, due: Option<&str>, position: i64) -> Result<(), AppError> {
     let length = title.trim().chars().count();
     if !(1..=200).contains(&length) {
@@ -1051,10 +1185,7 @@ fn validate_milestone(title: &str, due: Option<&str>, position: i64) -> Result<(
             "milestone title must be 1-200 characters".into(),
         ));
     }
-    if let Some(due) = due {
-        NaiveDate::parse_from_str(due, "%Y-%m-%d")
-            .map_err(|_| AppError::BadRequest("milestone due must be YYYY-MM-DD".into()))?;
-    }
+    validate_date("milestone due", due)?;
     if position < 0 {
         return Err(AppError::BadRequest(
             "milestone position must be non-negative".into(),
@@ -1210,10 +1341,10 @@ async fn update_milestone(
     if current.version != input.base_version {
         return Err(AppError::Conflict("milestone version changed".into()));
     }
-    let title = input.title.unwrap_or(current.title);
-    let due = input.due.unwrap_or(current.due);
-    let completed = input.completed.unwrap_or(current.completed);
-    let position = input.position.unwrap_or(current.position);
+    let title = resolve_required(input.title, current.title, "title")?;
+    let due = resolve_nullable(input.due, current.due);
+    let completed = resolve_required(input.completed, current.completed, "completed")?;
+    let position = resolve_required(input.position, current.position, "position")?;
     validate_milestone(&title, due.as_deref(), position)?;
     let completed_at = match (current.completed, completed) {
         (false, true) => Some(now()),
@@ -1326,11 +1457,8 @@ async fn create_event(
     if input.title.trim().is_empty() {
         return Err(AppError::BadRequest("title is required".into()));
     }
-    if input.end_at < input.start_at {
-        return Err(AppError::BadRequest(
-            "end_at must not precede start_at".into(),
-        ));
-    }
+    validate_calendar_range(&input.start_at, &input.end_at)?;
+    validate_reminder(input.reminder_minutes)?;
     let id = new_id();
     let timestamp = now();
     let mut tx = state.pool.begin().await?;
@@ -1364,16 +1492,18 @@ async fn update_event(
     if current.version != input.base_version {
         return Err(AppError::Conflict("calendar event version changed".into()));
     }
-    let start_at = input.start_at.unwrap_or(current.start_at);
-    let end_at = input.end_at.unwrap_or(current.end_at);
-    if end_at < start_at {
-        return Err(AppError::BadRequest(
-            "end_at must not precede start_at".into(),
-        ));
-    }
+    let title = resolve_required(input.title, current.title, "title")?;
+    let description = resolve_nullable(input.description, current.description);
+    let location = resolve_nullable(input.location, current.location);
+    let start_at = resolve_required(input.start_at, current.start_at, "startAt")?;
+    let end_at = resolve_required(input.end_at, current.end_at, "endAt")?;
+    let all_day = resolve_required(input.all_day, current.all_day, "allDay")?;
+    let reminder_minutes = resolve_nullable(input.reminder_minutes, current.reminder_minutes);
+    validate_calendar_range(&start_at, &end_at)?;
+    validate_reminder(reminder_minutes)?;
     let mut tx = state.pool.begin().await?;
-    let result = sqlx::query("UPDATE calendar_events SET title=COALESCE(?,title),description=COALESCE(?,description),location=COALESCE(?,location),start_at=?,end_at=?,all_day=COALESCE(?,all_day),reminder_minutes=COALESCE(?,reminder_minutes),updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
-        .bind(input.title).bind(input.description).bind(input.location).bind(start_at).bind(end_at).bind(input.all_day).bind(input.reminder_minutes).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&mut *tx).await?;
+    let result = sqlx::query("UPDATE calendar_events SET title=?,description=?,location=?,start_at=?,end_at=?,all_day=?,reminder_minutes=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
+        .bind(title.trim()).bind(description).bind(location).bind(start_at).bind(end_at).bind(all_day).bind(reminder_minutes).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&mut *tx).await?;
     if result.rows_affected() != 1 {
         return Err(AppError::Conflict("calendar event version changed".into()));
     }

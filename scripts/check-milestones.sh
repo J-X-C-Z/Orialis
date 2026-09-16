@@ -166,6 +166,16 @@ assert_json_arg title "$UPDATED_TITLE" \
     '.title == $title and .completed == true and .completedAt != null and .version == 2' \
     'milestone update applied and completion timestamp generated'
 
+CLEAR_DUE_BODY='{"due":null,"baseVersion":2}'
+request PATCH "$BASE_URL/api/v1/projects/$PROJECT_ID/milestones/$MILESTONE_ID" "$CLEAR_DUE_BODY" \
+    "milestone-clear-due-$$-${RANDOM}"
+expect_status 200 'cleared milestone deadline explicitly'
+assert_json '.due == null and .version == 3' 'explicit null clears milestone deadline'
+
+INVALID_DUE_BODY='{"due":"2099-02-30","baseVersion":3}'
+request PATCH "$BASE_URL/api/v1/projects/$PROJECT_ID/milestones/$MILESTONE_ID" "$INVALID_DUE_BODY"
+expect_status 400 'invalid milestone deadline rejected'
+
 STALE_BODY="$(json_body --arg title "$MILESTONE_TITLE stale" \
     '{title: $title, baseVersion: 1}')"
 request PATCH "$BASE_URL/api/v1/projects/$PROJECT_ID/milestones/$MILESTONE_ID" "$STALE_BODY"
