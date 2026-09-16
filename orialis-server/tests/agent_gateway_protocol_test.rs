@@ -51,6 +51,7 @@ fn hermes_legacy_message_shape_still_round_trips() {
         message_id: "msg-1".into(),
         conversation_id: "conv-1".into(),
         content: "hello Hermes".into(),
+        attachments: vec![],
     };
     let wire = serde_json::to_string(&original).unwrap();
 

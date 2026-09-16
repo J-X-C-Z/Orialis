@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/protocol/agent-gateway/event-v1.schema.json",
+  "title": "Orialis Agent Gateway event frames v1",
+  "description": "Both the generic v0.3 event envelope and the named flat v1.x event frames. Baseline and capability frames are defined separately.",
+  "oneOf": [
+    {"$ref": "#/$defs/generic_event"},
+    {"$ref": "#/$defs/flat_event"}
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "agent.typing",
+        "agent.start",
+        "agent.delta",
+        "agent.complete",
+        "agent.error",
+        "agent.status",
+        "tool.started",
+        "tool.progress",
+        "tool.completed",
+        "tool.failed",
+        "clarify.request",
+        "clarify.resolve",
+        "clarify.cancel",
+        "clarify.requested",
+        "clarify.responded",
+        "approval.request",
+        "approval.resolve",
+        "approval.cancel",
+        "approval.requested",
+        "approval.responded",
+        "session.start",
+        "session.update",
+        "session.complete",
+        "session.cancel",
+        "session.error",
+        "session.started",
+        "session.resumed",
+        "session.ended",
+        "command.requested",
+        "command.accepted",
+        "command.progress",
+        "command.completed",
+        "command.failed",
+        "command.cancelled",
+        "artifact.started",
+        "artifact.progress",
+        "artifact.completed",
+        "artifact.created",
+        "artifact.ready",
+        "artifact.failed"
+      ]
+    },
+    "generic_event": {
+      "type": "object",
+      "required": ["version", "type", "event_id", "event_type", "sequence", "occurred_at", "payload"],
+      "properties": {
+        "version": {"const": 1},
+        "type": {"const": "event"},
+        "event_id": {"$ref": "#/$defs/id"},
+        "event_type": {"$ref": "#/$defs/event_type"},
+        "sequence": {"type": "integer", "minimum": 1},
+        "occurred_at": {"type": "string", "format": "date-time"},
+        "session_id": {"$ref": "#/$defs/id"},
+        "correlation_id": {"$ref": "#/$defs/id"},
+        "causation_id": {"$ref": "#/$defs/id"},
+        "idempotency_key": {"$ref": "#/$defs/id"},
+        "payload": {"type": "object"}
+      }
+    },
+    "flat_event": {
+      "type": "object",
+      "required": ["version", "type", "event_id", "seq", "session_id"],
+      "properties": {
+        "version": {"const": 1},
+        "type": {"$ref": "#/$defs/event_type"},
+        "event_id": {"$ref": "#/$defs/id"},
+        "seq": {"type": "integer", "minimum": 1},
+        "session_id": {"$ref": "#/$defs/id"},
+        "run_id": {"$ref": "#/$defs/id"},
+        "request_id": {"$ref": "#/$defs/id"},
+        "conversation_id": {"$ref": "#/$defs/id"},
+        "reply_to": {"$ref": "#/$defs/id"},
+        "stream_id": {"$ref": "#/$defs/id"},
+        "tool_call_id": {"$ref": "#/$defs/id"},
+        "action": {"type": "string", "minLength": 1},
+        "command": {"type": "string", "minLength": 1},
+        "status": {"type": "string", "minLength": 1},
+        "state": {"type": "string", "minLength": 1},
+        "typing": {"type": "boolean"},
+        "question": {"type": "string", "minLength": 1},
+        "choices": {"type": "array", "maxItems": 32},
+        "multi_select": {"type": "boolean"},
+        "answer": {},
+        "response": {"type": "string", "minLength": 1},
+        "decision": {"enum": ["once", "session", "always", "deny", "timeout", "cancelled"]},
+        "reason": {"type": "string"},
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string"},
+        "delta": {"type": "string", "maxLength": 262144},
+        "progress": {},
+        "input": {},
+        "output": {},
+        "update": {"type": "object"},
+        "result": {},
+        "timeout_ms": {"type": "integer", "minimum": 0},
+        "artifact_id": {"$ref": "#/$defs/id"},
+        "artifact": {"$ref": "#/$defs/artifact"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"type": "string", "minLength": 1},
+        "name": {"type": "string"},
+        "mime_type": {"type": "string"},
+        "size": {"type": "integer", "minimum": 0},
+        "uri": {"type": "string"},
+        "metadata": {}
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "type": "command.request",
+  "request_id": "cmd_001",
+  "conversation_id": "conv_001",
+  "command": "project.summary",
+  "args": "project_id=project_001",
+  "session_key": "sess_001"
+}

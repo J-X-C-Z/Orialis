@@ -117,6 +117,64 @@ pub fn mobile_sync_change_hint(cursor: i64, entity: Option<&str>) -> MobileEnvel
     mobile_envelope(MOBILE_SYNC_CHANGE_HINT, None, payload)
 }
 
+/// Attachment metadata carried on the Agent Gateway WebSocket.
+///
+/// The file bytes are uploaded over HTTP; WebSocket frames only carry a
+/// server-issued ID and canonical metadata.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatewayAttachment {
+    pub id: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size: i64,
+    pub download_url: String,
+}
+
+/// Decisions are deliberately transport-level values.  The server does not
+/// decide what a Hermes tool is allowed to do; it only carries the decision
+/// and prevents the same approval request from being resolved twice.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ApprovalDecision {
+    #[serde(rename = "once")]
+    Once,
+    #[serde(rename = "session")]
+    Session,
+    #[serde(rename = "always")]
+    Always,
+    #[serde(rename = "deny")]
+    Deny,
+    #[serde(rename = "timeout")]
+    Timeout,
+    #[serde(rename = "cancelled", alias = "canceled")]
+    Cancelled,
+    #[serde(rename = "approved")]
+    Approved,
+    #[serde(rename = "denied")]
+    Denied,
+    #[serde(rename = "expired")]
+    Expired,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatewayArtifact {
+    pub id: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum GatewayMessage {
@@ -140,6 +198,8 @@ pub enum GatewayMessage {
         message_id: String,
         conversation_id: String,
         content: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<GatewayAttachment>,
     },
     #[serde(rename = "message.reply")]
     MessageReply {
@@ -148,6 +208,8 @@ pub enum GatewayMessage {
         reply_to: String,
         conversation_id: String,
         content: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<GatewayAttachment>,
     },
     #[serde(rename = "message.ack")]
     MessageAck {
@@ -162,6 +224,307 @@ pub enum GatewayMessage {
         message: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         reply_to: Option<String>,
+    },
+    /// Generic v0.3 event envelope. Named event variants below provide the
+    /// flat v1.x transport while this form remains schema-compatible.
+    #[serde(rename = "event")]
+    Event {
+        version: u32,
+        event_id: String,
+        event_type: String,
+        sequence: u64,
+        occurred_at: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        correlation_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        causation_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        idempotency_key: Option<String>,
+        payload: Value,
+    },
+    #[serde(rename = "capabilities.hello")]
+    CapabilitiesHello {
+        version: u32,
+        capabilities: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume_from: Option<u64>,
+    },
+    #[serde(rename = "capabilities.ack")]
+    CapabilitiesAck {
+        version: u32,
+        capabilities: Vec<String>,
+        resume_from: u64,
+        next_seq: u64,
+    },
+    #[serde(rename = "agent.ack")]
+    AgentAck {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        status: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_seq: Option<u64>,
+    },
+    #[serde(rename = "agent.typing")]
+    AgentTyping {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
+        typing: bool,
+    },
+    #[serde(rename = "agent.start", alias = "agent.started")]
+    AgentStart {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        run_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conversation_id: Option<String>,
+    },
+    #[serde(rename = "agent.delta")]
+    AgentDelta {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        run_id: String,
+        delta: String,
+    },
+    #[serde(rename = "agent.complete", alias = "agent.completed")]
+    AgentComplete {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        run_id: String,
+        content: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        artifacts: Vec<GatewayArtifact>,
+    },
+    #[serde(rename = "agent.error", alias = "agent.failed")]
+    AgentError {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        run_id: String,
+        code: String,
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retryable: Option<bool>,
+    },
+    #[serde(rename = "agent.status")]
+    AgentStatus {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        status: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    #[serde(rename = "tool.started")]
+    ToolStarted {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        tool_call_id: String,
+        tool_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<Value>,
+    },
+    #[serde(rename = "tool.progress")]
+    ToolProgress {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        tool_call_id: String,
+        progress: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    #[serde(rename = "tool.completed")]
+    ToolCompleted {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        tool_call_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<Value>,
+    },
+    #[serde(rename = "tool.failed")]
+    ToolFailed {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        tool_call_id: String,
+        code: String,
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retryable: Option<bool>,
+    },
+    #[serde(rename = "clarify.request", alias = "clarify.requested")]
+    ClarifyRequest {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        request_id: String,
+        question: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        options: Vec<Value>,
+    },
+    #[serde(rename = "clarify.resolve", alias = "clarify.responded")]
+    ClarifyResolve {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        request_id: String,
+        answer: Value,
+    },
+    #[serde(rename = "clarify.cancel")]
+    ClarifyCancel {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        request_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    #[serde(rename = "approval.request", alias = "approval.requested")]
+    ApprovalRequest {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        request_id: String,
+        action: String,
+        #[serde(default)]
+        details: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_ms: Option<u64>,
+    },
+    #[serde(rename = "approval.resolve", alias = "approval.responded")]
+    ApprovalResolve {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        request_id: String,
+        decision: ApprovalDecision,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    #[serde(
+        rename = "session.start",
+        alias = "session.started",
+        alias = "session.created"
+    )]
+    SessionStart {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conversation_id: Option<String>,
+    },
+    #[serde(rename = "session.update")]
+    SessionUpdate {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        update: Value,
+    },
+    #[serde(rename = "session.complete", alias = "session.completed")]
+    SessionComplete {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        result: Option<Value>,
+    },
+    #[serde(rename = "session.resumed")]
+    SessionResumed {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        last_sequence: u64,
+    },
+    #[serde(rename = "session.ended")]
+    SessionEnded {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        reason: String,
+    },
+    #[serde(rename = "session.cancel", alias = "session.cancelled")]
+    SessionCancel {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    #[serde(rename = "session.error", alias = "session.failed")]
+    SessionError {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        code: String,
+        message: String,
+    },
+    #[serde(rename = "artifact.started", alias = "artifact.created")]
+    ArtifactStarted {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        artifact: GatewayArtifact,
+    },
+    #[serde(rename = "artifact.progress")]
+    ArtifactProgress {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        artifact_id: String,
+        progress: Value,
+    },
+    #[serde(rename = "artifact.completed", alias = "artifact.ready")]
+    ArtifactCompleted {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        artifact: GatewayArtifact,
+    },
+    #[serde(rename = "artifact.failed")]
+    ArtifactFailed {
+        version: u32,
+        event_id: String,
+        seq: u64,
+        session_id: String,
+        artifact_id: String,
+        code: String,
+        message: String,
     },
 }
 
@@ -184,6 +547,210 @@ impl GatewayMessage {
             } => Some(reply_to),
             _ => None,
         }
+    }
+
+    pub fn event_metadata(&self) -> Option<(&str, u64, &str)> {
+        match self {
+            Self::Event {
+                event_id,
+                sequence,
+                session_id,
+                ..
+            } => Some((event_id, *sequence, session_id.as_deref().unwrap_or(""))),
+            Self::AgentTyping {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::AgentStart {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::AgentDelta {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::AgentComplete {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::AgentError {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::AgentStatus {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ToolStarted {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ToolProgress {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ToolCompleted {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ToolFailed {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ClarifyRequest {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ClarifyResolve {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ClarifyCancel {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ApprovalRequest {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ApprovalResolve {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::SessionStart {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::SessionUpdate {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::SessionComplete {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::SessionResumed {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::SessionEnded {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::SessionCancel {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::SessionError {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ArtifactStarted {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ArtifactProgress {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ArtifactCompleted {
+                event_id,
+                seq,
+                session_id,
+                ..
+            }
+            | Self::ArtifactFailed {
+                event_id,
+                seq,
+                session_id,
+                ..
+            } => Some((event_id, *seq, session_id)),
+            _ => None,
+        }
+    }
+
+    pub fn with_seq(mut self, seq: u64) -> Self {
+        match &mut self {
+            Self::Event {
+                sequence: value, ..
+            } => *value = seq,
+            Self::AgentTyping { seq: value, .. }
+            | Self::AgentStart { seq: value, .. }
+            | Self::AgentDelta { seq: value, .. }
+            | Self::AgentComplete { seq: value, .. }
+            | Self::AgentError { seq: value, .. }
+            | Self::AgentStatus { seq: value, .. }
+            | Self::ToolStarted { seq: value, .. }
+            | Self::ToolProgress { seq: value, .. }
+            | Self::ToolCompleted { seq: value, .. }
+            | Self::ToolFailed { seq: value, .. }
+            | Self::ClarifyRequest { seq: value, .. }
+            | Self::ClarifyResolve { seq: value, .. }
+            | Self::ClarifyCancel { seq: value, .. }
+            | Self::ApprovalRequest { seq: value, .. }
+            | Self::ApprovalResolve { seq: value, .. }
+            | Self::SessionStart { seq: value, .. }
+            | Self::SessionUpdate { seq: value, .. }
+            | Self::SessionComplete { seq: value, .. }
+            | Self::SessionResumed { seq: value, .. }
+            | Self::SessionEnded { seq: value, .. }
+            | Self::SessionCancel { seq: value, .. }
+            | Self::SessionError { seq: value, .. }
+            | Self::ArtifactStarted { seq: value, .. }
+            | Self::ArtifactProgress { seq: value, .. }
+            | Self::ArtifactCompleted { seq: value, .. }
+            | Self::ArtifactFailed { seq: value, .. } => *value = seq,
+            _ => {}
+        }
+        self
     }
 }
 
@@ -245,6 +812,50 @@ pub fn parse_message(input: &str) -> Result<GatewayMessage, ProtocolError> {
             | "message.reply"
             | "message.ack"
             | "error"
+            | "event"
+            | "capabilities.hello"
+            | "capabilities.ack"
+            | "agent.ack"
+            | "agent.typing"
+            | "agent.start"
+            | "agent.started"
+            | "agent.delta"
+            | "agent.complete"
+            | "agent.completed"
+            | "agent.error"
+            | "agent.failed"
+            | "agent.status"
+            | "tool.started"
+            | "tool.progress"
+            | "tool.completed"
+            | "tool.failed"
+            | "clarify.request"
+            | "clarify.requested"
+            | "clarify.responded"
+            | "clarify.resolve"
+            | "clarify.cancel"
+            | "approval.request"
+            | "approval.requested"
+            | "approval.responded"
+            | "approval.resolve"
+            | "session.start"
+            | "session.started"
+            | "session.created"
+            | "session.update"
+            | "session.complete"
+            | "session.completed"
+            | "session.resumed"
+            | "session.ended"
+            | "session.cancel"
+            | "session.cancelled"
+            | "session.error"
+            | "session.failed"
+            | "artifact.started"
+            | "artifact.created"
+            | "artifact.progress"
+            | "artifact.completed"
+            | "artifact.ready"
+            | "artifact.failed"
     ) {
         return Err(ProtocolError::UnknownType(message_type.to_owned()));
     }
@@ -260,6 +871,53 @@ fn validate_text(value: &str) -> Result<(), ProtocolError> {
     } else {
         Ok(())
     }
+}
+
+fn validate_attachments(attachments: &[GatewayAttachment]) -> Result<(), ProtocolError> {
+    if attachments.len() > 16 {
+        return Err(ProtocolError::InvalidMessage);
+    }
+    for attachment in attachments {
+        for value in [
+            &attachment.id,
+            &attachment.name,
+            &attachment.mime_type,
+            &attachment.download_url,
+        ] {
+            validate_text(value)?;
+        }
+        if attachment.name.chars().count() > 180 || attachment.size < 1 {
+            return Err(ProtocolError::InvalidMessage);
+        }
+        let mime = attachment.mime_type.to_ascii_lowercase();
+        if mime.starts_with("audio/") || mime.starts_with("video/") {
+            return Err(ProtocolError::InvalidMessage);
+        }
+        if !(mime.starts_with("image/")
+            || mime.starts_with("text/")
+            || matches!(
+                mime.as_str(),
+                "application/pdf"
+                    | "application/json"
+                    | "application/xml"
+                    | "application/octet-stream"
+                    | "application/zip"
+            ))
+        {
+            return Err(ProtocolError::InvalidMessage);
+        }
+    }
+    Ok(())
+}
+
+fn validate_message_text_or_attachments(
+    content: &str,
+    attachments: &[GatewayAttachment],
+) -> Result<(), ProtocolError> {
+    if content.trim().is_empty() && attachments.is_empty() {
+        return Err(ProtocolError::InvalidMessage);
+    }
+    validate_attachments(attachments)
 }
 
 fn validate_message(message: &GatewayMessage) -> Result<(), ProtocolError> {
@@ -282,22 +940,26 @@ fn validate_message(message: &GatewayMessage) -> Result<(), ProtocolError> {
             message_id,
             conversation_id,
             content,
+            attachments,
             ..
         } => {
-            for value in [message_id, conversation_id, content] {
+            for value in [message_id, conversation_id] {
                 validate_text(value)?;
             }
+            validate_message_text_or_attachments(content, attachments)?;
         }
         GatewayMessage::MessageReply {
             message_id,
             reply_to,
             conversation_id,
             content,
+            attachments,
             ..
         } => {
-            for value in [message_id, reply_to, conversation_id, content] {
+            for value in [message_id, reply_to, conversation_id] {
                 validate_text(value)?;
             }
+            validate_message_text_or_attachments(content, attachments)?;
         }
         GatewayMessage::MessageAck {
             message_id, status, ..
@@ -317,9 +979,289 @@ fn validate_message(message: &GatewayMessage) -> Result<(), ProtocolError> {
                 validate_text(reply_to)?;
             }
         }
+        GatewayMessage::CapabilitiesHello { capabilities, .. } => {
+            validate_capabilities(capabilities)?;
+        }
+        GatewayMessage::CapabilitiesAck { capabilities, .. } => {
+            validate_capabilities(capabilities)?;
+        }
+        GatewayMessage::AgentAck {
+            event_id,
+            status,
+            seq,
+            expected_seq,
+            ..
+        } => {
+            validate_text(event_id)?;
+            validate_text(status)?;
+            if *seq == 0 || expected_seq.is_some_and(|value| value == 0) {
+                return Err(ProtocolError::InvalidMessage);
+            }
+        }
+        message if message.event_metadata().is_some() => validate_event(message)?,
         GatewayMessage::HelloAck { .. }
         | GatewayMessage::Ping { .. }
         | GatewayMessage::Pong { .. } => {}
+        // Capability and delivery control messages are structurally validated
+        // by serde and do not carry user-authored text constraints here.
+        _ => {}
+    }
+    Ok(())
+}
+
+fn validate_capabilities(capabilities: &[String]) -> Result<(), ProtocolError> {
+    if capabilities.len() > 128 {
+        return Err(ProtocolError::InvalidMessage);
+    }
+    for capability in capabilities {
+        validate_text(capability)?;
+        if capability.len() > 120 {
+            return Err(ProtocolError::InvalidMessage);
+        }
+    }
+    Ok(())
+}
+
+fn validate_event(message: &GatewayMessage) -> Result<(), ProtocolError> {
+    let Some((event_id, seq, session_id)) = message.event_metadata() else {
+        return Err(ProtocolError::InvalidMessage);
+    };
+    if let GatewayMessage::Event {
+        event_type,
+        occurred_at,
+        session_id,
+        correlation_id,
+        causation_id,
+        idempotency_key,
+        payload,
+        ..
+    } = message
+    {
+        validate_text(event_id)?;
+        validate_text(event_type)?;
+        validate_text(occurred_at)?;
+        if chrono::DateTime::parse_from_rfc3339(occurred_at).is_err() {
+            return Err(ProtocolError::InvalidMessage);
+        }
+        if !supported_event_type(event_type) || seq == 0 || !payload.is_object() {
+            return Err(if !supported_event_type(event_type) {
+                ProtocolError::UnknownType(event_type.clone())
+            } else {
+                ProtocolError::InvalidMessage
+            });
+        }
+        if event_type.starts_with("artifact.") {
+            if payload
+                .get("mime_type")
+                .and_then(Value::as_str)
+                .is_some_and(|mime| {
+                    let mime = mime.to_ascii_lowercase();
+                    mime.starts_with("audio/") || mime.starts_with("video/")
+                })
+            {
+                return Err(ProtocolError::InvalidMessage);
+            }
+        }
+        for value in [session_id, correlation_id, causation_id, idempotency_key]
+            .into_iter()
+            .flatten()
+        {
+            validate_text(value)?;
+        }
+        return Ok(());
+    }
+    for value in [event_id, session_id] {
+        validate_text(value)?;
+    }
+    if seq == 0 {
+        return Err(ProtocolError::InvalidMessage);
+    }
+    match message {
+        GatewayMessage::AgentStart {
+            run_id,
+            conversation_id,
+            ..
+        } => {
+            validate_text(run_id)?;
+            if let Some(value) = conversation_id {
+                validate_text(value)?;
+            }
+        }
+        GatewayMessage::AgentDelta { run_id, delta, .. } => {
+            validate_text(run_id)?;
+            if delta.is_empty() {
+                return Err(ProtocolError::InvalidMessage);
+            }
+        }
+        GatewayMessage::AgentComplete { run_id, .. } => validate_text(run_id)?,
+        GatewayMessage::AgentError {
+            run_id,
+            code,
+            message,
+            ..
+        } => {
+            validate_text(run_id)?;
+            validate_text(code)?;
+            validate_text(message)?;
+        }
+        GatewayMessage::ToolFailed {
+            tool_call_id,
+            code,
+            message,
+            ..
+        } => {
+            validate_text(tool_call_id)?;
+            validate_text(code)?;
+            validate_text(message)?;
+        }
+        GatewayMessage::SessionError { code, message, .. } => {
+            validate_text(code)?;
+            validate_text(message)?;
+        }
+        GatewayMessage::AgentStatus {
+            status, message, ..
+        } => {
+            validate_text(status)?;
+            if let Some(value) = message {
+                validate_text(value)?;
+            }
+        }
+        GatewayMessage::ToolStarted {
+            tool_call_id,
+            tool_name,
+            ..
+        } => {
+            validate_text(tool_call_id)?;
+            validate_text(tool_name)?;
+        }
+        GatewayMessage::ToolProgress { tool_call_id, .. }
+        | GatewayMessage::ToolCompleted { tool_call_id, .. } => validate_text(tool_call_id)?,
+        GatewayMessage::ClarifyRequest {
+            request_id,
+            question,
+            ..
+        } => {
+            validate_text(request_id)?;
+            validate_text(question)?;
+        }
+        GatewayMessage::ClarifyResolve { request_id, .. }
+        | GatewayMessage::ClarifyCancel { request_id, .. } => validate_text(request_id)?,
+        GatewayMessage::ApprovalRequest {
+            request_id, action, ..
+        } => {
+            validate_text(request_id)?;
+            validate_text(action)?;
+        }
+        GatewayMessage::ApprovalResolve { request_id, .. } => validate_text(request_id)?,
+        GatewayMessage::SessionStart {
+            conversation_id, ..
+        } => {
+            if let Some(value) = conversation_id {
+                validate_text(value)?;
+            }
+        }
+        GatewayMessage::SessionUpdate { update, .. } => {
+            if !update.is_object() {
+                return Err(ProtocolError::InvalidMessage);
+            }
+        }
+        GatewayMessage::SessionCancel { reason, .. } => {
+            if let Some(value) = reason {
+                validate_text(value)?;
+            }
+        }
+        GatewayMessage::ArtifactStarted { artifact, .. }
+        | GatewayMessage::ArtifactCompleted { artifact, .. } => validate_artifact(artifact)?,
+        GatewayMessage::ArtifactProgress { artifact_id, .. } => validate_text(artifact_id)?,
+        GatewayMessage::ArtifactFailed {
+            artifact_id,
+            code,
+            message,
+            ..
+        } => {
+            validate_text(artifact_id)?;
+            validate_text(code)?;
+            validate_text(message)?;
+        }
+        GatewayMessage::AgentTyping { .. }
+        | GatewayMessage::SessionComplete { .. }
+        | GatewayMessage::SessionResumed { .. } => {}
+        GatewayMessage::SessionEnded { reason, .. } => validate_text(reason)?,
+        _ => return Err(ProtocolError::InvalidMessage),
+    }
+    Ok(())
+}
+
+fn supported_event_type(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "agent.typing"
+            | "agent.start"
+            | "agent.delta"
+            | "agent.complete"
+            | "agent.error"
+            | "agent.status"
+            | "tool.started"
+            | "tool.progress"
+            | "tool.completed"
+            | "tool.failed"
+            | "clarify.request"
+            | "clarify.resolve"
+            | "clarify.cancel"
+            | "clarify.requested"
+            | "clarify.responded"
+            | "approval.request"
+            | "approval.resolve"
+            | "approval.cancel"
+            | "approval.requested"
+            | "approval.responded"
+            | "session.start"
+            | "session.update"
+            | "session.complete"
+            | "session.cancel"
+            | "session.error"
+            | "session.started"
+            | "session.resumed"
+            | "session.ended"
+            | "command.requested"
+            | "command.accepted"
+            | "command.progress"
+            | "command.completed"
+            | "command.failed"
+            | "command.cancelled"
+            | "artifact.started"
+            | "artifact.progress"
+            | "artifact.completed"
+            | "artifact.created"
+            | "artifact.ready"
+            | "artifact.failed"
+    )
+}
+
+fn validate_artifact(artifact: &GatewayArtifact) -> Result<(), ProtocolError> {
+    validate_text(&artifact.id)?;
+    validate_text(&artifact.kind)?;
+    if let Some(name) = &artifact.name {
+        validate_text(name)?;
+    }
+    if let Some(mime_type) = &artifact.mime_type {
+        validate_text(mime_type)?;
+        let mime_type = mime_type.to_ascii_lowercase();
+        if mime_type.starts_with("audio/") || mime_type.starts_with("video/") {
+            return Err(ProtocolError::InvalidMessage);
+        }
+    }
+    if artifact.size.is_some_and(|size| size < 0) {
+        return Err(ProtocolError::InvalidMessage);
+    }
+    if let Some(uri) = &artifact.uri {
+        validate_text(uri)?;
+    }
+    if let Some(download_url) = &artifact.download_url {
+        validate_text(download_url)?;
+    }
+    if let Some(sha256) = &artifact.sha256 {
+        validate_text(sha256)?;
     }
     Ok(())
 }
@@ -347,6 +1289,21 @@ pub fn ack(message_id: impl Into<String>) -> GatewayMessage {
     }
 }
 
+pub fn agent_ack(
+    event_id: impl Into<String>,
+    seq: u64,
+    status: impl Into<String>,
+    expected_seq: Option<u64>,
+) -> GatewayMessage {
+    GatewayMessage::AgentAck {
+        version: PROTOCOL_VERSION,
+        event_id: event_id.into(),
+        seq,
+        status: status.into(),
+        expected_seq,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,6 +1321,7 @@ mod tests {
                 message_id: "msg_001".into(),
                 conversation_id: "conv_001".into(),
                 content: "你好 Hermes".into(),
+                attachments: vec![],
             }
         );
     }
@@ -390,6 +1348,17 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error, ProtocolError::InvalidMessage);
+    }
+
+    #[test]
+    fn attachment_only_messages_are_valid_and_keep_structured_metadata() {
+        let message = parse_message(
+            r#"{"version":1,"type":"message.send","message_id":"msg_1","conversation_id":"conv_1","content":"","attachments":[{"id":"att_1","name":"note.txt","mime_type":"text/plain","size":4,"download_url":"https://example.test/api/v1/attachments/att_1/download"}]}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(message, GatewayMessage::MessageSend { attachments, .. } if attachments.len() == 1)
+        );
     }
 
     #[test]
@@ -504,8 +1473,110 @@ mod tests {
             message_id: "msg-1".into(),
             conversation_id: "conv-1".into(),
             content: "hello Hermes".into(),
+            attachments: vec![],
         };
         let wire = serde_json::to_string(&original).unwrap();
         assert_eq!(parse_message(&wire).unwrap(), original);
+    }
+
+    #[test]
+    fn structured_agent_event_round_trips_with_sequence_and_artifact() {
+        let original = GatewayMessage::AgentComplete {
+            version: PROTOCOL_VERSION,
+            event_id: "evt-1".into(),
+            seq: 7,
+            session_id: "session-1".into(),
+            run_id: "run-1".into(),
+            content: "done".into(),
+            artifacts: vec![GatewayArtifact {
+                id: "artifact-1".into(),
+                kind: "document".into(),
+                name: Some("result.txt".into()),
+                mime_type: Some("text/plain".into()),
+                size: Some(4),
+                uri: Some("https://example.test/artifacts/1".into()),
+                download_url: None,
+                sha256: None,
+                metadata: Some(serde_json::json!({"source": "hermes"})),
+            }],
+        };
+        let wire = serde_json::to_string(&original).unwrap();
+        assert_eq!(parse_message(&wire).unwrap(), original);
+        assert_eq!(serde_json::from_str::<Value>(&wire).unwrap()["seq"], 7);
+    }
+
+    #[test]
+    fn generic_event_envelope_accepts_registered_non_voice_event_types() {
+        let message = parse_message(
+            r#"{"version":1,"type":"event","event_id":"evt-1","event_type":"artifact.ready","sequence":15,"occurred_at":"2026-09-17T08:00:03Z","session_id":"sess-1","correlation_id":"cmd-1","payload":{"artifact_id":"art-1","kind":"document","name":"report.pdf","mime_type":"application/pdf","size":12,"download_url":"https://example.test/report.pdf"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            message,
+            GatewayMessage::Event { sequence: 15, .. }
+        ));
+        let wire = serde_json::to_string(&message).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&wire).unwrap()["type"],
+            "event"
+        );
+    }
+
+    #[test]
+    fn generic_event_rejects_unknown_or_voice_event_payloads() {
+        let unknown = parse_message(
+            r#"{"version":1,"type":"event","event_id":"evt-1","event_type":"future.event","sequence":1,"occurred_at":"2026-09-17T08:00:00Z","payload":{}}"#,
+        )
+        .unwrap_err();
+        assert_eq!(unknown, ProtocolError::UnknownType("future.event".into()));
+        let voice = parse_message(
+            r#"{"version":1,"type":"event","event_id":"evt-2","event_type":"artifact.ready","sequence":1,"occurred_at":"2026-09-17T08:00:00Z","payload":{"mime_type":"audio/mpeg"}}"#,
+        )
+        .unwrap_err();
+        assert_eq!(voice, ProtocolError::InvalidMessage);
+    }
+
+    #[test]
+    fn capabilities_resume_and_approval_decisions_are_wire_compatible() {
+        let capabilities = parse_message(
+            r#"{"version":1,"type":"capabilities.hello","capabilities":["agent.delta"],"resume_from":12}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            capabilities,
+            GatewayMessage::CapabilitiesHello {
+                resume_from: Some(12),
+                ..
+            }
+        ));
+        let approval = parse_message(
+            r#"{"version":1,"type":"approval.resolve","event_id":"evt-2","seq":2,"session_id":"session-1","request_id":"approval-1","decision":"always"}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            approval,
+            GatewayMessage::ApprovalResolve {
+                decision: ApprovalDecision::Always,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn event_sequence_and_structured_fields_are_validated() {
+        assert_eq!(
+            parse_message(
+                r#"{"version":1,"type":"agent.delta","event_id":"evt-1","seq":0,"session_id":"session-1","run_id":"run-1","delta":"x"}"#,
+            )
+            .unwrap_err(),
+            ProtocolError::InvalidMessage
+        );
+        assert_eq!(
+            parse_message(
+                r#"{"version":1,"type":"approval.resolve","event_id":"evt-1","seq":1,"session_id":"session-1","request_id":"approval-1","decision":"later"}"#,
+            )
+            .unwrap_err(),
+            ProtocolError::InvalidMessage
+        );
     }
 }

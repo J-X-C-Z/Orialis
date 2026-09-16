@@ -3,7 +3,8 @@ mod mobile_realtime;
 
 use agent_gateway::AgentRegistry;
 use axum::{
-    extract::{Path, Query, State},
+    body::Body,
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, patch, post},
@@ -20,7 +21,13 @@ use serde::{de::DeserializeOwned, de::Error as DeError, Deserialize, Deserialize
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
-use std::{env, net::SocketAddr, sync::Arc};
+use std::{
+    env,
+    net::SocketAddr,
+    path::{Path as FsPath, PathBuf},
+    sync::Arc,
+};
+use tokio::io::AsyncWriteExt;
 use tracing::info;
 use uuid::Uuid;
 
@@ -34,6 +41,8 @@ struct AppState {
     mobile: mobile_realtime::MobileRegistry,
     agent_device_token: Option<String>,
     agent_user_id: Option<String>,
+    public_url: String,
+    upload_dir: PathBuf,
 }
 
 #[derive(Clone)]
@@ -45,6 +54,7 @@ struct Config {
     database_url: String,
     agent_device_token: Option<String>,
     agent_user_id: Option<String>,
+    upload_dir: PathBuf,
 }
 
 impl Config {
@@ -68,6 +78,9 @@ impl Config {
                 .ok()
                 .map(|user_id| user_id.trim().to_owned())
                 .filter(|user_id| !user_id.is_empty()),
+            upload_dir: env::var("ORIALIS_UPLOAD_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("./uploads")),
         })
     }
 
@@ -260,6 +273,8 @@ struct Project {
     id: String,
     name: String,
     goal: Option<String>,
+    description: Option<String>,
+    color: Option<String>,
     status: String,
     start_date: Option<String>,
     due: Option<String>,
@@ -274,6 +289,8 @@ struct Project {
 struct ProjectInput {
     name: String,
     goal: Option<String>,
+    description: Option<String>,
+    color: Option<String>,
     status: Option<String>,
     start_date: Option<String>,
     due: Option<String>,
@@ -287,6 +304,10 @@ struct ProjectPatch {
     name: Option<PatchValue<String>>,
     #[serde(default, deserialize_with = "deserialize_patch")]
     goal: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    description: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    color: Option<PatchValue<String>>,
     #[serde(default, deserialize_with = "deserialize_patch")]
     status: Option<PatchValue<String>>,
     #[serde(default, deserialize_with = "deserialize_patch")]
@@ -327,7 +348,34 @@ struct CalendarEventInput {
     reminder_minutes: Option<i64>,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Attachment {
+    id: String,
+    name: String,
+    mime_type: String,
+    size: i64,
+    download_url: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentInput {
+    id: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct MessageRow {
+    id: String,
+    conversation_id: String,
+    role: String,
+    content: String,
+    created_at: String,
+    version: i64,
+    attachments_json: String,
+}
+
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Message {
     id: String,
@@ -336,6 +384,21 @@ struct Message {
     content: String,
     created_at: String,
     version: i64,
+    attachments: Vec<Attachment>,
+}
+
+impl MessageRow {
+    fn into_message(self) -> Message {
+        Message {
+            id: self.id,
+            conversation_id: self.conversation_id,
+            role: self.role,
+            content: self.content,
+            created_at: self.created_at,
+            version: self.version,
+            attachments: serde_json::from_str(&self.attachments_json).unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -343,7 +406,53 @@ struct Message {
 struct MessageInput {
     id: Option<String>,
     content: String,
+    #[serde(default)]
+    attachments: Vec<AttachmentInput>,
 }
+
+const DEFAULT_CONVERSATION_ID: &str = "default";
+
+#[derive(Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+struct Conversation {
+    id: String,
+    title: String,
+    is_default: bool,
+    #[serde(rename = "type")]
+    conversation_type: String,
+    created_at: String,
+    updated_at: String,
+    version: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationInput {
+    id: Option<String>,
+    title: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationPatch {
+    title: String,
+}
+
+#[derive(Deserialize)]
+struct DownloadQuery {
+    token: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentUploadResponse {
+    items: Vec<Attachment>,
+}
+
+const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
+const MAX_ATTACHMENT_COUNT: usize = 10;
+const MAX_TOTAL_ATTACHMENT_BYTES: usize = 48 * 1024 * 1024;
+const MAX_ATTACHMENT_REQUEST_BYTES: usize = 50 * 1024 * 1024;
 
 #[derive(Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -471,6 +580,86 @@ struct MilestonePatch {
     base_version: i64,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectSummary {
+    project: Project,
+    total_tasks: i64,
+    completed_tasks: i64,
+    total_milestones: i64,
+    completed_milestones: i64,
+    total_units: i64,
+    completed_units: i64,
+    progress: f64,
+    next_action: Option<Task>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectListResponse {
+    items: Vec<Project>,
+    next_cursor: Option<String>,
+    has_more: bool,
+}
+
+#[derive(Deserialize)]
+struct ProjectListQuery {
+    after: Option<String>,
+    limit: Option<i64>,
+    status: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ProjectCursor {
+    v: u8,
+    created_at: String,
+    id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CalendarEventListResponse {
+    items: Vec<CalendarEvent>,
+    next_cursor: Option<String>,
+    has_more: bool,
+}
+
+#[derive(Deserialize)]
+struct CalendarEventListQuery {
+    after: Option<String>,
+    limit: Option<i64>,
+    from: Option<String>,
+    to: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CalendarEventCursor {
+    v: u8,
+    start_at: String,
+    id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MilestoneListResponse {
+    items: Vec<Milestone>,
+    next_cursor: Option<String>,
+    has_more: bool,
+}
+
+#[derive(Deserialize)]
+struct MilestoneListQuery {
+    after: Option<String>,
+    limit: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MilestoneCursor {
+    v: u8,
+    position: i64,
+    id: String,
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum PatchValue<T> {
@@ -538,6 +727,15 @@ async fn main() {
         mobile: mobile_realtime::MobileRegistry::default(),
         agent_device_token: config.agent_device_token.clone(),
         agent_user_id: config.agent_user_id.clone(),
+        public_url: config.public_url.clone(),
+        upload_dir: config.upload_dir.clone(),
+    });
+    let delivery_state = state.clone();
+    tokio::spawn(async move {
+        loop {
+            agent_gateway::ws::dispatch_due_messages(delivery_state.clone()).await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
     });
     let app = Router::new()
         .route("/api/health", get(health))
@@ -555,6 +753,7 @@ async fn main() {
             "/api/v1/projects/{id}",
             patch(update_project).delete(delete_project),
         )
+        .route("/api/v1/projects/{id}/summary", get(project_summary))
         .route(
             "/api/v1/projects/{project_id}/milestones",
             get(list_milestones).post(create_milestone),
@@ -573,12 +772,34 @@ async fn main() {
             "/api/v1/calendar-events/{id}",
             patch(update_event).delete(delete_event),
         )
+        .route("/api/v1/schedules", get(list_events).post(create_event))
+        .route(
+            "/api/v1/schedules/{id}",
+            patch(update_event).delete(delete_event),
+        )
+        .route(
+            "/api/v1/conversations",
+            get(list_conversations).post(create_conversation),
+        )
+        .route(
+            "/api/v1/conversations/{id}",
+            patch(rename_conversation).delete(delete_conversation),
+        )
         .route("/api/v1/sync/events", get(sync_events))
         .route("/api/v1/sync/snapshot", get(sync_snapshot))
         .route(
             "/api/v1/conversations/{conversation_id}/messages",
             get(list_messages).post(create_message),
         )
+        .route(
+            "/api/v1/conversations/{conversation_id}/attachments",
+            post(upload_attachments),
+        )
+        .route(
+            "/api/v1/attachments/{id}/download",
+            get(download_attachment),
+        )
+        .layer(DefaultBodyLimit::max(MAX_ATTACHMENT_REQUEST_BYTES))
         .route("/api/v1/agent/devices", get(list_agent_devices))
         .route(
             "/api/v1/agent/devices/{device_id}/select",
@@ -628,8 +849,11 @@ async fn capabilities() -> Json<CapabilitiesResponse> {
             "tasks",
             "projects",
             "calendar-events",
+            "schedules",
             "incremental-sync",
             "messages",
+            "conversations",
+            "attachments",
             "agent-devices",
             "websocket",
         ],
@@ -740,7 +964,6 @@ async fn authenticated_user(headers: &HeaderMap, pool: &SqlitePool) -> Result<St
     }
     let device_id = headers
         .get("x-orialis-device-id")
-        .or_else(|| headers.get("x-oris-device-id"))
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -771,6 +994,48 @@ async fn authenticated_user(headers: &HeaderMap, pool: &SqlitePool) -> Result<St
         .fetch_one(pool)
         .await
         .map_err(AppError::from)
+}
+
+/// Accept the configured Agent token for HTTP attachment operations. The
+/// WebSocket uses the same token, but upload/download also need an owner so
+/// an Agent cannot access another user's files.
+async fn authenticated_user_or_agent(
+    headers: &HeaderMap,
+    state: &AppState,
+) -> Result<String, AppError> {
+    if let Ok(user_id) = authenticated_user(headers, &state.pool).await {
+        return Ok(user_id);
+    }
+    let valid_agent_token = headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split_once(' '))
+        .is_some_and(|(scheme, token)| {
+            scheme.eq_ignore_ascii_case("bearer")
+                && state.agent_device_token.as_deref() == Some(token)
+                && !token.is_empty()
+        });
+    if !valid_agent_token {
+        return Err(AppError::Unauthorized);
+    }
+    if let Some(user_id) = state.agent_user_id.as_deref() {
+        let exists = sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM users WHERE id=?)")
+            .bind(user_id)
+            .fetch_one(&state.pool)
+            .await?;
+        return (exists != 0)
+            .then(|| user_id.to_owned())
+            .ok_or(AppError::Unauthorized);
+    }
+    let users =
+        sqlx::query_scalar::<_, String>("SELECT id FROM users ORDER BY created_at,id LIMIT 2")
+            .fetch_all(&state.pool)
+            .await?;
+    if users.len() == 1 {
+        Ok(users[0].clone())
+    } else {
+        Err(AppError::Unauthorized)
+    }
 }
 
 fn development_device_auth_enabled() -> bool {
@@ -940,6 +1205,111 @@ async fn current_session(
     ))
 }
 
+async fn ensure_default_conversation(pool: &SqlitePool, user_id: &str) -> Result<(), AppError> {
+    sqlx::query("INSERT INTO conversations (id,user_id,title,is_default,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(user_id,id) DO NOTHING")
+        .bind(DEFAULT_CONVERSATION_ID).bind(user_id).bind("主会话").bind(true).bind(now()).bind(now())
+        .execute(pool).await?;
+    Ok(())
+}
+
+async fn ensure_conversation(
+    pool: &SqlitePool,
+    user_id: &str,
+    conversation_id: &str,
+) -> Result<(), AppError> {
+    ensure_default_conversation(pool, user_id).await?;
+    let exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM conversations WHERE user_id=? AND id=? AND deleted_at IS NULL)",
+    )
+    .bind(user_id)
+    .bind(conversation_id)
+    .fetch_one(pool)
+    .await?;
+    if !exists {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
+}
+
+async fn list_conversations(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<Conversation>>, AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    ensure_default_conversation(&state.pool, &user_id).await?;
+    let items = sqlx::query_as::<_, Conversation>("SELECT id,title,is_default,CASE WHEN is_default=1 THEN 'main' ELSE 'normal' END AS conversation_type,created_at,updated_at,version FROM conversations WHERE user_id=? AND deleted_at IS NULL ORDER BY is_default DESC,updated_at DESC,id")
+        .bind(user_id).fetch_all(&state.pool).await?;
+    Ok(Json(items))
+}
+
+async fn create_conversation(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(input): Json<ConversationInput>,
+) -> Result<(StatusCode, Json<Conversation>), AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    let title = input.title.trim();
+    if title.is_empty() {
+        return Err(AppError::BadRequest("title is required".into()));
+    }
+    let id = input.id.unwrap_or_else(new_id);
+    let timestamp = now();
+    sqlx::query(
+        "INSERT INTO conversations (id,user_id,title,created_at,updated_at) VALUES (?,?,?,?,?)",
+    )
+    .bind(&id)
+    .bind(&user_id)
+    .bind(title)
+    .bind(&timestamp)
+    .bind(&timestamp)
+    .execute(&state.pool)
+    .await?;
+    let item = sqlx::query_as::<_, Conversation>("SELECT id,title,is_default,CASE WHEN is_default=1 THEN 'main' ELSE 'normal' END AS conversation_type,created_at,updated_at,version FROM conversations WHERE user_id=? AND id=?")
+        .bind(&user_id).bind(&id).fetch_one(&state.pool).await?;
+    Ok((StatusCode::CREATED, Json(item)))
+}
+
+async fn rename_conversation(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<ConversationPatch>,
+) -> Result<Json<Conversation>, AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    let title = input.title.trim();
+    if title.is_empty() {
+        return Err(AppError::BadRequest("title is required".into()));
+    }
+    let result = sqlx::query("UPDATE conversations SET title=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND deleted_at IS NULL")
+        .bind(title).bind(now()).bind(&user_id).bind(&id).execute(&state.pool).await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::NotFound);
+    }
+    let item = sqlx::query_as::<_, Conversation>("SELECT id,title,is_default,CASE WHEN is_default=1 THEN 'main' ELSE 'normal' END AS conversation_type,created_at,updated_at,version FROM conversations WHERE user_id=? AND id=?")
+        .bind(user_id).bind(id).fetch_one(&state.pool).await?;
+    Ok(Json(item))
+}
+
+async fn delete_conversation(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    ensure_default_conversation(&state.pool, &user_id).await?;
+    if id == DEFAULT_CONVERSATION_ID {
+        return Err(AppError::Conflict(
+            "default conversation cannot be deleted".into(),
+        ));
+    }
+    let result = sqlx::query("UPDATE conversations SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND deleted_at IS NULL")
+        .bind(now()).bind(now()).bind(&user_id).bind(&id).execute(&state.pool).await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::NotFound);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn list_agent_devices(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1039,8 +1409,9 @@ async fn list_messages(
     Path(conversation_id): Path<String>,
 ) -> Result<Json<Vec<Message>>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
-    let messages = sqlx::query_as::<_, Message>(
-        "SELECT id,conversation_id,role,content,created_at,version
+    ensure_conversation(&state.pool, &user_id, &conversation_id).await?;
+    let messages = sqlx::query_as::<_, MessageRow>(
+        "SELECT id,conversation_id,role,content,created_at,version,attachments_json
          FROM messages WHERE user_id=? AND conversation_id=?
          ORDER BY created_at,id",
     )
@@ -1048,7 +1419,9 @@ async fn list_messages(
     .bind(conversation_id)
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(messages))
+    Ok(Json(
+        messages.into_iter().map(MessageRow::into_message).collect(),
+    ))
 }
 
 async fn create_message(
@@ -1058,47 +1431,75 @@ async fn create_message(
     Json(input): Json<MessageInput>,
 ) -> Result<(StatusCode, Json<Message>), AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
+    ensure_conversation(&state.pool, &user_id, &conversation_id).await?;
     reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let content = input.content.trim();
-    if content.is_empty() {
+    if content.is_empty() && input.attachments.is_empty() {
         return Err(AppError::BadRequest("content is required".into()));
     }
     if conversation_id.trim().is_empty() {
         return Err(AppError::BadRequest("conversationId is required".into()));
     }
+    if input.attachments.len() > MAX_ATTACHMENT_COUNT {
+        return Err(AppError::BadRequest("too many attachments".into()));
+    }
+    let mut canonical_attachments = Vec::with_capacity(input.attachments.len());
+    for attachment in &input.attachments {
+        canonical_attachments
+            .push(canonical_attachment(&state, &user_id, &conversation_id, attachment).await?);
+    }
+    let attachments_json = serde_json::to_string(&canonical_attachments)
+        .map_err(|_| AppError::BadRequest("invalid attachments".into()))?;
     let id = input.id.unwrap_or_else(new_id);
+    let timestamp = now();
+    let mut tx = state.pool.begin().await?;
     let result = sqlx::query(
-        "INSERT INTO messages (id,user_id,conversation_id,role,content)
-         VALUES (?,?,?,'user',?) ON CONFLICT(id) DO NOTHING",
+        "INSERT INTO messages (id,user_id,conversation_id,role,content,attachments_json)
+         VALUES (?,?,?,'user',?,?) ON CONFLICT(id) DO NOTHING",
     )
     .bind(&id)
     .bind(&user_id)
     .bind(&conversation_id)
     .bind(content)
-    .execute(&state.pool)
+    .bind(&attachments_json)
+    .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
-        let existing = sqlx::query_as::<_, Message>(
-            "SELECT id,conversation_id,role,content,created_at,version
+        let existing = sqlx::query_as::<_, MessageRow>(
+            "SELECT id,conversation_id,role,content,created_at,version,attachments_json
              FROM messages WHERE user_id=? AND id=? AND conversation_id=?",
         )
         .bind(&user_id)
         .bind(&id)
         .bind(&conversation_id)
-        .fetch_optional(&state.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::Conflict("message id already used".into()))?;
-        return Ok((StatusCode::OK, Json(existing)));
+        tx.rollback().await?;
+        return Ok((StatusCode::OK, Json(existing.into_message())));
     }
-    let message = sqlx::query_as::<_, Message>(
-        "SELECT id,conversation_id,role,content,created_at,version
+    sqlx::query(
+        "INSERT INTO agent_delivery_queue
+         (message_id,user_id,conversation_id,attempts,next_attempt_at)
+         VALUES (?,?,?,0,?)",
+    )
+    .bind(&id)
+    .bind(&user_id)
+    .bind(&conversation_id)
+    .bind(&timestamp)
+    .execute(&mut *tx)
+    .await?;
+    let message = sqlx::query_as::<_, MessageRow>(
+        "SELECT id,conversation_id,role,content,created_at,version,attachments_json
          FROM messages WHERE user_id=? AND id=? AND conversation_id=?",
     )
     .bind(&user_id)
     .bind(&id)
     .bind(&conversation_id)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
+    let message = message.into_message();
     state.mobile.notify(
         &user_id,
         agent_gateway::protocol::mobile_message(serde_json::to_value(&message).unwrap()),
@@ -1108,6 +1509,17 @@ async fn create_message(
     let dispatch_conversation_id = conversation_id.clone();
     let dispatch_id = message.id.clone();
     let dispatch_content = message.content.clone();
+    let dispatch_attachments = message
+        .attachments
+        .iter()
+        .map(|attachment| agent_gateway::protocol::GatewayAttachment {
+            id: attachment.id.clone(),
+            name: attachment.name.clone(),
+            mime_type: attachment.mime_type.clone(),
+            size: attachment.size,
+            download_url: attachment.download_url.clone(),
+        })
+        .collect();
     tokio::spawn(async move {
         agent_gateway::ws::dispatch_message(
             dispatch_state,
@@ -1115,10 +1527,259 @@ async fn create_message(
             dispatch_conversation_id,
             dispatch_id,
             dispatch_content,
+            dispatch_attachments,
         )
         .await;
     });
     Ok((StatusCode::CREATED, Json(message)))
+}
+
+async fn upload_attachments(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(conversation_id): Path<String>,
+    mut multipart: Multipart,
+) -> Result<Json<AttachmentUploadResponse>, AppError> {
+    let user_id = authenticated_user_or_agent(&headers, &state).await?;
+    ensure_conversation(&state.pool, &user_id, &conversation_id).await?;
+    if conversation_id.trim().is_empty() {
+        return Err(AppError::BadRequest("conversationId is required".into()));
+    }
+    let idempotency_key = mutation_id(&headers);
+    if let Some(key) = &idempotency_key {
+        if key.len() > 200 {
+            return Err(AppError::BadRequest("Idempotency-Key is too long".into()));
+        }
+        if let Some(response_json) = sqlx::query_scalar::<_, String>(
+            "SELECT response_json FROM attachment_uploads
+             WHERE user_id=? AND conversation_id=? AND idempotency_key=?",
+        )
+        .bind(&user_id)
+        .bind(&conversation_id)
+        .bind(key)
+        .fetch_optional(&state.pool)
+        .await?
+        {
+            return serde_json::from_str(&response_json)
+                .map(|response| Ok(Json(response)))
+                .map_err(|_| AppError::BadRequest("invalid stored upload response".into()))?;
+        }
+    }
+    tokio::fs::create_dir_all(&state.upload_dir)
+        .await
+        .map_err(|error| {
+            AppError::ServiceUnavailable(format!("attachment storage unavailable: {error}"))
+        })?;
+
+    let mut items = Vec::new();
+    let mut stored_paths = Vec::new();
+    let mut transaction = state.pool.begin().await?;
+    let result: Result<AttachmentUploadResponse, AppError> = async {
+    while let Some(mut field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| AppError::BadRequest("invalid multipart upload".into()))?
+    {
+        if items.len() >= MAX_ATTACHMENT_COUNT {
+            return Err(AppError::BadRequest("too many attachments".into()));
+        }
+        let Some(file_name) = field.file_name() else {
+            continue;
+        };
+        let name = FsPath::new(file_name)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("文件")
+            .chars()
+            .take(180)
+            .collect::<String>();
+        let mime_type = field
+            .content_type()
+            .unwrap_or("application/octet-stream")
+            .to_owned();
+        let id = new_id();
+        let access_token = Uuid::new_v4().simple().to_string();
+        let storage_path = state.upload_dir.join(format!("{id}.bin"));
+        let mut file = tokio::fs::File::create(&storage_path).await.map_err(|error| {
+            AppError::ServiceUnavailable(format!("could not store attachment: {error}"))
+        })?;
+        stored_paths.push(storage_path.clone());
+        let mut size = 0usize;
+        while let Some(chunk) = field.chunk().await.map_err(|_| AppError::BadRequest("could not read attachment".into()))? {
+            size = size.saturating_add(chunk.len());
+            let total = items.iter().map(|item: &Attachment| item.size as usize).sum::<usize>() + size;
+            if size > MAX_ATTACHMENT_BYTES {
+                return Err(AppError::BadRequest("attachment exceeds 20 MB".into()));
+            }
+            if total > MAX_TOTAL_ATTACHMENT_BYTES {
+                return Err(AppError::BadRequest("attachments exceed 48 MB total".into()));
+            }
+            file.write_all(&chunk).await.map_err(|error| AppError::ServiceUnavailable(format!("could not store attachment: {error}")))?;
+        }
+        if size == 0 {
+            return Err(AppError::BadRequest("attachment cannot be empty".into()));
+        }
+        file.flush().await.map_err(|error| AppError::ServiceUnavailable(format!("could not store attachment: {error}")))?;
+        sqlx::query(
+            "INSERT INTO attachments
+             (id,user_id,conversation_id,original_name,mime_type,size_bytes,storage_path,access_token_hash)
+             VALUES (?,?,?,?,?,?,?,?)",
+        )
+        .bind(&id)
+        .bind(&user_id)
+        .bind(&conversation_id)
+        .bind(&name)
+        .bind(&mime_type)
+        .bind(size as i64)
+        .bind(storage_path.to_string_lossy().as_ref())
+        .bind(hash_token(&access_token))
+        .execute(&mut *transaction)
+        .await?;
+
+        let download_url = format!(
+            "{}/api/v1/attachments/{id}/download",
+            state.public_url.trim_end_matches('/')
+        );
+        items.push(Attachment {
+            id,
+            name,
+            mime_type,
+            size: size as i64,
+            download_url,
+        });
+    }
+    if items.is_empty() {
+        return Err(AppError::BadRequest("no files uploaded".into()));
+    }
+    Ok(AttachmentUploadResponse { items })
+    }.await;
+    let response = match result {
+        Ok(response) => response,
+        Err(error) => {
+            for path in stored_paths {
+                let _ = tokio::fs::remove_file(path).await;
+            }
+            return Err(error);
+        }
+    };
+    if let Some(key) = idempotency_key {
+        if let Err(error) = sqlx::query(
+            "INSERT INTO attachment_uploads
+             (user_id,conversation_id,idempotency_key,response_json)
+             VALUES (?,?,?,?)",
+        )
+        .bind(&user_id)
+        .bind(&conversation_id)
+        .bind(key)
+        .bind(
+            serde_json::to_string(&response)
+                .map_err(|_| AppError::BadRequest("invalid upload response".into()))?,
+        )
+        .execute(&mut *transaction)
+        .await
+        {
+            for path in stored_paths {
+                let _ = tokio::fs::remove_file(path).await;
+            }
+            return Err(AppError::from(error));
+        }
+    }
+    if let Err(error) = transaction.commit().await {
+        for path in stored_paths {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+        return Err(AppError::from(error));
+    }
+    Ok(Json(response))
+}
+
+async fn canonical_attachment(
+    state: &AppState,
+    user_id: &str,
+    conversation_id: &str,
+    attachment: &AttachmentInput,
+) -> Result<Attachment, AppError> {
+    let row = sqlx::query_as::<_, (String, String, i64, String)>(
+        "SELECT original_name,mime_type,size_bytes,conversation_id
+         FROM attachments WHERE id=? AND user_id=?",
+    )
+    .bind(&attachment.id)
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| AppError::BadRequest("attachment is not owned by this user".into()))?;
+    if row.3 != conversation_id {
+        return Err(AppError::BadRequest(
+            "attachment does not belong to this conversation".into(),
+        ));
+    }
+    Ok(Attachment {
+        id: attachment.id.clone(),
+        name: row.0,
+        mime_type: row.1,
+        size: row.2,
+        download_url: format!(
+            "{}/api/v1/attachments/{}/download",
+            state.public_url.trim_end_matches('/'),
+            attachment.id
+        ),
+    })
+}
+
+fn attachment_download_token<'a>(
+    public_url: &str,
+    id: &str,
+    download_url: &'a str,
+) -> Option<&'a str> {
+    let prefix = format!(
+        "{}/api/v1/attachments/{id}/download?token=",
+        public_url.trim_end_matches('/')
+    );
+    download_url
+        .strip_prefix(&prefix)
+        .filter(|token| !token.is_empty() && !token.contains('&'))
+}
+
+async fn download_attachment(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(query): Query<DownloadQuery>,
+) -> Result<Response, AppError> {
+    let row = sqlx::query_as::<_, (String, String, String, String)>(
+        "SELECT user_id,mime_type,storage_path,access_token_hash
+         FROM attachments WHERE id=?",
+    )
+    .bind(&id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    let session_user = authenticated_user_or_agent(&headers, &state).await.ok();
+    let token_valid = query
+        .token
+        .as_deref()
+        .is_some_and(|token| hash_token(token) == row.3);
+    if session_user.as_deref() != Some(row.0.as_str()) && !token_valid {
+        return Err(AppError::Unauthorized);
+    }
+    let root = tokio::fs::canonicalize(&state.upload_dir)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    let path = tokio::fs::canonicalize(&row.2)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    if !path.starts_with(&root) {
+        return Err(AppError::NotFound);
+    }
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, row.1)],
+        Body::from(bytes),
+    )
+        .into_response())
 }
 
 async fn list_tasks(
@@ -1245,12 +1906,20 @@ async fn create_task(
     if input.title.trim().is_empty() {
         return Err(AppError::BadRequest("title is required".into()));
     }
+    if input.title.trim().chars().count() > 120 {
+        return Err(AppError::BadRequest(
+            "title must be at most 120 characters".into(),
+        ));
+    }
     if input.due.is_none() && input.due_time.is_some() {
         return Err(AppError::BadRequest("due_time requires due".into()));
     }
     validate_date("due", input.due.as_deref())?;
     validate_time("dueTime", input.due_time.as_deref())?;
     validate_reminder(input.reminder_minutes)?;
+    if let Some(project_id) = input.project_id.as_deref() {
+        ensure_project(&state.pool, &user_id, project_id).await?;
+    }
     let id = input.id.unwrap_or_else(new_id);
     let timestamp = now();
     let mut tx = state.pool.begin().await?;
@@ -1330,6 +1999,9 @@ async fn update_task(
     validate_reminder(reminder_minutes)?;
     if due.is_none() && due_time.is_some() {
         return Err(AppError::BadRequest("due_time requires due".into()));
+    }
+    if let Some(project_id) = project_id.as_deref() {
+        ensure_project(&state.pool, &user_id, project_id).await?;
     }
     let mut tx = state.pool.begin().await?;
     let result = sqlx::query(
@@ -1414,12 +2086,86 @@ async fn delete_task(
 async fn list_projects(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-) -> Result<Json<Vec<Project>>, AppError> {
+    Query(query): Query<ProjectListQuery>,
+) -> Result<Json<ProjectListResponse>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
-    Ok(Json(sqlx::query_as::<_, Project>(
-        "SELECT id,name,goal,status,start_date,due,next_action_task_id,created_at,updated_at,version
-         FROM projects WHERE user_id=? AND deleted_at IS NULL ORDER BY created_at",
-    ).bind(user_id).fetch_all(&state.pool).await?))
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=100).contains(&limit) {
+        return Err(AppError::BadRequest(
+            "limit must be between 1 and 100".into(),
+        ));
+    }
+    let status = query.status.filter(|value| !value.trim().is_empty());
+    if let Some(status) = &status {
+        if !matches!(status.as_str(), "active" | "completed" | "archived") {
+            return Err(AppError::BadRequest(
+                "status must be active, completed, or archived".into(),
+            ));
+        }
+    }
+    let cursor = query.after.map(decode_project_cursor).transpose()?;
+    let fetch_limit = limit + 1;
+    let mut projects = sqlx::query_as::<_, Project>(
+        "SELECT id,name,goal,description,color,status,start_date,due,next_action_task_id,created_at,updated_at,version
+         FROM projects
+         WHERE user_id=? AND deleted_at IS NULL
+           AND (? IS NULL OR status=?)
+           AND (? IS NULL OR (created_at,id) > (?,?))
+         ORDER BY created_at,id LIMIT ?",
+    )
+    .bind(&user_id)
+    .bind(&status)
+    .bind(&status)
+    .bind(cursor.as_ref().map(|value| value.created_at.as_str()))
+    .bind(cursor.as_ref().map(|value| value.created_at.as_str()))
+    .bind(cursor.as_ref().map(|value| value.id.as_str()))
+    .bind(fetch_limit)
+    .fetch_all(&state.pool)
+    .await?;
+    let has_more = projects.len() > limit as usize;
+    if has_more {
+        projects.pop();
+    }
+    let next_cursor = has_more
+        .then(|| {
+            projects
+                .last()
+                .map(project_cursor)
+                .map(encode_project_cursor)
+        })
+        .flatten()
+        .transpose()?;
+    Ok(Json(ProjectListResponse {
+        items: projects,
+        next_cursor,
+        has_more,
+    }))
+}
+
+fn project_cursor(project: &Project) -> ProjectCursor {
+    ProjectCursor {
+        v: 1,
+        created_at: project.created_at.clone(),
+        id: project.id.clone(),
+    }
+}
+
+fn encode_project_cursor(cursor: ProjectCursor) -> Result<String, AppError> {
+    let payload = serde_json::to_vec(&cursor)
+        .map_err(|_| AppError::BadRequest("invalid project cursor".into()))?;
+    Ok(URL_SAFE_NO_PAD.encode(payload))
+}
+
+fn decode_project_cursor(value: String) -> Result<ProjectCursor, AppError> {
+    let payload = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| AppError::BadRequest("invalid project cursor".into()))?;
+    let cursor: ProjectCursor = serde_json::from_slice(&payload)
+        .map_err(|_| AppError::BadRequest("invalid project cursor".into()))?;
+    if cursor.v != 1 || cursor.created_at.is_empty() || cursor.id.is_empty() {
+        return Err(AppError::BadRequest("invalid project cursor".into()));
+    }
+    Ok(cursor)
 }
 
 async fn fetch_project<'e, E>(executor: E, user_id: &str, id: &str) -> Result<Project, AppError>
@@ -1427,7 +2173,7 @@ where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
     sqlx::query_as::<_, Project>(
-        "SELECT id,name,goal,status,start_date,due,next_action_task_id,created_at,updated_at,version
+        "SELECT id,name,goal,description,color,status,start_date,due,next_action_task_id,created_at,updated_at,version
          FROM projects WHERE user_id=? AND id=? AND deleted_at IS NULL",
     ).bind(user_id).bind(id).fetch_optional(executor).await?.ok_or(AppError::NotFound)
 }
@@ -1442,13 +2188,25 @@ async fn create_project(
     if input.name.trim().is_empty() {
         return Err(AppError::BadRequest("name is required".into()));
     }
+    if input.name.trim().chars().count() > 120 {
+        return Err(AppError::BadRequest(
+            "name must be at most 120 characters".into(),
+        ));
+    }
+    let status = input.status.as_deref().unwrap_or("active");
+    validate_project_status(status)?;
+    if input.next_action_task_id.is_some() {
+        return Err(AppError::BadRequest(
+            "nextActionTaskId must be null when creating a project".into(),
+        ));
+    }
     validate_date("startDate", input.start_date.as_deref())?;
     validate_date("due", input.due.as_deref())?;
     let id = new_id();
     let timestamp = now();
     let mut tx = state.pool.begin().await?;
-    sqlx::query("INSERT INTO projects (id,user_id,name,goal,status,start_date,due,next_action_task_id,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,?,?,?,1)")
-        .bind(&id).bind(&user_id).bind(input.name.trim()).bind(input.goal).bind(input.status.unwrap_or_else(|| "active".into())).bind(input.start_date).bind(input.due).bind(input.next_action_task_id).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO projects (id,user_id,name,goal,description,color,status,start_date,due,next_action_task_id,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)")
+        .bind(&id).bind(&user_id).bind(input.name.trim()).bind(input.goal).bind(input.description).bind(input.color).bind(status).bind(input.start_date).bind(input.due).bind(None::<String>).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await?;
     let project = fetch_project(&mut *tx, &user_id, &id).await?;
     append_event(
         &mut *tx,
@@ -1480,16 +2238,25 @@ async fn update_project(
     }
     let name = resolve_required(input.name, current.name, "name")?;
     let goal = resolve_nullable(input.goal, current.goal);
+    let description = resolve_nullable(input.description, current.description);
+    let color = resolve_nullable(input.color, current.color);
     let status = resolve_required(input.status, current.status, "status")?;
     let start_date = resolve_nullable(input.start_date, current.start_date);
     let due = resolve_nullable(input.due, current.due);
     let next_action_task_id =
         resolve_nullable(input.next_action_task_id, current.next_action_task_id);
+    if name.trim().is_empty() || name.trim().chars().count() > 120 {
+        return Err(AppError::BadRequest("name must be 1-120 characters".into()));
+    }
+    validate_project_status(&status)?;
+    if let Some(task_id) = next_action_task_id.as_deref() {
+        ensure_project_next_action(&state.pool, &user_id, &id, task_id).await?;
+    }
     validate_date("startDate", start_date.as_deref())?;
     validate_date("due", due.as_deref())?;
     let mut tx = state.pool.begin().await?;
-    let result = sqlx::query("UPDATE projects SET name=?,goal=?,status=?,start_date=?,due=?,next_action_task_id=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
-        .bind(name.trim()).bind(goal).bind(status).bind(start_date).bind(due).bind(next_action_task_id).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&mut *tx).await?;
+    let result = sqlx::query("UPDATE projects SET name=?,goal=?,description=?,color=?,status=?,start_date=?,due=?,next_action_task_id=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
+        .bind(name.trim()).bind(goal).bind(description).bind(color).bind(status).bind(start_date).bind(due).bind(next_action_task_id).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&mut *tx).await?;
     if result.rows_affected() != 1 {
         return Err(AppError::Conflict("project version changed".into()));
     }
@@ -1510,6 +2277,61 @@ async fn update_project(
     Ok(Json(project))
 }
 
+async fn project_summary(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<ProjectSummary>, AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    let project = fetch_project(&state.pool, &user_id, &id).await?;
+    let (total_tasks, completed_tasks) = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT COUNT(*), COALESCE(SUM(completed),0)
+         FROM tasks WHERE user_id=? AND project_id=? AND deleted_at IS NULL",
+    )
+    .bind(&user_id)
+    .bind(&id)
+    .fetch_one(&state.pool)
+    .await?;
+    let (total_milestones, completed_milestones) = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT COUNT(*), COALESCE(SUM(completed),0)
+         FROM project_milestones m JOIN projects p ON p.id=m.project_id
+         WHERE p.user_id=? AND p.id=? AND p.deleted_at IS NULL AND m.deleted_at IS NULL",
+    )
+    .bind(&user_id)
+    .bind(&id)
+    .fetch_one(&state.pool)
+    .await?;
+    let next_action = sqlx::query_as::<_, Task>(
+        "SELECT id,title,notes,important,urgent,completed,due,due_time,
+                reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
+         FROM tasks
+         WHERE user_id=? AND project_id=? AND deleted_at IS NULL AND completed=0
+         ORDER BY due IS NULL,due,due_time IS NULL,due_time,created_at,id LIMIT 1",
+    )
+    .bind(&user_id)
+    .bind(&id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let total_units = total_tasks + total_milestones;
+    let completed_units = completed_tasks + completed_milestones;
+    let progress = if total_units == 0 {
+        0.0
+    } else {
+        completed_units as f64 / total_units as f64 * 100.0
+    };
+    Ok(Json(ProjectSummary {
+        project,
+        total_tasks,
+        completed_tasks,
+        total_milestones,
+        completed_milestones,
+        total_units,
+        completed_units,
+        progress,
+        next_action,
+    }))
+}
+
 async fn delete_project(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1517,16 +2339,16 @@ async fn delete_project(
 ) -> Result<StatusCode, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
-    let project = fetch_project(&state.pool, &user_id, &id).await?;
+    let mut tx = state.pool.begin().await?;
+    let project = fetch_project(&mut *tx, &user_id, &id).await?;
     let milestones = sqlx::query_as::<_, (String, i64)>(
         "SELECT id,version FROM project_milestones
          WHERE project_id=? AND deleted_at IS NULL",
     )
     .bind(&id)
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await?;
     let timestamp = now();
-    let mut tx = state.pool.begin().await?;
     let result = sqlx::query(
         "UPDATE projects SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?",
     )
@@ -1653,17 +2475,49 @@ fn validate_milestone(title: &str, due: Option<&str>, position: i64) -> Result<(
     Ok(())
 }
 
-async fn ensure_project(
+fn validate_project_status(status: &str) -> Result<(), AppError> {
+    if matches!(status, "active" | "completed" | "archived") {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest(
+            "status must be active, completed, or archived".into(),
+        ))
+    }
+}
+
+async fn ensure_project_next_action(
     pool: &SqlitePool,
     user_id: &str,
     project_id: &str,
+    task_id: &str,
 ) -> Result<(), AppError> {
+    let exists = sqlx::query_scalar::<_, i64>(
+        "SELECT EXISTS(SELECT 1 FROM tasks
+         WHERE id=? AND user_id=? AND project_id=? AND deleted_at IS NULL)",
+    )
+    .bind(task_id)
+    .bind(user_id)
+    .bind(project_id)
+    .fetch_one(pool)
+    .await?;
+    if exists == 0 {
+        return Err(AppError::BadRequest(
+            "nextActionTaskId must reference an active task in this project".into(),
+        ));
+    }
+    Ok(())
+}
+
+async fn ensure_project<'e, E>(executor: E, user_id: &str, project_id: &str) -> Result<(), AppError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     sqlx::query_scalar::<_, String>(
         "SELECT id FROM projects WHERE id=? AND user_id=? AND deleted_at IS NULL",
     )
     .bind(project_id)
     .bind(user_id)
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await?
     .map(|_| ())
     .ok_or(AppError::NotFound)
@@ -1698,24 +2552,79 @@ async fn list_milestones(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(project_id): Path<String>,
-) -> Result<Json<Vec<Milestone>>, AppError> {
+    Query(query): Query<MilestoneListQuery>,
+) -> Result<Json<MilestoneListResponse>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     ensure_project(&state.pool, &user_id, &project_id).await?;
-    Ok(Json(
-        sqlx::query_as::<_, Milestone>(
-            "SELECT m.id,p.user_id,m.project_id,m.title,m.due,m.completed,m.completed_at,
-                    m.position,m.created_at,m.updated_at,m.version,m.deleted_at
-             FROM project_milestones m
-             JOIN projects p ON p.id=m.project_id
-             WHERE p.user_id=? AND p.deleted_at IS NULL
-               AND m.project_id=? AND m.deleted_at IS NULL
-             ORDER BY m.position,m.id",
-        )
-        .bind(user_id)
-        .bind(project_id)
-        .fetch_all(&state.pool)
-        .await?,
-    ))
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=100).contains(&limit) {
+        return Err(AppError::BadRequest(
+            "limit must be between 1 and 100".into(),
+        ));
+    }
+    let cursor = query.after.map(decode_milestone_cursor).transpose()?;
+    let mut milestones = sqlx::query_as::<_, Milestone>(
+        "SELECT m.id,p.user_id,m.project_id,m.title,m.due,m.completed,m.completed_at,
+                m.position,m.created_at,m.updated_at,m.version,m.deleted_at
+         FROM project_milestones m
+         JOIN projects p ON p.id=m.project_id
+         WHERE p.user_id=? AND p.deleted_at IS NULL
+           AND m.project_id=? AND m.deleted_at IS NULL
+           AND (? IS NULL OR (m.position,m.id) > (?,?))
+         ORDER BY m.position,m.id LIMIT ?",
+    )
+    .bind(&user_id)
+    .bind(&project_id)
+    .bind(cursor.as_ref().map(|value| value.position))
+    .bind(cursor.as_ref().map(|value| value.position))
+    .bind(cursor.as_ref().map(|value| value.id.as_str()))
+    .bind(limit + 1)
+    .fetch_all(&state.pool)
+    .await?;
+    let has_more = milestones.len() > limit as usize;
+    if has_more {
+        milestones.pop();
+    }
+    let next_cursor = has_more
+        .then(|| {
+            milestones
+                .last()
+                .map(milestone_cursor)
+                .map(encode_milestone_cursor)
+        })
+        .flatten()
+        .transpose()?;
+    Ok(Json(MilestoneListResponse {
+        items: milestones,
+        next_cursor,
+        has_more,
+    }))
+}
+
+fn milestone_cursor(milestone: &Milestone) -> MilestoneCursor {
+    MilestoneCursor {
+        v: 1,
+        position: milestone.position,
+        id: milestone.id.clone(),
+    }
+}
+
+fn encode_milestone_cursor(cursor: MilestoneCursor) -> Result<String, AppError> {
+    let payload = serde_json::to_vec(&cursor)
+        .map_err(|_| AppError::BadRequest("invalid milestone cursor".into()))?;
+    Ok(URL_SAFE_NO_PAD.encode(payload))
+}
+
+fn decode_milestone_cursor(value: String) -> Result<MilestoneCursor, AppError> {
+    let payload = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| AppError::BadRequest("invalid milestone cursor".into()))?;
+    let cursor: MilestoneCursor = serde_json::from_slice(&payload)
+        .map_err(|_| AppError::BadRequest("invalid milestone cursor".into()))?;
+    if cursor.v != 1 || cursor.position < 0 || cursor.id.is_empty() {
+        return Err(AppError::BadRequest("invalid milestone cursor".into()));
+    }
+    Ok(cursor)
 }
 
 async fn create_milestone(
@@ -1726,12 +2635,13 @@ async fn create_milestone(
 ) -> Result<(StatusCode, Json<Milestone>), AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
-    ensure_project(&state.pool, &user_id, &project_id).await?;
+    let mut tx = state.pool.begin().await?;
+    ensure_project(&mut *tx, &user_id, &project_id).await?;
     let count = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM project_milestones WHERE project_id=? AND deleted_at IS NULL",
     )
     .bind(&project_id)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await?;
     if count >= 100 {
         return Err(AppError::BadRequest(
@@ -1744,7 +2654,6 @@ async fn create_milestone(
     let timestamp = now();
     let completed = input.completed.unwrap_or(false);
     let completed_at = completed.then(|| timestamp.clone());
-    let mut tx = state.pool.begin().await?;
     sqlx::query(
         "INSERT INTO project_milestones
          (id,project_id,title,due,completed,completed_at,position,created_at,updated_at,version)
@@ -1891,12 +2800,87 @@ async fn delete_milestone(
 async fn list_events(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-) -> Result<Json<Vec<CalendarEvent>>, AppError> {
+    Query(query): Query<CalendarEventListQuery>,
+) -> Result<Json<CalendarEventListResponse>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
-    Ok(Json(sqlx::query_as::<_, CalendarEvent>(
+    for (field, value) in [("from", query.from.as_deref()), ("to", query.to.as_deref())] {
+        if let Some(value) = value {
+            value.parse::<DateTime<FixedOffset>>().map_err(|_| {
+                AppError::BadRequest(format!("{field} must be a valid RFC 3339 timestamp"))
+            })?;
+        }
+    }
+    if let (Some(from), Some(to)) = (&query.from, &query.to) {
+        validate_calendar_range(from, to)?;
+    }
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=100).contains(&limit) {
+        return Err(AppError::BadRequest(
+            "limit must be between 1 and 100".into(),
+        ));
+    }
+    let cursor = query.after.map(decode_calendar_event_cursor).transpose()?;
+    let mut events = sqlx::query_as::<_, CalendarEvent>(
         "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version
-         FROM calendar_events WHERE user_id=? AND deleted_at IS NULL ORDER BY start_at",
-    ).bind(user_id).fetch_all(&state.pool).await?))
+         FROM calendar_events
+         WHERE user_id=? AND deleted_at IS NULL
+           AND (? IS NULL OR start_at>=?) AND (? IS NULL OR start_at<?)
+           AND (? IS NULL OR (start_at,id)>(?,?))
+         ORDER BY start_at,id LIMIT ?",
+    )
+    .bind(&user_id)
+    .bind(&query.from).bind(&query.from)
+    .bind(&query.to).bind(&query.to)
+    .bind(cursor.as_ref().map(|value| value.start_at.as_str()))
+    .bind(cursor.as_ref().map(|value| value.start_at.as_str()))
+    .bind(cursor.as_ref().map(|value| value.id.as_str()))
+    .bind(limit + 1)
+    .fetch_all(&state.pool)
+    .await?;
+    let has_more = events.len() > limit as usize;
+    if has_more {
+        events.pop();
+    }
+    let next_cursor = has_more
+        .then(|| {
+            events
+                .last()
+                .map(calendar_event_cursor)
+                .map(encode_calendar_event_cursor)
+        })
+        .flatten()
+        .transpose()?;
+    Ok(Json(CalendarEventListResponse {
+        items: events,
+        next_cursor,
+        has_more,
+    }))
+}
+
+fn calendar_event_cursor(event: &CalendarEvent) -> CalendarEventCursor {
+    CalendarEventCursor {
+        v: 1,
+        start_at: event.start_at.clone(),
+        id: event.id.clone(),
+    }
+}
+
+fn encode_calendar_event_cursor(cursor: CalendarEventCursor) -> Result<String, AppError> {
+    let payload = serde_json::to_vec(&cursor)
+        .map_err(|_| AppError::BadRequest("invalid calendar cursor".into()))?;
+    Ok(URL_SAFE_NO_PAD.encode(payload))
+}
+
+fn decode_calendar_event_cursor(value: String) -> Result<CalendarEventCursor, AppError> {
+    let payload = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| AppError::BadRequest("invalid calendar cursor".into()))?;
+    let cursor: CalendarEventCursor = serde_json::from_slice(&payload)
+        .map_err(|_| AppError::BadRequest("invalid calendar cursor".into()))?;
+    if cursor.v != 1 || cursor.start_at.is_empty() || cursor.id.is_empty() {
+        return Err(AppError::BadRequest("invalid calendar cursor".into()));
+    }
+    Ok(cursor)
 }
 
 async fn fetch_event<'e, E>(executor: E, user_id: &str, id: &str) -> Result<CalendarEvent, AppError>
@@ -2047,22 +3031,23 @@ async fn sync_snapshot(
     headers: HeaderMap,
 ) -> Result<Json<SyncSnapshot>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
+    let mut tx = state.pool.begin().await?;
     let tasks = sqlx::query_as::<_, Task>(
         "SELECT id,title,notes,important,urgent,completed,due,due_time,
                 reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
          FROM tasks WHERE user_id=? AND deleted_at IS NULL ORDER BY created_at",
     )
     .bind(&user_id)
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await?;
     let projects = sqlx::query_as::<_, Project>(
-        "SELECT id,name,goal,status,start_date,due,next_action_task_id,created_at,updated_at,version
+        "SELECT id,name,goal,description,color,status,start_date,due,next_action_task_id,created_at,updated_at,version
          FROM projects WHERE user_id=? AND deleted_at IS NULL ORDER BY created_at",
-    ).bind(&user_id).fetch_all(&state.pool).await?;
+    ).bind(&user_id).fetch_all(&mut *tx).await?;
     let calendar_events = sqlx::query_as::<_, CalendarEvent>(
         "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version
          FROM calendar_events WHERE user_id=? AND deleted_at IS NULL ORDER BY start_at",
-    ).bind(&user_id).fetch_all(&state.pool).await?;
+    ).bind(&user_id).fetch_all(&mut *tx).await?;
     let milestones = sqlx::query_as::<_, Milestone>(
         "SELECT m.id,p.user_id,m.project_id,m.title,m.due,m.completed,m.completed_at,
                 m.position,m.created_at,m.updated_at,m.version,m.deleted_at
@@ -2072,14 +3057,15 @@ async fn sync_snapshot(
          ORDER BY m.project_id,m.position,m.id",
     )
     .bind(&user_id)
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await?;
     let cursor =
         sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(cursor) FROM sync_events WHERE user_id=?")
             .bind(&user_id)
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *tx)
             .await?
             .unwrap_or(0);
+    tx.commit().await?;
     Ok(Json(SyncSnapshot {
         cursor,
         tasks,
@@ -2114,5 +3100,58 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => info!("received Ctrl+C, shutting down"),
         _ = terminate => info!("received SIGTERM, shutting down"),
+    }
+}
+
+#[cfg(test)]
+mod attachment_tests {
+    use super::*;
+
+    #[test]
+    fn attachment_download_url_must_be_canonical_and_single_token() {
+        let token = attachment_download_token(
+            "https://example.test/",
+            "att-1",
+            "https://example.test/api/v1/attachments/att-1/download?token=secret",
+        );
+        assert_eq!(token, Some("secret"));
+        assert!(attachment_download_token(
+            "https://example.test",
+            "att-1",
+            "https://evil.test/api/v1/attachments/att-1/download?token=secret"
+        )
+        .is_none());
+        assert!(attachment_download_token(
+            "https://example.test",
+            "att-1",
+            "https://example.test/api/v1/attachments/att-1/download?token=secret&next=evil"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn attachment_upload_response_is_stable_for_idempotent_replay() {
+        let response = AttachmentUploadResponse {
+            items: vec![Attachment {
+                id: "att-1".into(),
+                name: "note.txt".into(),
+                mime_type: "text/plain".into(),
+                size: 4,
+                download_url: "https://example.test/api/v1/attachments/att-1/download?token=secret"
+                    .into(),
+            }],
+        };
+        let encoded = serde_json::to_string(&response).unwrap();
+        let replay: AttachmentUploadResponse = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(replay.items[0].id, "att-1");
+        assert_eq!(replay.items[0].size, 4);
+    }
+
+    #[test]
+    fn attachment_limits_cover_single_total_and_count() {
+        assert_eq!(MAX_ATTACHMENT_BYTES, 20 * 1024 * 1024);
+        assert!(MAX_TOTAL_ATTACHMENT_BYTES >= MAX_ATTACHMENT_BYTES);
+        assert!(MAX_ATTACHMENT_REQUEST_BYTES > MAX_TOTAL_ATTACHMENT_BYTES);
+        assert_eq!(MAX_ATTACHMENT_COUNT, 10);
     }
 }

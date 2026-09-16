@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "type": "artifact.completed",
+  "event_id": "evt_004",
+  "seq": 15,
+  "session_id": "sess_001",
+  "artifact": {
+    "id": "art_001",
+    "kind": "document",
+    "name": "Orialis-report.pdf",
+    "mime_type": "application/pdf",
+    "size": 48231,
+    "uri": "https://orialis.example/api/v1/attachments/art_001/download"
+  }
+}

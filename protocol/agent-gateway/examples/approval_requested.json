@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "type": "approval.request",
+  "event_id": "evt_002",
+  "seq": 13,
+  "session_id": "sess_001",
+  "request_id": "approval_001",
+  "conversation_id": "conv_001",
+  "action": "project.upload",
+  "details": {
+    "summary": "Orialis 将把报告上传到指定项目。"
+  },
+  "timeout_ms": 600000
+}

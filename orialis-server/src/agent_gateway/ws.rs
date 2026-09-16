@@ -1,6 +1,6 @@
 //! Axum WebSocket endpoint for the Orialis ↔ Hermes Agent Gateway MVP.
 
-use super::{protocol, AgentCommand, RegistryError};
+use super::{protocol, AgentCommand, EventDisposition, RegistryError};
 use crate::{AppError, AppState};
 use axum::{
     extract::{
@@ -11,6 +11,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use chrono::{Duration as ChronoDuration, Utc};
 use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::Value;
@@ -378,11 +379,13 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
     }
     tracing::info!(device_id = %hello.0, platform = %hello.3, "orialis-hermes-plugin connected");
 
+    let mut maintenance = tokio::time::interval(Duration::from_secs(1));
+    maintenance.tick().await;
     loop {
         tokio::select! {
             incoming = socket.next() => {
                 match incoming {
-                    Some(Ok(Message::Text(text))) => handle_text(&state, &mut socket, text.to_string()).await,
+                    Some(Ok(Message::Text(text))) => handle_text(&state, &mut socket, &user_id, &hello.0, text.to_string()).await,
                     Some(Ok(Message::Ping(payload))) => {
                         if socket.send(Message::Pong(payload)).await.is_err() { break; }
                     }
@@ -400,6 +403,22 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
                         if send_message(&mut socket, &message).await.is_err() { break; }
                     }
                     Some(AgentCommand::Close) | None => break,
+                }
+            }
+            _ = maintenance.tick() => {
+                for (request_id, session_id) in state.agent.expire_approvals(&hello.0).await {
+                    let timeout = protocol::GatewayMessage::ApprovalResolve {
+                        version: protocol::PROTOCOL_VERSION,
+                        event_id: format!("approval-timeout-{}", Uuid::now_v7()),
+                        seq: 0,
+                        session_id,
+                        request_id,
+                        decision: protocol::ApprovalDecision::Timeout,
+                        reason: Some("approval request timed out".into()),
+                    };
+                    if let Some(timeout) = state.agent.record_server_event(&hello.0, timeout).await {
+                        if send_message(&mut socket, &timeout).await.is_err() { break; }
+                    }
                 }
             }
         }
@@ -508,7 +527,13 @@ async fn mark_agent_device_seen(state: &AppState, user_id: &str, device_id: &str
     }
 }
 
-async fn handle_text(state: &Arc<AppState>, socket: &mut WebSocket, text: String) {
+async fn handle_text(
+    state: &Arc<AppState>,
+    socket: &mut WebSocket,
+    user_id: &str,
+    device_id: &str,
+    text: String,
+) {
     match protocol::parse_message(&text) {
         Ok(protocol::GatewayMessage::Ping { .. }) => {
             let _ = send_message(
@@ -533,6 +558,67 @@ async fn handle_text(state: &Arc<AppState>, socket: &mut WebSocket, text: String
         }) => {
             tracing::debug!(%message_id, %status, "Orialis Hermes plugin acknowledged message");
         }
+        Ok(protocol::GatewayMessage::CapabilitiesHello { resume_from, .. }) => {
+            let resume_from = resume_from.unwrap_or(0);
+            let acknowledgement = state.agent.capabilities_ack(device_id, resume_from).await;
+            if send_message(socket, &acknowledgement).await.is_err() {
+                return;
+            }
+            for message in state.agent.replay_after(device_id, resume_from).await {
+                if send_message(socket, &message).await.is_err() {
+                    return;
+                }
+            }
+        }
+        Ok(message) if message.event_metadata().is_some() => {
+            let Some((event_id, seq, _)) = message.event_metadata() else {
+                return;
+            };
+            let disposition = state.agent.accept_event(device_id, message.clone()).await;
+            match disposition {
+                EventDisposition::Accepted => {
+                    let _ = send_message(
+                        socket,
+                        &protocol::agent_ack(event_id, seq, "received", None),
+                    )
+                    .await;
+                    state.mobile.notify(
+                        user_id,
+                        protocol::mobile_event(serde_json::json!({
+                            "kind": "agent_gateway_event",
+                            "event": serde_json::to_value(message).unwrap_or(Value::Null),
+                        })),
+                    );
+                }
+                EventDisposition::Duplicate => {
+                    let _ = send_message(
+                        socket,
+                        &protocol::agent_ack(event_id, seq, "duplicate", None),
+                    )
+                    .await;
+                }
+                EventDisposition::Gap { expected_seq } => {
+                    let _ = send_message(
+                        socket,
+                        &protocol::agent_ack(event_id, seq, "gap", Some(expected_seq)),
+                    )
+                    .await;
+                }
+                EventDisposition::UnknownApproval => {
+                    let _ =
+                        send_message(socket, &protocol::agent_ack(event_id, seq, "unknown", None))
+                            .await;
+                    let _ = send_error(
+                        socket,
+                        "UNKNOWN_APPROVAL",
+                        "approval request is not pending",
+                    )
+                    .await;
+                }
+            }
+        }
+        Ok(protocol::GatewayMessage::AgentAck { .. })
+        | Ok(protocol::GatewayMessage::CapabilitiesAck { .. }) => {}
         Ok(_) => {
             let _ = send_error(
                 socket,
@@ -605,6 +691,7 @@ pub async fn debug_message(
             .unwrap_or_else(|| format!("msg_{}", Uuid::now_v7())),
         conversation_id: input.conversation_id,
         content: input.content,
+        attachments: vec![],
     };
     let receiver = state
         .agent
@@ -637,12 +724,17 @@ pub(crate) async fn dispatch_message(
     conversation_id: String,
     message_id: String,
     content: String,
+    attachments: Vec<protocol::GatewayAttachment>,
 ) {
+    let Some(attempts) = claim_delivery(&state, &message_id).await else {
+        return;
+    };
     let request = protocol::GatewayMessage::MessageSend {
         version: protocol::PROTOCOL_VERSION,
         message_id: message_id.clone(),
         conversation_id: conversation_id.clone(),
         content,
+        attachments,
     };
     let active_device_id = match sqlx::query_scalar::<_, Option<String>>(
         "SELECT active_device_id FROM agent_preferences WHERE user_id=?",
@@ -665,6 +757,7 @@ pub(crate) async fn dispatch_message(
         Ok(receiver) => receiver,
         Err(error) => {
             tracing::warn!(%error, %message_id, "could not dispatch mobile message to Hermes");
+            fail_delivery(&state, &message_id, attempts, error.to_string()).await;
             return;
         }
     };
@@ -672,10 +765,24 @@ pub(crate) async fn dispatch_message(
         Ok(Ok(reply)) => reply,
         Ok(Err(_)) => {
             tracing::warn!(%message_id, "Hermes disconnected before replying to mobile message");
+            fail_delivery(
+                &state,
+                &message_id,
+                attempts,
+                "agent connection closed".into(),
+            )
+            .await;
             return;
         }
         Err(_) => {
             tracing::warn!(%message_id, "Hermes reply timed out for mobile message");
+            fail_delivery(
+                &state,
+                &message_id,
+                attempts,
+                "agent reply timed out".into(),
+            )
+            .await;
             return;
         }
     };
@@ -684,10 +791,18 @@ pub(crate) async fn dispatch_message(
         reply_to,
         conversation_id: reply_conversation_id,
         content,
+        attachments,
         ..
     } = reply
     else {
         tracing::warn!(%message_id, "Hermes returned a non-reply response for mobile message");
+        fail_delivery(
+            &state,
+            &message_id,
+            attempts,
+            "agent returned a non-reply response".into(),
+        )
+        .await;
         return;
     };
     if reply_to != message_id || reply_conversation_id != conversation_id {
@@ -697,37 +812,114 @@ pub(crate) async fn dispatch_message(
             reply_conversation_id = %reply_conversation_id,
             "Hermes reply did not match mobile message"
         );
+        fail_delivery(
+            &state,
+            &message_id,
+            attempts,
+            "agent reply did not match request".into(),
+        )
+        .await;
         return;
     }
 
+    let attachments_json =
+        match canonical_reply_attachments(&state, &user_id, &conversation_id, &attachments).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(%message_id, %error, "Hermes reply contained invalid attachments");
+                fail_delivery(
+                    &state,
+                    &message_id,
+                    attempts,
+                    "agent reply contained invalid attachments".into(),
+                )
+                .await;
+                return;
+            }
+        };
+    let mut transaction = match state.pool.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            tracing::error!(%error, %message_id, "failed to start reply transaction");
+            fail_delivery(
+                &state,
+                &message_id,
+                attempts,
+                "could not start reply transaction".into(),
+            )
+            .await;
+            return;
+        }
+    };
     let result = sqlx::query(
-        "INSERT INTO messages (id,user_id,conversation_id,role,content)
-         VALUES (?,?,?,'assistant',?) ON CONFLICT(id) DO NOTHING",
+        "INSERT INTO messages (id,user_id,conversation_id,role,content,attachments_json)
+         VALUES (?,?,?,'assistant',?,?) ON CONFLICT(id) DO NOTHING",
     )
     .bind(&reply_id)
     .bind(&user_id)
     .bind(&conversation_id)
     .bind(&content)
-    .execute(&state.pool)
+    .bind(&attachments_json)
+    .execute(&mut *transaction)
     .await;
     let Ok(result) = result else {
         tracing::error!(%message_id, "failed to persist Hermes reply");
+        fail_delivery(
+            &state,
+            &message_id,
+            attempts,
+            "failed to persist agent reply".into(),
+        )
+        .await;
         return;
     };
-    if result.rows_affected() == 0 {
-        return;
-    }
     let Ok((created_at, version)) = sqlx::query_as::<_, (String, i64)>(
         "SELECT created_at,version FROM messages WHERE id=? AND user_id=?",
     )
     .bind(&reply_id)
     .bind(&user_id)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *transaction)
     .await
     else {
         tracing::error!(%reply_id, "failed to read persisted Hermes reply");
+        fail_delivery(
+            &state,
+            &message_id,
+            attempts,
+            "failed to read persisted agent reply".into(),
+        )
+        .await;
         return;
     };
+    if let Err(error) = sqlx::query("DELETE FROM agent_delivery_queue WHERE message_id=?")
+        .bind(&message_id)
+        .execute(&mut *transaction)
+        .await
+    {
+        tracing::error!(%error, %message_id, "failed to remove delivered agent message");
+        fail_delivery(
+            &state,
+            &message_id,
+            attempts,
+            "failed to finalize agent delivery".into(),
+        )
+        .await;
+        return;
+    }
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(%error, %message_id, "failed to commit agent delivery");
+        fail_delivery(
+            &state,
+            &message_id,
+            attempts,
+            "failed to commit agent delivery".into(),
+        )
+        .await;
+        return;
+    }
+    if result.rows_affected() == 0 {
+        return;
+    }
     state.mobile.notify(
         &user_id,
         protocol::mobile_message(serde_json::json!({
@@ -735,9 +927,124 @@ pub(crate) async fn dispatch_message(
             "conversationId": conversation_id,
             "role": "assistant",
             "content": content,
+            "attachments": serde_json::from_str::<Value>(&attachments_json).unwrap_or_default(),
             "createdAt": created_at,
             "version": version,
         })),
     );
     tracing::info!(%message_id, %reply_id, "persisted Hermes reply for mobile conversation");
+}
+
+async fn claim_delivery(state: &AppState, message_id: &str) -> Option<i64> {
+    let current = Utc::now();
+    let now = current.to_rfc3339();
+    let result = sqlx::query(
+        "UPDATE agent_delivery_queue
+         SET attempts=attempts+1,next_attempt_at=?,updated_at=?
+         WHERE message_id=? AND next_attempt_at<=?",
+    )
+    .bind((current + ChronoDuration::minutes(2)).to_rfc3339())
+    .bind(&now)
+    .bind(message_id)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .ok()?;
+    if result.rows_affected() != 1 {
+        return None;
+    }
+    sqlx::query_scalar("SELECT attempts FROM agent_delivery_queue WHERE message_id=?")
+        .bind(message_id)
+        .fetch_optional(&state.pool)
+        .await
+        .ok()
+        .flatten()
+}
+
+async fn fail_delivery(state: &AppState, message_id: &str, attempts: i64, error: String) {
+    let delay = 2_i64.pow(attempts.clamp(0, 8) as u32).min(300);
+    if let Err(database_error) = sqlx::query(
+        "UPDATE agent_delivery_queue SET next_attempt_at=?,last_error=?,updated_at=?
+         WHERE message_id=?",
+    )
+    .bind((Utc::now() + ChronoDuration::seconds(delay)).to_rfc3339())
+    .bind(error)
+    .bind(Utc::now().to_rfc3339())
+    .bind(message_id)
+    .execute(&state.pool)
+    .await
+    {
+        tracing::error!(%database_error, %message_id, "failed to reschedule agent delivery");
+    }
+}
+
+pub(crate) async fn dispatch_due_messages(state: Arc<AppState>) {
+    let rows = match sqlx::query_as::<_, (String, String, String, String, String)>(
+        "SELECT q.user_id,q.conversation_id,q.message_id,m.content,m.attachments_json
+         FROM agent_delivery_queue q JOIN messages m ON m.id=q.message_id
+         WHERE q.next_attempt_at<=? ORDER BY q.created_at,q.message_id LIMIT 8",
+    )
+    .bind(Utc::now().to_rfc3339())
+    .fetch_all(&state.pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(%error, "could not read pending agent deliveries");
+            return;
+        }
+    };
+    for (user_id, conversation_id, message_id, content, attachments_json) in rows {
+        let attachments = serde_json::from_str::<Vec<crate::Attachment>>(&attachments_json)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|attachment| protocol::GatewayAttachment {
+                id: attachment.id,
+                name: attachment.name,
+                mime_type: attachment.mime_type,
+                size: attachment.size,
+                download_url: attachment.download_url,
+            })
+            .collect();
+        dispatch_message(
+            state.clone(),
+            user_id,
+            conversation_id,
+            message_id,
+            content,
+            attachments,
+        )
+        .await;
+    }
+}
+
+async fn canonical_reply_attachments(
+    state: &AppState,
+    user_id: &str,
+    conversation_id: &str,
+    attachments: &[protocol::GatewayAttachment],
+) -> Result<String, sqlx::Error> {
+    let mut canonical = Vec::with_capacity(attachments.len());
+    for attachment in attachments {
+        let row = sqlx::query_as::<_, (String, String, i64, String)>(
+            "SELECT original_name,mime_type,size_bytes,conversation_id
+             FROM attachments WHERE id=? AND user_id=?",
+        )
+        .bind(&attachment.id)
+        .bind(user_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+        if row.3 != conversation_id {
+            return Err(sqlx::Error::RowNotFound);
+        }
+        canonical.push(serde_json::json!({
+            "id": attachment.id,
+            "name": row.0,
+            "mimeType": row.1,
+            "size": row.2,
+            "downloadUrl": format!("{}/api/v1/attachments/{}/download", state.public_url.trim_end_matches('/'), attachment.id),
+        }));
+    }
+    serde_json::to_string(&canonical).map_err(|error| sqlx::Error::Protocol(error.to_string()))
 }

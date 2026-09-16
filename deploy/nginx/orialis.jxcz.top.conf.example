@@ -23,7 +23,7 @@ server {
     ssl_certificate /etc/letsencrypt/live/orialis.jxcz.top/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/orialis.jxcz.top/privkey.pem;
 
-    client_max_body_size 2m;
+    client_max_body_size 25m;
 
     # Keep the Agent Gateway upgrade explicit; the Hermes plugin uses a long-lived connection.
     location /api/v1/agent/ws {

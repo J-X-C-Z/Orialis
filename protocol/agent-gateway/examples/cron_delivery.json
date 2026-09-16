@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "type": "cron.delivery",
+  "delivery_id": "delivery_001",
+  "conversation_id": "conv_001",
+  "content": "Orialis 的定时提醒：检查项目进度。",
+  "metadata": {
+    "cron_id": "cron_001",
+    "scheduled_for": "2026-09-17T09:00:00Z"
+  }
+}

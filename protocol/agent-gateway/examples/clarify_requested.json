@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "type": "clarify.request",
+  "event_id": "evt_001",
+  "seq": 12,
+  "session_id": "sess_001",
+  "request_id": "clarify_001",
+  "conversation_id": "conv_001",
+  "question": "Orialis 应按哪个截止日期创建任务？",
+  "choices": ["今天", "明天"],
+  "multi_select": false
+}

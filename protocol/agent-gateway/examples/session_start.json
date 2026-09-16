@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "type": "session.start",
+  "event_id": "evt_005",
+  "seq": 16,
+  "session_id": "sess_001",
+  "conversation_id": "conv_001"
+}

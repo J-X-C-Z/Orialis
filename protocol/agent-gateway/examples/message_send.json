@@ -3,5 +3,14 @@
   "type": "message.send",
   "message_id": "msg_001",
   "conversation_id": "conv_001",
-  "content": "你好 Hermes"
+  "content": "请分析这个文件",
+  "attachments": [
+    {
+      "id": "att_001",
+      "name": "report.pdf",
+      "mime_type": "application/pdf",
+      "size": 48231,
+      "download_url": "https://orialis.example/api/v1/attachments/att_001/download"
+    }
+  ]
 }

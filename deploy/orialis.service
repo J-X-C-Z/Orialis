@@ -16,8 +16,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/orialis
+ReadWritePaths=/var/lib/orialis /var/lib/orialis/uploads
 
 [Install]
 WantedBy=multi-user.target
-

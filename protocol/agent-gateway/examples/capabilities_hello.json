@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "type": "capabilities.hello",
+  "capabilities": [
+    "agent.delta",
+    "clarify.request",
+    "approval.request",
+    "artifact.completed"
+  ],
+  "resume_from": 12
+}

@@ -7,10 +7,40 @@ use protocol::GatewayMessage;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt,
+    time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 const COMPLETED_REQUEST_CACHE: usize = 4096;
+const EVENT_CACHE: usize = 4096;
+const DEFAULT_APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
+const MAX_APPROVAL_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
+pub(crate) const SERVER_CAPABILITIES: &[&str] = &[
+    "agent.typing",
+    "agent.start",
+    "agent.delta",
+    "agent.complete",
+    "agent.error",
+    "agent.status",
+    "tool.started",
+    "tool.progress",
+    "tool.completed",
+    "tool.failed",
+    "clarify.request",
+    "clarify.resolve",
+    "clarify.cancel",
+    "approval.request",
+    "approval.resolve",
+    "session.start",
+    "session.update",
+    "session.complete",
+    "session.cancel",
+    "session.error",
+    "artifact.started",
+    "artifact.progress",
+    "artifact.completed",
+    "artifact.failed",
+];
 
 #[derive(Debug)]
 pub(crate) enum AgentCommand {
@@ -25,6 +55,24 @@ struct AgentConnection {
     device_id: String,
     platform: String,
     command_tx: mpsc::Sender<AgentCommand>,
+}
+
+#[derive(Default)]
+struct DeviceEventState {
+    last_inbound_seq: u64,
+    seen_event_ids: HashSet<String>,
+    seen_event_order: VecDeque<String>,
+    inbound_events: VecDeque<GatewayMessage>,
+    next_outbound_seq: u64,
+    outbound_events: VecDeque<GatewayMessage>,
+    pending_approvals: HashMap<String, PendingApproval>,
+    resolved_approvals: HashSet<String>,
+    resolved_approval_order: VecDeque<String>,
+}
+
+struct PendingApproval {
+    expires_at: Instant,
+    session_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +92,7 @@ struct RegistryState {
     pending: HashMap<String, PendingRequest>,
     completed: HashSet<String>,
     completed_order: VecDeque<String>,
+    events: HashMap<String, DeviceEventState>,
 }
 
 #[derive(Clone, Default)]
@@ -56,6 +105,14 @@ pub enum RegistryError {
     NoConnection,
     ConnectionClosed,
     DuplicateMessage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EventDisposition {
+    Accepted,
+    Duplicate,
+    Gap { expected_seq: u64 },
+    UnknownApproval,
 }
 
 impl fmt::Display for RegistryError {
@@ -236,6 +293,226 @@ impl AgentRegistry {
             tracing::warn!(reply_to = %reply_to, "received reply for unknown Orialis Agent request");
         }
     }
+
+    pub(crate) async fn accept_event(
+        &self,
+        device_id: &str,
+        message: GatewayMessage,
+    ) -> EventDisposition {
+        let Some((event_id, seq, _)) = message.event_metadata() else {
+            return EventDisposition::UnknownApproval;
+        };
+        let mut state = self.state.lock().await;
+        let events = state.events.entry(device_id.to_owned()).or_default();
+        if events.seen_event_ids.contains(event_id) || seq <= events.last_inbound_seq {
+            return EventDisposition::Duplicate;
+        }
+        if seq > events.last_inbound_seq.saturating_add(1) {
+            return EventDisposition::Gap {
+                expected_seq: events.last_inbound_seq.saturating_add(1),
+            };
+        }
+
+        let mut disposition = EventDisposition::Accepted;
+        if let GatewayMessage::ApprovalRequest {
+            request_id,
+            timeout_ms,
+            ..
+        } = &message
+        {
+            if events.pending_approvals.contains_key(request_id)
+                || events.resolved_approvals.contains(request_id)
+            {
+                disposition = EventDisposition::Duplicate;
+            } else {
+                let timeout = timeout_ms
+                    .map(|value| Duration::from_millis(value).min(MAX_APPROVAL_TIMEOUT))
+                    .unwrap_or(DEFAULT_APPROVAL_TIMEOUT);
+                events.pending_approvals.insert(
+                    request_id.clone(),
+                    PendingApproval {
+                        expires_at: Instant::now() + timeout,
+                        session_id: session_id_for(&message),
+                    },
+                );
+            }
+        } else if let GatewayMessage::ApprovalResolve { request_id, .. } = &message {
+            if events.pending_approvals.remove(request_id).is_none() {
+                disposition = EventDisposition::UnknownApproval;
+            } else {
+                remember_resolved_approval(events, request_id);
+            }
+        }
+
+        events.last_inbound_seq = seq;
+        remember_event_id(events, event_id);
+        events.inbound_events.push_back(message);
+        while events.inbound_events.len() > EVENT_CACHE {
+            events.inbound_events.pop_front();
+        }
+        disposition
+    }
+
+    pub(crate) async fn expire_approvals(&self, device_id: &str) -> Vec<(String, String)> {
+        let mut state = self.state.lock().await;
+        let events = state.events.entry(device_id.to_owned()).or_default();
+        let now = Instant::now();
+        let expired = events
+            .pending_approvals
+            .iter()
+            .filter_map(|(request_id, approval)| {
+                (approval.expires_at <= now)
+                    .then_some((request_id.clone(), approval.session_id.clone()))
+            })
+            .collect::<Vec<_>>();
+        for (request_id, _) in &expired {
+            events.pending_approvals.remove(request_id);
+            remember_resolved_approval(events, request_id);
+        }
+        expired
+    }
+
+    pub(crate) async fn capabilities_ack(
+        &self,
+        device_id: &str,
+        resume_from: u64,
+    ) -> GatewayMessage {
+        let mut state = self.state.lock().await;
+        let events = state.events.entry(device_id.to_owned()).or_default();
+        GatewayMessage::CapabilitiesAck {
+            version: protocol::PROTOCOL_VERSION,
+            capabilities: SERVER_CAPABILITIES
+                .iter()
+                .map(|value| (*value).into())
+                .collect(),
+            resume_from: resume_from.min(events.next_outbound_seq.saturating_sub(1)),
+            next_seq: events.next_outbound_seq.max(1),
+        }
+    }
+
+    pub(crate) async fn replay_after(
+        &self,
+        device_id: &str,
+        resume_from: u64,
+    ) -> Vec<GatewayMessage> {
+        let state = self.state.lock().await;
+        state
+            .events
+            .get(device_id)
+            .map(|events| {
+                events
+                    .outbound_events
+                    .iter()
+                    .filter(|message| {
+                        message
+                            .event_metadata()
+                            .is_some_and(|(_, seq, _)| seq > resume_from)
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub(crate) async fn record_server_event(
+        &self,
+        device_id: &str,
+        message: GatewayMessage,
+    ) -> Option<GatewayMessage> {
+        if message.event_metadata().is_none() {
+            return None;
+        }
+        let mut state = self.state.lock().await;
+        let events = state.events.entry(device_id.to_owned()).or_default();
+        events.next_outbound_seq = events.next_outbound_seq.saturating_add(1).max(1);
+        let event = message.with_seq(events.next_outbound_seq);
+        events.outbound_events.push_back(event.clone());
+        while events.outbound_events.len() > EVENT_CACHE {
+            events.outbound_events.pop_front();
+        }
+        Some(event)
+    }
+
+    /// Queue a structured event for a device and assign its server sequence.
+    /// Current callers may still use the durable message queue; this method is
+    /// the transport hook for future server-originated session/tool events.
+    pub(crate) async fn send_event_for_user(
+        &self,
+        user_id: &str,
+        device_id: Option<&str>,
+        message: GatewayMessage,
+    ) -> Result<GatewayMessage, RegistryError> {
+        if message.event_metadata().is_none() {
+            return Err(RegistryError::ConnectionClosed);
+        }
+        let (command_tx, event) = {
+            let mut state = self.state.lock().await;
+            let (connection_device_id, connection_command_tx) = state
+                .connections
+                .values()
+                .find(|connection| {
+                    connection.user_id == user_id
+                        && device_id.is_none_or(|device_id| connection.device_id == device_id)
+                })
+                .map(|connection| (connection.device_id.clone(), connection.command_tx.clone()))
+                .ok_or(RegistryError::NoConnection)?;
+            let event_id = message.event_metadata().map(|(id, _, _)| id.to_owned());
+            let events = state.events.entry(connection_device_id).or_default();
+            if event_id.is_some_and(|id| {
+                events.seen_event_ids.contains(&id)
+                    || events.outbound_events.iter().any(|event| {
+                        event
+                            .event_metadata()
+                            .is_some_and(|(existing, _, _)| existing == id)
+                    })
+            }) {
+                return Err(RegistryError::DuplicateMessage);
+            }
+            events.next_outbound_seq = events.next_outbound_seq.saturating_add(1).max(1);
+            let event = message.with_seq(events.next_outbound_seq);
+            events.outbound_events.push_back(event.clone());
+            while events.outbound_events.len() > EVENT_CACHE {
+                events.outbound_events.pop_front();
+            }
+            (connection_command_tx, event)
+        };
+        command_tx
+            .send(AgentCommand::Send(event.clone()))
+            .await
+            .map_err(|_| RegistryError::ConnectionClosed)?;
+        Ok(event)
+    }
+}
+
+fn remember_event_id(events: &mut DeviceEventState, event_id: &str) {
+    if events.seen_event_ids.insert(event_id.to_owned()) {
+        events.seen_event_order.push_back(event_id.to_owned());
+        while events.seen_event_order.len() > EVENT_CACHE {
+            if let Some(oldest) = events.seen_event_order.pop_front() {
+                events.seen_event_ids.remove(&oldest);
+            }
+        }
+    }
+}
+
+fn remember_resolved_approval(events: &mut DeviceEventState, request_id: &str) {
+    if events.resolved_approvals.insert(request_id.to_owned()) {
+        events
+            .resolved_approval_order
+            .push_back(request_id.to_owned());
+        while events.resolved_approval_order.len() > EVENT_CACHE {
+            if let Some(oldest) = events.resolved_approval_order.pop_front() {
+                events.resolved_approvals.remove(&oldest);
+            }
+        }
+    }
+}
+
+fn session_id_for(message: &GatewayMessage) -> String {
+    message
+        .event_metadata()
+        .map(|(_, _, session_id)| session_id.to_owned())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -252,6 +529,7 @@ mod tests {
                 message_id: "msg_1".into(),
                 conversation_id: "conv_1".into(),
                 content: "hello".into(),
+                attachments: vec![],
             })
             .await;
         assert!(matches!(result, Err(RegistryError::NoConnection)));
@@ -275,6 +553,7 @@ mod tests {
             message_id: "msg_1".into(),
             conversation_id: "conv_1".into(),
             content: "hello".into(),
+            attachments: vec![],
         };
         let receiver = registry.send_request(message.clone()).await.unwrap();
         assert!(matches!(
@@ -288,6 +567,7 @@ mod tests {
                 reply_to: "msg_1".into(),
                 conversation_id: "conv_1".into(),
                 content: "done".into(),
+                attachments: vec![],
             })
             .await;
         assert!(receiver.await.is_ok());
@@ -298,6 +578,7 @@ mod tests {
                     message_id: "msg_1".into(),
                     conversation_id: "conv_1".into(),
                     content: "hello".into(),
+                    attachments: vec![],
                 })
                 .await,
             Err(RegistryError::DuplicateMessage)
@@ -337,6 +618,7 @@ mod tests {
                     message_id: "msg_windows".into(),
                     conversation_id: "conv_1".into(),
                     content: "use Windows".into(),
+                    attachments: vec![],
                 },
             )
             .await
@@ -353,6 +635,7 @@ mod tests {
                 reply_to: "msg_windows".into(),
                 conversation_id: "conv_1".into(),
                 content: "done".into(),
+                attachments: vec![],
             })
             .await;
         assert!(receiver.await.is_ok());
@@ -393,5 +676,115 @@ mod tests {
             .await;
         assert!(matches!(old_rx.recv().await, Some(AgentCommand::Close)));
         assert_eq!(registry.online_agents("user-1").await.len(), 2);
+    }
+
+    fn agent_status(event_id: &str, seq: u64) -> GatewayMessage {
+        GatewayMessage::AgentStatus {
+            version: protocol::PROTOCOL_VERSION,
+            event_id: event_id.into(),
+            seq,
+            session_id: "session-1".into(),
+            status: "running".into(),
+            message: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn event_sequence_is_idempotent_and_survives_reconnect() {
+        let registry = AgentRegistry::default();
+        assert_eq!(
+            registry
+                .accept_event("device-1", agent_status("event-1", 1))
+                .await,
+            EventDisposition::Accepted
+        );
+        assert_eq!(
+            registry
+                .accept_event("device-1", agent_status("event-1", 1))
+                .await,
+            EventDisposition::Duplicate
+        );
+        assert_eq!(
+            registry
+                .accept_event("device-1", agent_status("event-3", 3))
+                .await,
+            EventDisposition::Gap { expected_seq: 2 }
+        );
+        assert_eq!(
+            registry
+                .accept_event("device-1", agent_status("event-2", 2))
+                .await,
+            EventDisposition::Accepted
+        );
+        assert_eq!(
+            registry.replay_after("device-1", 0).await,
+            Vec::<GatewayMessage>::new()
+        );
+    }
+
+    #[tokio::test]
+    async fn approvals_are_resolved_once_and_expire() {
+        let registry = AgentRegistry::default();
+        let request = GatewayMessage::ApprovalRequest {
+            version: protocol::PROTOCOL_VERSION,
+            event_id: "approval-event-1".into(),
+            seq: 1,
+            session_id: "session-1".into(),
+            request_id: "approval-1".into(),
+            action: "calendar.write".into(),
+            details: serde_json::json!({"title": "demo"}),
+            timeout_ms: Some(0),
+        };
+        assert_eq!(
+            registry.accept_event("device-1", request.clone()).await,
+            EventDisposition::Accepted
+        );
+        assert_eq!(
+            registry.accept_event("device-1", request).await,
+            EventDisposition::Duplicate
+        );
+        assert_eq!(
+            registry.expire_approvals("device-1").await,
+            vec![("approval-1".into(), "session-1".into())]
+        );
+        let resolve = GatewayMessage::ApprovalResolve {
+            version: protocol::PROTOCOL_VERSION,
+            event_id: "approval-event-2".into(),
+            seq: 2,
+            session_id: "session-1".into(),
+            request_id: "approval-1".into(),
+            decision: protocol::ApprovalDecision::Once,
+            reason: None,
+        };
+        assert_eq!(
+            registry.accept_event("device-1", resolve).await,
+            EventDisposition::UnknownApproval
+        );
+    }
+
+    #[tokio::test]
+    async fn server_events_receive_sequences_and_can_be_replayed() {
+        let registry = AgentRegistry::default();
+        let (command_tx, mut command_rx) = mpsc::channel(2);
+        registry
+            .register_connection(
+                "connection-1".into(),
+                "user-1".into(),
+                "device-1".into(),
+                "test".into(),
+                command_tx,
+            )
+            .await;
+        let sent = registry
+            .send_event_for_user("user-1", Some("device-1"), agent_status("server-1", 0))
+            .await
+            .unwrap();
+        assert_eq!(sent.event_metadata().map(|(_, seq, _)| seq), Some(1));
+        assert!(matches!(
+            command_rx.recv().await,
+            Some(AgentCommand::Send(_))
+        ));
+        assert_eq!(registry.replay_after("device-1", 0).await.len(), 1);
+        assert_eq!(registry.replay_after("device-1", 1).await.len(), 0);
     }
 }

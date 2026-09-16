@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "type": "event",
+  "event_id": "evt_006",
+  "event_type": "artifact.ready",
+  "sequence": 17,
+  "occurred_at": "2026-09-17T08:00:04Z",
+  "session_id": "sess_001",
+  "correlation_id": "cmd_001",
+  "payload": {
+    "artifact_id": "art_001",
+    "kind": "document",
+    "name": "Orialis-report.pdf",
+    "mime_type": "application/pdf",
+    "size": 48231,
+    "download_url": "https://orialis.example/api/v1/attachments/art_001/download"
+  }
+}
