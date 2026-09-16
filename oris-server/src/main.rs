@@ -5,6 +5,7 @@ use axum::{
     routing::{get, patch, post},
     Json, Router,
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, NaiveTime, Utc};
 use oris_core::{metadata, ServiceMetadata, API_VERSION, SERVICE_NAME};
 use scrypt::{
@@ -200,6 +201,33 @@ struct TaskPatch {
     #[serde(default, deserialize_with = "deserialize_patch")]
     recurrence: Option<PatchValue<Value>>,
     base_version: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskListResponse {
+    items: Vec<Task>,
+    next_cursor: Option<String>,
+    has_more: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskListQuery {
+    after: Option<String>,
+    limit: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskCursor {
+    v: u8,
+    due_is_null: bool,
+    due: Option<String>,
+    due_time_is_null: bool,
+    due_time: Option<String>,
+    created_at: String,
+    id: String,
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -757,19 +785,99 @@ async fn current_session(
 async fn list_tasks(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-) -> Result<Json<Vec<Task>>, AppError> {
+    Query(query): Query<TaskListQuery>,
+) -> Result<Json<TaskListResponse>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
-    Ok(Json(
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=100).contains(&limit) {
+        return Err(AppError::BadRequest(
+            "limit must be between 1 and 100".into(),
+        ));
+    }
+    let cursor = query.after.map(decode_task_cursor).transpose()?;
+    let fetch_limit = limit + 1;
+    let mut tasks = if let Some(cursor) = cursor {
+        sqlx::query_as::<_, Task>(
+            "SELECT id,title,notes,important,urgent,completed,due,due_time,
+                    reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
+             FROM tasks
+             WHERE user_id=? AND deleted_at IS NULL
+               AND (due IS NULL,COALESCE(due,''),due_time IS NULL,
+                    COALESCE(due_time,''),created_at,id) > (?,?,?,?,?,?)
+             ORDER BY due IS NULL,due,due_time IS NULL,due_time,created_at,id
+             LIMIT ?",
+        )
+        .bind(&user_id)
+        .bind(cursor.due_is_null as i64)
+        .bind(cursor.due.unwrap_or_default())
+        .bind(cursor.due_time_is_null as i64)
+        .bind(cursor.due_time.unwrap_or_default())
+        .bind(cursor.created_at)
+        .bind(cursor.id)
+        .bind(fetch_limit)
+        .fetch_all(&state.pool)
+        .await?
+    } else {
         sqlx::query_as::<_, Task>(
             "SELECT id,title,notes,important,urgent,completed,due,due_time,
                     reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
              FROM tasks WHERE user_id=? AND deleted_at IS NULL
-             ORDER BY due IS NULL,due,due_time,created_at",
+             ORDER BY due IS NULL,due,due_time IS NULL,due_time,created_at,id
+             LIMIT ?",
         )
-        .bind(user_id)
+        .bind(&user_id)
+        .bind(fetch_limit)
         .fetch_all(&state.pool)
-        .await?,
-    ))
+        .await?
+    };
+    let has_more = tasks.len() > limit as usize;
+    if has_more {
+        tasks.pop();
+    }
+    let next_cursor = has_more
+        .then(|| tasks.last().map(task_cursor).map(encode_task_cursor))
+        .flatten()
+        .transpose()?;
+    Ok(Json(TaskListResponse {
+        items: tasks,
+        next_cursor,
+        has_more,
+    }))
+}
+
+fn task_cursor(task: &Task) -> TaskCursor {
+    TaskCursor {
+        v: 1,
+        due_is_null: task.due.is_none(),
+        due: task.due.clone(),
+        due_time_is_null: task.due_time.is_none(),
+        due_time: task.due_time.clone(),
+        created_at: task.created_at.clone(),
+        id: task.id.clone(),
+    }
+}
+
+fn encode_task_cursor(cursor: TaskCursor) -> Result<String, AppError> {
+    let payload = serde_json::to_vec(&cursor)
+        .map_err(|_| AppError::BadRequest("invalid task cursor".into()))?;
+    Ok(URL_SAFE_NO_PAD.encode(payload))
+}
+
+fn decode_task_cursor(value: String) -> Result<TaskCursor, AppError> {
+    let payload = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| AppError::BadRequest("invalid task cursor".into()))?;
+    let cursor: TaskCursor = serde_json::from_slice(&payload)
+        .map_err(|_| AppError::BadRequest("invalid task cursor".into()))?;
+    if cursor.v != 1
+        || cursor.due_is_null != cursor.due.is_none()
+        || cursor.due_time_is_null != cursor.due_time.is_none()
+        || cursor.id.is_empty()
+        || cursor.created_at.is_empty()
+    {
+        return Err(AppError::BadRequest("invalid task cursor".into()));
+    }
+    Ok(cursor)
 }
 
 async fn fetch_task<'e, E>(executor: E, user_id: &str, id: &str) -> Result<Task, AppError>

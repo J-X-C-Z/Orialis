@@ -7,6 +7,7 @@ license = "UNLICENSED"
 
 [dependencies]
 axum = "0.8"
+base64 = "0.22"
 chrono = { version = "0.4", features = ["clock"] }
 oris-core = { path = "../oris-core" }
 serde = { version = "1", features = ["derive"] }

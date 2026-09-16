@@ -48,7 +48,7 @@ Cookie: oris_session=<accessToken>
 | POST | `/api/v1/auth/login` | 否 | 已实现 | 登录并创建 Session |
 | POST | `/api/v1/auth/logout` | 是 | 已实现 | 撤销当前 Session |
 | GET | `/api/v1/auth/session` | 是 | 已实现 | 查询当前用户 |
-| GET/POST | `/api/v1/tasks` | 是 | 已实现 | 查询或创建任务 |
+| GET/POST | `/api/v1/tasks` | 是 | 已实现 | 分页查询或创建任务 |
 | PATCH/DELETE | `/api/v1/tasks/{id}` | 是 | 已实现 | 更新或软删除任务 |
 | GET/POST | `/api/v1/projects` | 是 | 已实现 | 查询或创建项目 |
 | PATCH/DELETE | `/api/v1/projects/{id}` | 是 | 已实现 | 更新或软删除项目 |
@@ -184,12 +184,27 @@ Authorization: Session <accessToken>
 ### 4.2 查询任务
 
 ```http
-GET /api/v1/tasks
+GET /api/v1/tasks?limit=50&after=<opaque-cursor>
 Authorization: Session <accessToken>
 ```
 
-返回当前用户全部未删除任务的数组。当前无筛选、分页或单任务 `GET`
-接口；默认按截止日期、截止时间和创建时间排序。
+返回当前用户未删除任务的一页，默认 `limit=50`，允许范围为 `1–100`。
+服务端按截止日期、截止时间、创建时间和实体 ID 稳定排序；没有截止日期或
+截止时间的任务排在有值任务之后。
+
+响应结构：
+
+```json
+{
+  "items": [],
+  "nextCursor": "<opaque-cursor>",
+  "hasMore": true
+}
+```
+
+首次请求省略 `after`；后续请求原样携带上一页的 `nextCursor`。最后一页的
+`nextCursor` 为 `null`。游标由服务端生成，格式无须客户端解析；非法游标或
+超出范围的 `limit` 返回 `400`。当前仍无任务筛选或单任务 `GET` 接口。
 
 ### 4.3 创建任务
 
@@ -605,6 +620,6 @@ JSON 解析失败等由 Axum 提取器直接生成的错误，当前不一定符
 - 里程碑通过项目嵌套路由提供 CRUD、乐观并发控制和删除墓碑事件。
 - `sync/snapshot` 当前未包含独立的生成时间字段；客户端应以返回的 `cursor`
   作为恢复边界。
-- 当前没有分页和时间范围查询，列表接口不适合大数据量长期使用。
+- 项目、日程和里程碑列表当前仍没有分页或时间范围查询。
 
-建议下一步顺序：列表分页/筛选和项目进度摘要。
+建议下一步顺序：项目进度摘要，再为其他资源补齐分页/筛选。
