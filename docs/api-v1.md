@@ -11,7 +11,8 @@
 - 正式 API 前缀为 `/api/v1`。
 - `GET /api/health` 是兼容入口；正式健康检查是 `GET /api/v1/health`。
 - 请求和响应使用 JSON，字段统一使用 `camelCase`。
-- 服务端生成实体 ID，当前为 UUID 字符串，客户端应将其视为不透明值。
+- 服务端默认生成实体 ID，当前为 UUID 字符串；本地优先客户端同步创建时也可
+  提交自己的本地 ID，服务端会原样保留，客户端仍应将 ID 视为不透明值。
 - 时间戳使用 RFC 3339 字符串，服务端当前生成 UTC 时间，例如
   `2026-09-16T08:00:00Z`。
 - 日期字段使用 `YYYY-MM-DD`，时间字段使用 `HH:mm`。
@@ -56,11 +57,17 @@ Cookie: oris_session=<accessToken>
 | GET/PATCH/DELETE | `/api/v1/projects/{project_id}/milestones/{id}` | 是 | 已实现 | 查询、更新或软删除里程碑 |
 | GET/POST | `/api/v1/calendar-events` | 是 | 已实现 | 查询或创建日程 |
 | PATCH/DELETE | `/api/v1/calendar-events/{id}` | 是 | 已实现 | 更新或软删除日程 |
+| GET/POST | `/api/v1/conversations/{conversation_id}/messages` | 是 | 已实现 | 查询或保存聊天消息 |
 | GET | `/api/v1/sync/events` | 是 | 已实现 | 按游标读取增量事件 |
 | GET | `/api/v1/sync/snapshot` | 是 | 已实现 | 获取可替换本地数据的完整快照 |
+| GET | `/api/v1/ws` | 否 | 已实现 | 手机端实时连接握手与心跳 |
 
-当前没有网页接口、Agent 接口或第三方日历接口。里程碑已通过项目嵌套路由
+当前没有网页接口或第三方日历接口。里程碑已通过项目嵌套路由
 对外提供 HTTP API。
+
+手机端首通阶段可在本地开发环境启用 `ORIS_DEV_DEVICE_AUTH=true`，然后使用
+`X-Oris-Device-Id` 访问需要认证的接口。该模式只用于本地开发，生产环境必须
+保持关闭并改用正式 Session 认证。
 
 ## 3. 认证接口
 
@@ -425,9 +432,33 @@ PATCH 支持日程创建字段，并要求 `baseVersion`。更新时间范围时
 服务端按实际时间点比较 `startAt` 和 `endAt`，因此不同 UTC 偏移的合法表示
 也能正确判断先后；响应暂时保留客户端提交的 RFC 3339 表示。
 
-## 7. 增量同步事件
+## 7. 手机端连接与聊天消息
 
-### 7.1 查询事件
+### 7.1 聊天消息
+
+```http
+GET /api/v1/conversations/{conversation_id}/messages
+POST /api/v1/conversations/{conversation_id}/messages
+Authorization: Session <accessToken>
+```
+
+消息创建请求为 `{"id":"<optional-local-id>","content":"..."}`，成功返回
+`201 Created`；使用同一消息 ID 重试时返回已有消息。当前服务端只保存用户消息，
+不生成 Agent 回复。
+
+### 7.2 手机端 WebSocket
+
+```text
+ws(s)://<server>/api/v1/ws
+```
+
+客户端连接后首先发送版本为 `1` 的 `hello` envelope，服务端返回 `hello.ack`，
+随后每 20 秒发送 `ping`。客户端应返回 `pong`。该通道当前用于连接保活和后续
+变化提示，数据真相仍以 HTTP 同步接口为准。
+
+## 8. 增量同步事件
+
+### 8.1 查询事件
 
 ```http
 GET /api/v1/sync/events?after=42&limit=100
@@ -485,7 +516,7 @@ Authorization: Session <accessToken>
 
 当前没有游标过期检测、事件清理策略或快照回退接口。
 
-## 8. 完整同步快照
+## 9. 完整同步快照
 
 该接口用于游标失效、首次同步或本地数据损坏时的恢复。当前返回任务、项目、
 日程和未删除的项目里程碑。
@@ -519,7 +550,7 @@ Authorization: Session <accessToken>
 5. 快照读取完成后，客户端从返回的 `cursor` 继续请求
    `/api/v1/sync/events?after=<cursor>`。
 
-## 9. `Idempotency-Key`
+## 10. `Idempotency-Key`
 
 写入接口支持 `Idempotency-Key`。服务端按用户和 Key 拒绝已成功处理的重复
 写入，并将 Key 与同步事件关联；客户端应在网络超时后复用原 Key。
@@ -559,7 +590,7 @@ Idempotency-Key: 01J7...client-generated-key
 服务端将 `mutation_id` 作为同步事件字段返回。当前 API 不要求客户端把 Key 放进
 JSON body。
 
-## 10. 版本、同步和任务/日程边界
+## 11. 版本、同步和任务/日程边界
 
 这三个概念不能混用：
 
@@ -576,7 +607,7 @@ JSON body。
 - 任务不因 `due`、`dueTime` 或提醒配置自动生成 `calendar-event`。
 - 项目和里程碑是任务组织与进度数据，不自动生成日程。
 
-## 11. 错误格式
+## 12. 错误格式
 
 当前业务错误使用以下 JSON 结构：
 
@@ -610,7 +641,7 @@ JSON 解析失败等由 Axum 提取器直接生成的错误，当前不一定符
 后续建议统一为同一个错误信封，并为验证错误增加稳定的字段路径信息，
 例如 `details.field`。
 
-## 12. 当前实现限制与后续优先级
+## 13. 当前实现限制与后续优先级
 
 当前 API 可以支撑第一轮服务端基础，但以下事项不应被误认为已完成：
 
@@ -621,5 +652,7 @@ JSON 解析失败等由 Axum 提取器直接生成的错误，当前不一定符
 - `sync/snapshot` 当前未包含独立的生成时间字段；客户端应以返回的 `cursor`
   作为恢复边界。
 - 项目、日程和里程碑列表当前仍没有分页或时间范围查询。
+- 手机 WebSocket 当前只提供握手、心跳和基础 envelope，不承载持久化数据。
+- 聊天消息当前只保存用户消息，不生成 Agent 回复。
 
 建议下一步顺序：项目进度摘要，再为其他资源补齐分页/筛选。

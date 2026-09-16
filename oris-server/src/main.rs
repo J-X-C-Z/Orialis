@@ -1,3 +1,6 @@
+mod agent_gateway;
+mod mobile_realtime;
+
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -19,6 +22,7 @@ use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use std::{env, net::SocketAddr, sync::Arc};
 use tracing::info;
 use uuid::Uuid;
+use agent_gateway::AgentRegistry;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -26,6 +30,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 struct AppState {
     metadata: ServiceMetadata,
     pool: SqlitePool,
+    agent: AgentRegistry,
+    agent_device_token: Option<String>,
 }
 
 #[derive(Clone)]
@@ -35,6 +41,7 @@ struct Config {
     environment: String,
     public_url: String,
     database_url: String,
+    agent_device_token: Option<String>,
 }
 
 impl Config {
@@ -51,6 +58,9 @@ impl Config {
                 .unwrap_or_else(|_| "https://orialis.jxcz.top".into()),
             database_url: env::var("ORIS_DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite://./oris.db?mode=rwc".into()),
+            agent_device_token: env::var("ORIS_AGENT_DEVICE_TOKEN")
+                .ok()
+                .filter(|token| !token.trim().is_empty()),
         })
     }
 
@@ -66,6 +76,7 @@ enum AppError {
     BadRequest(String),
     Unauthorized,
     Conflict(String),
+    ServiceUnavailable(String),
     NotFound,
     Database(sqlx::Error),
 }
@@ -86,6 +97,11 @@ impl IntoResponse for AppError {
                 "valid session required".to_string(),
             ),
             Self::Conflict(message) => (StatusCode::CONFLICT, "conflict", message),
+            Self::ServiceUnavailable(message) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "service_unavailable",
+                message,
+            ),
             Self::NotFound => (
                 StatusCode::NOT_FOUND,
                 "not_found",
@@ -165,6 +181,7 @@ struct Task {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TaskInput {
+    id: Option<String>,
     title: String,
     notes: Option<String>,
     important: Option<bool>,
@@ -293,6 +310,7 @@ struct CalendarEvent {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CalendarEventInput {
+    id: Option<String>,
     title: String,
     description: Option<String>,
     location: Option<String>,
@@ -300,6 +318,24 @@ struct CalendarEventInput {
     end_at: String,
     all_day: Option<bool>,
     reminder_minutes: Option<i64>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+struct Message {
+    id: String,
+    conversation_id: String,
+    role: String,
+    content: String,
+    created_at: String,
+    version: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageInput {
+    id: Option<String>,
+    content: String,
 }
 
 #[derive(Deserialize)]
@@ -462,6 +498,8 @@ async fn main() {
             config.public_url.clone(),
         ),
         pool,
+        agent: AgentRegistry::default(),
+        agent_device_token: config.agent_device_token.clone(),
     });
     let app = Router::new()
         .route("/api/health", get(health))
@@ -499,6 +537,17 @@ async fn main() {
         )
         .route("/api/v1/sync/events", get(sync_events))
         .route("/api/v1/sync/snapshot", get(sync_snapshot))
+        .route(
+            "/api/v1/conversations/{conversation_id}/messages",
+            get(list_messages).post(create_message),
+        )
+        .route("/api/v1/ws", get(mobile_realtime::upgrade))
+        .route("/api/v1/mobile/ws", get(mobile_realtime::upgrade))
+        .route("/api/v1/agent/ws", get(agent_gateway::ws::upgrade))
+        .route(
+            "/api/v1/agent/debug/message",
+            post(agent_gateway::ws::debug_message),
+        )
         .fallback(not_found)
         .with_state(state);
     info!(service = SERVICE_NAME, %address, public_url = %config.public_url, "Oris server listening");
@@ -537,6 +586,8 @@ async fn capabilities() -> Json<CapabilitiesResponse> {
             "projects",
             "calendar-events",
             "incremental-sync",
+            "messages",
+            "websocket",
         ],
     })
 }
@@ -629,16 +680,59 @@ async fn authenticated_user(headers: &HeaderMap, pool: &SqlitePool) -> Result<St
                         .find_map(|item| item.trim().strip_prefix("oris_session="))
                 })
         });
-    let token = token.ok_or(AppError::Unauthorized)?;
-    sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM user_sessions
-         WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?",
+    if let Some(token) = token {
+        return sqlx::query_scalar::<_, String>(
+            "SELECT user_id FROM user_sessions
+             WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?",
+        )
+        .bind(hash_token(token))
+        .bind(now())
+        .fetch_optional(pool)
+        .await?
+        .ok_or(AppError::Unauthorized);
+    }
+    if !development_device_auth_enabled() {
+        return Err(AppError::Unauthorized);
+    }
+    let device_id = headers
+        .get("x-oris-device-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(AppError::Unauthorized)?;
+    let digest = format!("{:x}", Sha256::digest(device_id.as_bytes()));
+    let username = format!("device_{}", &digest[..24]);
+    if let Some(user_id) = sqlx::query_scalar::<_, String>("SELECT id FROM users WHERE username=?")
+        .bind(&username)
+        .fetch_optional(pool)
+        .await?
+    {
+        return Ok(user_id);
+    }
+    let user_id = new_id();
+    sqlx::query(
+        "INSERT OR IGNORE INTO users (id,username,password_hash,created_at,updated_at)
+         VALUES (?,?,?,?,?)",
     )
-    .bind(hash_token(token))
+    .bind(&user_id)
+    .bind(&username)
+    .bind("device-auth-only")
     .bind(now())
-    .fetch_optional(pool)
-    .await?
-    .ok_or(AppError::Unauthorized)
+    .bind(now())
+    .execute(pool)
+    .await?;
+    sqlx::query_scalar::<_, String>("SELECT id FROM users WHERE username=?")
+        .bind(username)
+        .fetch_one(pool)
+        .await
+        .map_err(AppError::from)
+}
+
+fn development_device_auth_enabled() -> bool {
+    matches!(
+        std::env::var("ORIS_DEV_DEVICE_AUTH").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
+    )
 }
 
 async fn append_event<'e, E>(
@@ -782,6 +876,75 @@ async fn current_session(
     ))
 }
 
+async fn list_messages(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(conversation_id): Path<String>,
+) -> Result<Json<Vec<Message>>, AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    let messages = sqlx::query_as::<_, Message>(
+        "SELECT id,conversation_id,role,content,created_at,version
+         FROM messages WHERE user_id=? AND conversation_id=?
+         ORDER BY created_at,id",
+    )
+    .bind(&user_id)
+    .bind(conversation_id)
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(messages))
+}
+
+async fn create_message(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(conversation_id): Path<String>,
+    Json(input): Json<MessageInput>,
+) -> Result<(StatusCode, Json<Message>), AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
+    let content = input.content.trim();
+    if content.is_empty() {
+        return Err(AppError::BadRequest("content is required".into()));
+    }
+    if conversation_id.trim().is_empty() {
+        return Err(AppError::BadRequest("conversationId is required".into()));
+    }
+    let id = input.id.unwrap_or_else(new_id);
+    let result = sqlx::query(
+        "INSERT INTO messages (id,user_id,conversation_id,role,content)
+         VALUES (?,?,?,'user',?) ON CONFLICT(id) DO NOTHING",
+    )
+    .bind(&id)
+    .bind(&user_id)
+    .bind(&conversation_id)
+    .bind(content)
+    .execute(&state.pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        let existing = sqlx::query_as::<_, Message>(
+            "SELECT id,conversation_id,role,content,created_at,version
+             FROM messages WHERE user_id=? AND id=? AND conversation_id=?",
+        )
+        .bind(&user_id)
+        .bind(&id)
+        .bind(&conversation_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| AppError::Conflict("message id already used".into()))?;
+        return Ok((StatusCode::OK, Json(existing)));
+    }
+    let message = sqlx::query_as::<_, Message>(
+        "SELECT id,conversation_id,role,content,created_at,version
+         FROM messages WHERE user_id=? AND id=? AND conversation_id=?",
+    )
+    .bind(&user_id)
+    .bind(&id)
+    .bind(&conversation_id)
+    .fetch_one(&state.pool)
+    .await?;
+    Ok((StatusCode::CREATED, Json(message)))
+}
+
 async fn list_tasks(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -912,14 +1075,15 @@ async fn create_task(
     validate_date("due", input.due.as_deref())?;
     validate_time("dueTime", input.due_time.as_deref())?;
     validate_reminder(input.reminder_minutes)?;
-    let id = new_id();
+    let id = input.id.unwrap_or_else(new_id);
     let timestamp = now();
     let mut tx = state.pool.begin().await?;
-    sqlx::query(
+    let result = sqlx::query(
         "INSERT INTO tasks
          (id,user_id,title,notes,important,urgent,completed,due,due_time,
           reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+         ON CONFLICT(id) DO NOTHING",
     )
     .bind(&id)
     .bind(&user_id)
@@ -937,6 +1101,11 @@ async fn create_task(
     .bind(&timestamp)
     .execute(&mut *tx)
     .await?;
+    if result.rows_affected() == 0 {
+        let existing = fetch_task(&mut *tx, &user_id, &id).await?;
+        tx.rollback().await?;
+        return Ok((StatusCode::OK, Json(existing)));
+    }
     let task = fetch_task(&mut *tx, &user_id, &id).await?;
     append_event(
         &mut *tx,
@@ -1567,11 +1736,16 @@ async fn create_event(
     }
     validate_calendar_range(&input.start_at, &input.end_at)?;
     validate_reminder(input.reminder_minutes)?;
-    let id = new_id();
+    let id = input.id.unwrap_or_else(new_id);
     let timestamp = now();
     let mut tx = state.pool.begin().await?;
-    sqlx::query("INSERT INTO calendar_events (id,user_id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,?,?,?,?,1)")
+    let result = sqlx::query("INSERT INTO calendar_events (id,user_id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO NOTHING")
         .bind(&id).bind(&user_id).bind(input.title.trim()).bind(input.description).bind(input.location).bind(input.start_at).bind(input.end_at).bind(input.all_day.unwrap_or(false)).bind(input.reminder_minutes).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await?;
+    if result.rows_affected() == 0 {
+        let existing = fetch_event(&mut *tx, &user_id, &id).await?;
+        tx.rollback().await?;
+        return Ok((StatusCode::OK, Json(existing)));
+    }
     let event = fetch_event(&mut *tx, &user_id, &id).await?;
     append_event(
         &mut *tx,
