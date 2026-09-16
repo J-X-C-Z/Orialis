@@ -23,7 +23,7 @@ not imply that Hermes has completed processing it.
 ## Server connection authentication
 
 When the server is running outside development mode, configure
-`ORIS_AGENT_DEVICE_TOKEN` on the server and `ORIALIS_DEVICE_TOKEN` in the Hermes
+`ORIALIS_AGENT_DEVICE_TOKEN` on the server and `ORIALIS_DEVICE_TOKEN` in the Hermes
 plugin with the same secret. The plugin sends it as:
 
 ```http

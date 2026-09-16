@@ -1,4 +1,4 @@
-# Oris API reverse proxy template.
+# Orialis API reverse proxy template.
 # Install after DNS points orialis.jxcz.top to this server and a TLS certificate exists.
 
 server {

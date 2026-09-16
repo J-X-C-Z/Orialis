@@ -1,9 +1,9 @@
-# Oris API v1
+# Orialis API v1
 
-本文档定义 Oris 当前服务端已经提供的 API，以及下一步建议实现的同步能力。
+本文档定义 Orialis 当前服务端已经提供的 API，以及下一步建议实现的同步能力。
 
-本文档以 `oris-server/src/main.rs`、`oris-core/src/lib.rs` 和
-`oris-server/migrations/` 的当前工作树为准。标记为“建议”的内容仍属于后续
+本文档以 `orialis-server/src/main.rs`、`orialis-core/src/lib.rs` 和
+`orialis-server/migrations/` 的当前工作树为准。标记为“建议”的内容仍属于后续
 设计，其余接口可作为已完成基础实现的契约使用。
 
 ## 1. 基本约定
@@ -28,10 +28,10 @@
 Authorization: Session <accessToken>
 ```
 
-当前 Session 查询也接受名为 `oris_session` 的 Cookie：
+当前 Session 查询也接受名为 `orialis_session` 的 Cookie：
 
 ```http
-Cookie: oris_session=<accessToken>
+Cookie: orialis_session=<accessToken>
 ```
 
 但当前登录、注册不会自动设置 Cookie，客户端应保存响应中的
@@ -65,8 +65,8 @@ Cookie: oris_session=<accessToken>
 当前没有网页接口或第三方日历接口。里程碑已通过项目嵌套路由
 对外提供 HTTP API。
 
-手机端首通阶段可在本地开发环境启用 `ORIS_DEV_DEVICE_AUTH=true`，然后使用
-`X-Oris-Device-Id` 访问需要认证的接口。该模式只用于本地开发，生产环境必须
+手机端首通阶段可在本地开发环境启用 `ORIALIS_DEV_DEVICE_AUTH=true`，然后使用
+`X-Orialis-Device-Id` 访问需要认证的接口。该模式只用于本地开发，生产环境必须
 保持关闭并改用正式 Session 认证。
 
 ## 3. 认证接口

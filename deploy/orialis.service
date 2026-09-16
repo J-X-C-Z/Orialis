@@ -1,0 +1,23 @@
+[Unit]
+Description=Orialis API Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orialis
+Group=orialis
+WorkingDirectory=/opt/orialis
+EnvironmentFile=/etc/orialis.env
+ExecStart=/opt/orialis/bin/orialis-server
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/orialis
+
+[Install]
+WantedBy=multi-user.target
+

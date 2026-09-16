@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Local acceptance check for the mobile first-connection API.
-# Start Oris with ORIS_DEV_DEVICE_AUTH=true before running this script.
+# Start Orialis with ORIALIS_DEV_DEVICE_AUTH=true before running this script.
 
 set -u
 
@@ -14,16 +14,16 @@ pass() {
     printf 'PASS: %s\n' "$*"
 }
 
-[[ -n "${ORIS_BASE_URL:-}" ]] || fail 'ORIS_BASE_URL is required'
-[[ -n "${ORIS_DEVICE_ID:-}" ]] || fail 'ORIS_DEVICE_ID is required'
+[[ -n "${ORIALIS_BASE_URL:-}" ]] || fail 'ORIALIS_BASE_URL is required'
+[[ -n "${ORIALIS_DEVICE_ID:-}" ]] || fail 'ORIALIS_DEVICE_ID is required'
 command -v curl >/dev/null 2>&1 || fail 'curl is required'
 command -v jq >/dev/null 2>&1 || fail 'jq is required'
 
-BASE_URL="${ORIS_BASE_URL%/}"
-DEVICE_ID="$ORIS_DEVICE_ID"
+BASE_URL="${ORIALIS_BASE_URL%/}"
+DEVICE_ID="$ORIALIS_DEVICE_ID"
 TASK_ID="mobile-task-$$"
 MESSAGE_ID="mobile-message-$$"
-CONVERSATION_ID="${ORIS_CONVERSATION_ID:-mobile-default}"
+CONVERSATION_ID="${ORIALIS_CONVERSATION_ID:-mobile-default}"
 
 request() {
     local method="$1"
@@ -33,14 +33,14 @@ request() {
     if [[ -n "$data" ]]; then
         response="$(curl --silent --show-error --connect-timeout 3 --max-time 20 \
             --request "$method" --header 'Accept: application/json' \
-            --header "X-Oris-Device-Id: $DEVICE_ID" \
+            --header "X-Orialis-Device-Id: $DEVICE_ID" \
             --header 'Content-Type: application/json' --data "$data" \
             --write-out $'\n%{http_code}' "$url")" \
             || fail "request failed: $method $url"
     else
         response="$(curl --silent --show-error --connect-timeout 3 --max-time 20 \
             --request "$method" --header 'Accept: application/json' \
-            --header "X-Oris-Device-Id: $DEVICE_ID" \
+            --header "X-Orialis-Device-Id: $DEVICE_ID" \
             --write-out $'\n%{http_code}' "$url")" \
             || fail "request failed: $method $url"
     fi

@@ -1,10 +1,10 @@
 # Orialis
 
-Orialis 从纯服务端基础开始建设。`oris-refactor` 只保留 Orialis 自己的代码；方寸完整项目保存在 `fangcun-backup` 分支，后续按需抽取，不直接整体复制。
+Orialis 从纯服务端基础开始建设。`orialis-refactor` 只保留 Orialis 自己的代码；方寸完整项目保存在 `fangcun-backup` 分支，后续按需抽取，不直接整体复制。
 
 ## 当前范围（第一轮）
 
-- Rust workspace：oris-core + oris-server
+- Rust workspace：orialis-core + orialis-server
 - 纯 JSON API，无网页、PWA 和静态资源
 - SQLite + SQLx migrations，默认使用 WAL
 - 多用户注册、登录、Session（密码 scrypt 哈希，Session 只保存 token hash）
@@ -42,22 +42,22 @@ API：
 
 Agent Track（M0–M5）已落地：服务器提供 WebSocket Agent Gateway、开发触发器、ACK、去重和自动重连；Hermes 插件源代码位于 `integrations/hermes/orialis/`，本机插件目录为 `~/.hermes/plugins/orialis/`。
 
-生产接入时，在服务端设置 `ORIS_AGENT_DEVICE_TOKEN`，并在 Hermes 插件设置对应的 `ORIALIS_DEVICE_TOKEN`；插件会通过 `Authorization: Bearer` 发送令牌。开发环境未配置服务端令牌时允许本地无认证联调。
+生产接入时，在服务端设置 `ORIALIS_AGENT_DEVICE_TOKEN`，并在 Hermes 插件设置对应的 `ORIALIS_DEVICE_TOKEN`；插件会通过 `Authorization: Bearer` 发送令牌。开发环境未配置服务端令牌时允许本地无认证联调。
 
 ## 本地运行
 
 需要 Rust stable：
 
-    cargo run -p oris-server
+    cargo run -p orialis-server
 
 自定义配置：
 
-    ORIS_HOST=127.0.0.1 \
-    ORIS_PORT=18443 \
-    ORIS_ENV=development \
-    ORIS_PUBLIC_URL=https://orialis.jxcz.top \
-    ORIS_DATABASE_URL=sqlite://./oris.db?mode=rwc \
-    cargo run -p oris-server
+    ORIALIS_HOST=127.0.0.1 \
+    ORIALIS_PORT=18443 \
+    ORIALIS_ENV=development \
+    ORIALIS_PUBLIC_URL=https://orialis.jxcz.top \
+    ORIALIS_DATABASE_URL=sqlite://./orialis.db?mode=rwc \
+    cargo run -p orialis-server
 
 验证：
 
@@ -66,8 +66,8 @@ Agent Track（M0–M5）已落地：服务器提供 WebSocket Agent Gateway、�
 
 ## 部署准备
 
-服务器部署使用 deploy/oris.service、deploy/oris.env.example 和 Nginx 配置模板。生产数据库建议设置为：
+服务器部署使用 deploy/orialis.service、deploy/orialis.env.example 和 Nginx 配置模板。生产数据库建议设置为：
 
-    ORIS_DATABASE_URL=sqlite:///var/lib/oris/oris.db?mode=rwc
+    ORIALIS_DATABASE_URL=sqlite:///var/lib/orialis/orialis.db?mode=rwc
 
 当前迭代暂不包含网页、LLM 和第三方日历连接。手机端第一阶段边界见 docs/architecture.md、docs/mobile-architecture.md 和 docs/sync.md；旧项目的迁移边界见 docs/fangcun-migration.md。

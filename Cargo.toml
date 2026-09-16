@@ -1,4 +1,4 @@
 [workspace]
-members = ["oris-core", "oris-server"]
+members = ["orialis-core", "orialis-server"]
 resolver = "2"
 

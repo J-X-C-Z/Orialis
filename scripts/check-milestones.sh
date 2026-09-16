@@ -2,7 +2,7 @@
 
 # Local API acceptance check for project milestones.
 # Required runtime tools: curl, jq.
-# The script never starts Oris and leaves its test project for inspection.
+# The script never starts Orialis and leaves its test project for inspection.
 
 set -u
 
@@ -15,14 +15,14 @@ pass() {
     printf 'PASS: %s\n' "$*"
 }
 
-[[ -n "${ORIS_BASE_URL:-}" ]] || fail 'ORIS_BASE_URL is required'
-[[ -n "${ORIS_USERNAME:-}" ]] || fail 'ORIS_USERNAME is required'
-[[ -n "${ORIS_PASSWORD:-}" ]] || fail 'ORIS_PASSWORD is required'
+[[ -n "${ORIALIS_BASE_URL:-}" ]] || fail 'ORIALIS_BASE_URL is required'
+[[ -n "${ORIALIS_USERNAME:-}" ]] || fail 'ORIALIS_USERNAME is required'
+[[ -n "${ORIALIS_PASSWORD:-}" ]] || fail 'ORIALIS_PASSWORD is required'
 
 command -v curl >/dev/null 2>&1 || fail 'curl is required'
 command -v jq >/dev/null 2>&1 || fail 'jq is required'
 
-BASE_URL="${ORIS_BASE_URL%/}"
+BASE_URL="${ORIALIS_BASE_URL%/}"
 TOKEN=''
 HTTP_STATUS=''
 HTTP_BODY=''
@@ -101,7 +101,7 @@ request GET "$BASE_URL/api/v1/health"
 expect_status 200 'service is running'
 assert_json '.ok == true' 'health response is ok'
 
-CREDENTIALS="$(json_body --arg username "$ORIS_USERNAME" --arg password "$ORIS_PASSWORD" \
+CREDENTIALS="$(json_body --arg username "$ORIALIS_USERNAME" --arg password "$ORIALIS_PASSWORD" \
     '{username: $username, password: $password}')"
 
 request POST "$BASE_URL/api/v1/auth/register" "$CREDENTIALS"

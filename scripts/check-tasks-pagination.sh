@@ -13,13 +13,13 @@ pass() {
     printf 'PASS: %s\n' "$*"
 }
 
-[[ -n "${ORIS_BASE_URL:-}" ]] || fail 'ORIS_BASE_URL is required'
-[[ -n "${ORIS_USERNAME:-}" ]] || fail 'ORIS_USERNAME is required'
-[[ -n "${ORIS_PASSWORD:-}" ]] || fail 'ORIS_PASSWORD is required'
+[[ -n "${ORIALIS_BASE_URL:-}" ]] || fail 'ORIALIS_BASE_URL is required'
+[[ -n "${ORIALIS_USERNAME:-}" ]] || fail 'ORIALIS_USERNAME is required'
+[[ -n "${ORIALIS_PASSWORD:-}" ]] || fail 'ORIALIS_PASSWORD is required'
 command -v curl >/dev/null 2>&1 || fail 'curl is required'
 command -v jq >/dev/null 2>&1 || fail 'jq is required'
 
-BASE_URL="${ORIS_BASE_URL%/}"
+BASE_URL="${ORIALIS_BASE_URL%/}"
 TOKEN=''
 HTTP_STATUS=''
 HTTP_BODY=''
@@ -63,7 +63,7 @@ assert_json() {
     pass "$description"
 }
 
-credentials="$(jq -cn --arg username "$ORIS_USERNAME" --arg password "$ORIS_PASSWORD" \
+credentials="$(jq -cn --arg username "$ORIALIS_USERNAME" --arg password "$ORIALIS_PASSWORD" \
     '{username: $username, password: $password}')"
 register_response="$(curl --silent --show-error --request POST \
     --header 'Content-Type: application/json' --data "$credentials" \

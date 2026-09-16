@@ -1,6 +1,6 @@
 # Project Milestones API 下一阶段设计
 
-> 范围：审查 `fangcun-backup` 与当前 Oris 模型后，为 `project_milestones` API 固化下一阶段契约。
+> 范围：审查 `fangcun-backup` 与当前 Orialis 模型后，为 `project_milestones` API 固化下一阶段契约。
 >
 > 本文记录边界和迁移注意事项；第 2–6 节已落实为当前服务端 API，第 8 节保留
 > 尚未完成的验收项。
@@ -24,9 +24,9 @@ completedUnits = completedMilestoneCount + completedTaskCount
 progress       = completedUnits / totalUnits * 100
 ```
 
-这部分可以作为 Oris 后续项目详情/摘要接口的计算规则，但不应把 `progress` 写入里程碑表，也不应把里程碑转换成日程。里程碑仍然是项目内的截止事项。
+这部分可以作为 Orialis 后续项目详情/摘要接口的计算规则，但不应把 `progress` 写入里程碑表，也不应把里程碑转换成日程。里程碑仍然是项目内的截止事项。
 
-当前 Oris 已通过项目嵌套路由提供里程碑 CRUD。表结构具备 `position`、`version`、
+当前 Orialis 已通过项目嵌套路由提供里程碑 CRUD。表结构具备 `position`、`version`、
 `deleted_at` 和完成状态约束，适合作为独立资源的基础。
 
 ## 2. 推荐资源边界
@@ -55,7 +55,7 @@ ORDER BY position ASC, id ASC
 
 ### 3.1 返回对象
 
-返回对象采用 camelCase，与当前 `oris-core::Milestone` 的序列化约定一致：
+返回对象采用 camelCase，与当前 `orialis-core::Milestone` 的序列化约定一致：
 
 | 字段 | 类型 | 客户端可写 | 约束与语义 |
 | --- | --- | --- | --- |
@@ -63,7 +63,7 @@ ORDER BY position ASC, id ASC
 | `userId` | UUID 字符串 | 否 | 从 Session 推导；不从请求体读取 |
 | `projectId` | UUID 字符串 | 否 | 来自路径；必须属于当前用户且项目未删除 |
 | `title` | 字符串 | 创建必填，更新可选 | trim 后 1–200 个 Unicode 字符；空白标题拒绝 |
-| `due` | `YYYY-MM-DD` 或 `null` | 是 | 截止日期，不是时间段；Oris 规范使用 `null` 清空，迁移旧空字符串为 `null` |
+| `due` | `YYYY-MM-DD` 或 `null` | 是 | 截止日期，不是时间段；Orialis 规范使用 `null` 清空，迁移旧空字符串为 `null` |
 | `completed` | 布尔值 | 是 | 默认 `false`；只允许服务端同步维护 `completedAt` |
 | `completedAt` | RFC3339 时间戳或 `null` | 否 | `completed=true` 时由服务端写入当前时间；恢复为 false 时清空 |
 | `position` | 非负整数 | 是 | 默认 0；用于项目内排序，不代表进度百分比 |
@@ -144,7 +144,7 @@ payload     = upsert 时的完整返回对象；delete 时为空
 
 ## 5. 项目删除的级联策略
 
-当前 SQL 定义 `project_milestones.project_id REFERENCES projects(id) ON DELETE CASCADE`，但 Oris 的项目删除是软删除。软删除不会触发 SQLite 的物理级联，因此如果只把项目写入 `deleted_at`，子里程碑仍可能是“未删除”状态。
+当前 SQL 定义 `project_milestones.project_id REFERENCES projects(id) ON DELETE CASCADE`，但 Orialis 的项目删除是软删除。软删除不会触发 SQLite 的物理级联，因此如果只把项目写入 `deleted_at`，子里程碑仍可能是“未删除”状态。
 
 实现项目删除或恢复前必须明确以下行为：
 
@@ -157,9 +157,9 @@ payload     = upsert 时的完整返回对象；delete 时为空
 
 ## 6. 迁移 Fangcun 数据的注意事项
 
-旧数据形态和 Oris 的差异如下：
+旧数据形态和 Orialis 的差异如下：
 
-| Fangcun | Oris | 注意事项 |
+| Fangcun | Orialis | 注意事项 |
 | --- | --- | --- |
 | 项目内 `milestones[]` | 独立 `project_milestones` 行 | 先导入项目，再拆分里程碑 |
 | 任意旧字符串 ID | UUIDv7 | 建立旧 ID → 新 UUID 映射；同一用户范围内保持引用稳定 |
@@ -167,7 +167,7 @@ payload     = upsert 时的完整返回对象；delete 时为空
 | 缺失 `completed` | `false` | 非布尔值不默默转 truthy；记录迁移警告并按默认值处理 |
 | 缺失 `completedAt` | 服务端时间或 `NULL` | 已完成但缺少时间时使用迁移时间，并在报告中标记推断 |
 | 数组顺序 | `position` | 按原数组索引写入，从 0 开始；重复/非法顺序归一化 |
-| 项目整体更新 | 独立 CRUD + 增量事件 | 不把旧数组替换协议作为正式 Oris 同步协议 |
+| 项目整体更新 | 独立 CRUD + 增量事件 | 不把旧数组替换协议作为正式 Orialis 同步协议 |
 
 迁移顺序：
 
@@ -184,8 +184,8 @@ payload     = upsert 时的完整返回对象；delete 时为空
 
 正式写 API 前，下一次代码改动需要先处理这些已确认差异：
 
-1. `oris-core::Milestone` 包含 `user_id`，而 `project_milestones` 表没有 `user_id`；确定采用 JOIN 注入还是补列，本文件推荐 JOIN。
-2. `oris-core::Project` 包含 `description`，SQL 表也有该列，但当前 server 的 `Project` DTO 和项目查询没有读取/写入它。
+1. `orialis-core::Milestone` 包含 `user_id`，而 `project_milestones` 表没有 `user_id`；确定采用 JOIN 注入还是补列，本文件推荐 JOIN。
+2. `orialis-core::Project` 包含 `description`，SQL 表也有该列，但当前 server 的 `Project` DTO 和项目查询没有读取/写入它。
 3. SQL 表有 `projects.color`，当前 core/server 项目模型没有暴露它；决定保留为展示元数据，还是延后加入模型。不要在里程碑 API 中隐式带出未统一的项目字段。
 4. 里程碑已使用嵌套路由和独立 DTO；仍需补充更完整的同步事务测试。
 5. 项目删除已处理子里程碑软删除和对应墓碑事件；仍需将整个操作收束到同一事务。
