@@ -32,3 +32,20 @@ Authorization: Bearer <device-token>
 
 Development mode permits an unauthenticated local connection only when the
 server token is unset. The token must never be committed or written to logs.
+
+## Multiple Agent devices
+
+Each Hermes installation must use its own stable `ORIALIS_DEVICE_ID`. The
+server records each device and keeps the selected device per Orialis account.
+The authenticated mobile client can query and change the selection through:
+
+```text
+GET  /api/v1/agent/devices
+POST /api/v1/agent/devices/{device_id}/select
+```
+
+When the database contains exactly one user, Agent devices are assigned to that
+user automatically. If there are multiple users, configure
+`ORIALIS_AGENT_USER_ID` on the server. Messages sent from mobile are routed to
+the selected online device; devices with different IDs can remain connected at
+the same time.

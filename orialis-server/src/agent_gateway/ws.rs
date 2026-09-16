@@ -297,9 +297,11 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
     let hello = match protocol::parse_message(&first_message) {
         Ok(protocol::GatewayMessage::Hello {
             device_id,
+            client,
+            plugin_version,
             platform,
             ..
-        }) => (device_id, platform),
+        }) => (device_id, client, plugin_version, platform),
         Ok(_) => {
             let _ = send_error(
                 &mut socket,
@@ -315,14 +317,50 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
         }
     };
 
+    let user_id = match resolve_agent_owner(&state).await {
+        Ok(Some(user_id)) => user_id,
+        Ok(None) => {
+            let _ = send_error(
+                &mut socket,
+                "AGENT_OWNER_REQUIRED",
+                "configure ORIALIS_AGENT_USER_ID when the server has multiple users",
+            )
+            .await;
+            return;
+        }
+        Err(error) => {
+            tracing::error!(%error, "could not resolve the Orialis Agent owner");
+            let _ = send_error(
+                &mut socket,
+                "AGENT_OWNER_INVALID",
+                "the configured Orialis Agent owner does not exist",
+            )
+            .await;
+            return;
+        }
+    };
+    if let Err(error) =
+        register_agent_device(&state, &user_id, &hello.0, &hello.1, &hello.2, &hello.3).await
+    {
+        tracing::warn!(?error, device_id = %hello.0, "could not register Orialis Agent device");
+        let _ = send_error(
+            &mut socket,
+            "AGENT_DEVICE_REJECTED",
+            "agent device is not available",
+        )
+        .await;
+        return;
+    }
+
     let (command_tx, mut command_rx) = mpsc::channel(32);
     let connection_id = Uuid::now_v7().to_string();
     state
         .agent
-        .replace_connection(
+        .register_connection(
             connection_id.clone(),
+            user_id.clone(),
             hello.0.clone(),
-            hello.1.clone(),
+            hello.3.clone(),
             command_tx,
         )
         .await;
@@ -338,7 +376,7 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
         state.agent.remove_connection(&connection_id).await;
         return;
     }
-    tracing::info!(device_id = %hello.0, platform = %hello.1, "orialis-hermes-plugin connected");
+    tracing::info!(device_id = %hello.0, platform = %hello.3, "orialis-hermes-plugin connected");
 
     loop {
         tokio::select! {
@@ -368,7 +406,106 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
     }
 
     state.agent.remove_connection(&connection_id).await;
-    tracing::info!(device_id = %hello.0, platform = %hello.1, "Orialis Agent WebSocket connection closed");
+    mark_agent_device_seen(&state, &user_id, &hello.0).await;
+    state.mobile.notify(
+        &user_id,
+        protocol::mobile_event(serde_json::json!({
+            "kind": "agent_devices_changed",
+            "reason": "disconnected",
+            "deviceId": hello.0,
+        })),
+    );
+    tracing::info!(device_id = %hello.0, platform = %hello.3, "Orialis Agent WebSocket connection closed");
+}
+
+async fn resolve_agent_owner(state: &AppState) -> Result<Option<String>, sqlx::Error> {
+    if let Some(user_id) = state.agent_user_id.as_deref() {
+        let exists = sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM users WHERE id=?)")
+            .bind(user_id)
+            .fetch_one(&state.pool)
+            .await?;
+        return Ok((exists != 0).then(|| user_id.to_owned()));
+    }
+    let users =
+        sqlx::query_scalar::<_, String>("SELECT id FROM users ORDER BY created_at,id LIMIT 2")
+            .fetch_all(&state.pool)
+            .await?;
+    Ok((users.len() == 1).then(|| users[0].clone()))
+}
+
+async fn register_agent_device(
+    state: &AppState,
+    user_id: &str,
+    device_id: &str,
+    client: &str,
+    plugin_version: &str,
+    platform: &str,
+) -> Result<(), AppError> {
+    if let Some(existing_user_id) =
+        sqlx::query_scalar::<_, String>("SELECT user_id FROM agent_devices WHERE device_id=?")
+            .bind(device_id)
+            .fetch_optional(&state.pool)
+            .await?
+    {
+        if existing_user_id != user_id {
+            return Err(AppError::Unauthorized);
+        }
+    }
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO agent_devices
+            (device_id,user_id,client,plugin_version,platform,last_seen_at,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?)
+         ON CONFLICT(device_id) DO UPDATE SET
+            client=excluded.client, plugin_version=excluded.plugin_version,
+            platform=excluded.platform, last_seen_at=excluded.last_seen_at,
+            updated_at=excluded.updated_at, version=agent_devices.version+1",
+    )
+    .bind(device_id)
+    .bind(user_id)
+    .bind(client)
+    .bind(plugin_version)
+    .bind(platform)
+    .bind(&timestamp)
+    .bind(&timestamp)
+    .bind(&timestamp)
+    .execute(&state.pool)
+    .await?;
+    sqlx::query(
+        "INSERT OR IGNORE INTO agent_preferences
+            (user_id,active_device_id,created_at,updated_at)
+         VALUES (?,?,?,?)",
+    )
+    .bind(user_id)
+    .bind(device_id)
+    .bind(&timestamp)
+    .bind(&timestamp)
+    .execute(&state.pool)
+    .await?;
+    state.mobile.notify(
+        user_id,
+        protocol::mobile_event(serde_json::json!({
+            "kind": "agent_devices_changed",
+            "reason": "connected",
+            "deviceId": device_id,
+        })),
+    );
+    Ok(())
+}
+
+async fn mark_agent_device_seen(state: &AppState, user_id: &str, device_id: &str) {
+    if let Err(error) = sqlx::query(
+        "UPDATE agent_devices SET last_seen_at=?,updated_at=? WHERE user_id=? AND device_id=?",
+    )
+    .bind(chrono::Utc::now().to_rfc3339())
+    .bind(chrono::Utc::now().to_rfc3339())
+    .bind(user_id)
+    .bind(device_id)
+    .execute(&state.pool)
+    .await
+    {
+        tracing::warn!(%error, %device_id, "could not update Orialis Agent device heartbeat");
+    }
 }
 
 async fn handle_text(state: &Arc<AppState>, socket: &mut WebSocket, text: String) {
@@ -507,7 +644,24 @@ pub(crate) async fn dispatch_message(
         conversation_id: conversation_id.clone(),
         content,
     };
-    let receiver = match state.agent.send_request(request).await {
+    let active_device_id = match sqlx::query_scalar::<_, Option<String>>(
+        "SELECT active_device_id FROM agent_preferences WHERE user_id=?",
+    )
+    .bind(&user_id)
+    .fetch_optional(&state.pool)
+    .await
+    {
+        Ok(active_device_id) => active_device_id.flatten(),
+        Err(error) => {
+            tracing::warn!(%error, %message_id, "could not read active Orialis Agent device");
+            return;
+        }
+    };
+    let receiver = match state
+        .agent
+        .send_request_for_user(&user_id, active_device_id.as_deref(), request)
+        .await
+    {
         Ok(receiver) => receiver,
         Err(error) => {
             tracing::warn!(%error, %message_id, "could not dispatch mobile message to Hermes");

@@ -61,10 +61,13 @@ Cookie: orialis_session=<accessToken>
 | GET | `/api/v1/sync/events` | 是 | 已实现 | 按游标读取增量事件 |
 | GET | `/api/v1/sync/snapshot` | 是 | 已实现 | 获取可替换本地数据的完整快照 |
 | GET | `/api/v1/ws` | 是 | 已实现 | 手机端实时连接、心跳、同步提示和消息推送 |
+| GET | `/api/v1/agent/devices` | 是 | 已实现 | 查询当前用户的 Hermes 设备与在线状态 |
+| POST | `/api/v1/agent/devices/{device_id}/select` | 是 | 已实现 | 选择聊天消息投递设备 |
 
 当前没有网页接口或第三方日历接口。里程碑已通过项目嵌套路由
 对外提供 HTTP API。消息 POST 成功后会先持久化用户消息，再异步投递给已连接的
-Hermes；收到匹配的 `message.reply` 后，服务端会保存 `role=assistant` 的消息。
+Hermes；收到匹配的 `message.reply` 后，服务端会保存 `role=assistant` 的消息。消息会投递到
+当前用户选择的在线 Hermes 设备；选择状态保存在服务端，因此手机重启后仍然有效。
 
 手机端首通阶段可在本地开发环境启用 `ORIALIS_DEV_DEVICE_AUTH=true`，然后使用
 `X-Orialis-Device-Id` 访问需要认证的 HTTP 和 WebSocket 接口。该模式只用于本地
@@ -445,8 +448,8 @@ Authorization: Session <accessToken>
 ```
 
 消息创建请求为 `{"id":"<optional-local-id>","content":"..."}`，成功返回
-`201 Created`；使用同一消息 ID 重试时返回已有消息。当前服务端只保存用户消息，
-不生成 Agent 回复。
+`201 Created`；使用同一消息 ID 重试时返回已有消息。服务端会先保存用户消息，再将
+消息异步投递给当前选中的 Hermes 设备，并在收到回复后保存 Agent 消息。
 
 ### 7.2 手机端 WebSocket
 
@@ -457,6 +460,42 @@ ws(s)://<server>/api/v1/ws
 客户端连接后首先发送版本为 `1` 的 `hello` envelope，服务端返回 `hello.ack`，
 随后每 20 秒发送 `ping`。客户端应返回 `pong`。该通道当前用于连接保活和后续
 变化提示，数据真相仍以 HTTP 同步接口为准。
+
+### 7.3 Hermes 设备切换
+
+```http
+GET /api/v1/agent/devices
+Authorization: Session <accessToken>
+```
+
+响应示例：
+
+```json
+{
+  "devices": [
+    {
+      "deviceId": "orialis-hermes-macbook",
+      "platform": "macos",
+      "client": "hermes",
+      "pluginVersion": "0.1.0",
+      "lastSeenAt": "2026-09-16T08:00:00Z",
+      "online": true,
+      "active": true
+    }
+  ],
+  "activeDeviceId": "orialis-hermes-macbook"
+}
+```
+
+切换设备：
+
+```http
+POST /api/v1/agent/devices/orialis-hermes-windows/select
+Authorization: Session <accessToken>
+```
+
+设备上线、下线和选择变化会通过手机 WebSocket 发送 `event`，其中
+`payload.kind` 为 `agent_devices_changed`；客户端收到后重新查询上述 HTTP 接口。
 
 ## 8. 增量同步事件
 

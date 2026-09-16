@@ -33,6 +33,7 @@ struct AppState {
     agent: AgentRegistry,
     mobile: mobile_realtime::MobileRegistry,
     agent_device_token: Option<String>,
+    agent_user_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -43,6 +44,7 @@ struct Config {
     public_url: String,
     database_url: String,
     agent_device_token: Option<String>,
+    agent_user_id: Option<String>,
 }
 
 impl Config {
@@ -62,6 +64,10 @@ impl Config {
             agent_device_token: env::var("ORIALIS_AGENT_DEVICE_TOKEN")
                 .ok()
                 .filter(|token| !token.trim().is_empty()),
+            agent_user_id: env::var("ORIALIS_AGENT_USER_ID")
+                .ok()
+                .map(|user_id| user_id.trim().to_owned())
+                .filter(|user_id| !user_id.is_empty()),
         })
     }
 
@@ -339,6 +345,35 @@ struct MessageInput {
     content: String,
 }
 
+#[derive(Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+struct AgentDeviceRecord {
+    device_id: String,
+    platform: String,
+    client: String,
+    plugin_version: String,
+    last_seen_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentDeviceResponse {
+    device_id: String,
+    platform: String,
+    client: String,
+    plugin_version: String,
+    last_seen_at: String,
+    online: bool,
+    active: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentDevicesResponse {
+    devices: Vec<AgentDeviceResponse>,
+    active_device_id: Option<String>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CalendarEventPatch {
@@ -502,6 +537,7 @@ async fn main() {
         agent: AgentRegistry::default(),
         mobile: mobile_realtime::MobileRegistry::default(),
         agent_device_token: config.agent_device_token.clone(),
+        agent_user_id: config.agent_user_id.clone(),
     });
     let app = Router::new()
         .route("/api/health", get(health))
@@ -542,6 +578,11 @@ async fn main() {
         .route(
             "/api/v1/conversations/{conversation_id}/messages",
             get(list_messages).post(create_message),
+        )
+        .route("/api/v1/agent/devices", get(list_agent_devices))
+        .route(
+            "/api/v1/agent/devices/{device_id}/select",
+            post(select_agent_device),
         )
         .route("/api/v1/ws", get(mobile_realtime::upgrade))
         .route("/api/v1/mobile/ws", get(mobile_realtime::upgrade))
@@ -589,6 +630,7 @@ async fn capabilities() -> Json<CapabilitiesResponse> {
             "calendar-events",
             "incremental-sync",
             "messages",
+            "agent-devices",
             "websocket",
         ],
     })
@@ -896,6 +938,99 @@ async fn current_session(
     Ok(Json(
         serde_json::json!({ "userId": row.0, "username": row.1 }),
     ))
+}
+
+async fn list_agent_devices(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<AgentDevicesResponse>, AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    agent_devices_for_user(&state, &user_id).await.map(Json)
+}
+
+async fn agent_devices_for_user(
+    state: &AppState,
+    user_id: &str,
+) -> Result<AgentDevicesResponse, AppError> {
+    let active_device_id = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT active_device_id FROM agent_preferences WHERE user_id=?",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .flatten();
+    let records = sqlx::query_as::<_, AgentDeviceRecord>(
+        "SELECT device_id,platform,client,plugin_version,last_seen_at
+         FROM agent_devices WHERE user_id=? ORDER BY updated_at DESC,device_id",
+    )
+    .bind(user_id)
+    .fetch_all(&state.pool)
+    .await?;
+    let online = state.agent.online_agents(user_id).await;
+    let devices = records
+        .into_iter()
+        .map(|record| {
+            let is_online = online
+                .iter()
+                .any(|agent| agent.device_id == record.device_id);
+            AgentDeviceResponse {
+                active: active_device_id.as_deref() == Some(record.device_id.as_str()),
+                device_id: record.device_id,
+                platform: record.platform,
+                client: record.client,
+                plugin_version: record.plugin_version,
+                last_seen_at: record.last_seen_at,
+                online: is_online,
+            }
+        })
+        .collect();
+    Ok(AgentDevicesResponse {
+        devices,
+        active_device_id,
+    })
+}
+
+async fn select_agent_device(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(device_id): Path<String>,
+) -> Result<Json<AgentDevicesResponse>, AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    let device_id = device_id.trim();
+    if device_id.is_empty() {
+        return Err(AppError::BadRequest("device_id is required".into()));
+    }
+    let exists = sqlx::query_scalar::<_, i64>(
+        "SELECT EXISTS(SELECT 1 FROM agent_devices WHERE user_id=? AND device_id=?)",
+    )
+    .bind(&user_id)
+    .bind(device_id)
+    .fetch_one(&state.pool)
+    .await?;
+    if exists == 0 {
+        return Err(AppError::NotFound);
+    }
+    sqlx::query(
+        "INSERT INTO agent_preferences (user_id,active_device_id,created_at,updated_at)
+         VALUES (?,?,?,?)
+         ON CONFLICT(user_id) DO UPDATE SET active_device_id=excluded.active_device_id,
+             updated_at=excluded.updated_at, version=agent_preferences.version+1",
+    )
+    .bind(&user_id)
+    .bind(device_id)
+    .bind(now())
+    .bind(now())
+    .execute(&state.pool)
+    .await?;
+    state.mobile.notify(
+        &user_id,
+        agent_gateway::protocol::mobile_event(serde_json::json!({
+            "kind": "agent_devices_changed",
+            "reason": "selected",
+            "activeDeviceId": device_id,
+        })),
+    );
+    Ok(Json(agent_devices_for_user(&state, &user_id).await?))
 }
 
 async fn list_messages(
