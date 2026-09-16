@@ -164,7 +164,6 @@ struct Task {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TaskInput {
-    id: Option<String>,
     title: String,
     notes: Option<String>,
     important: Option<bool>,
@@ -250,7 +249,6 @@ struct CalendarEvent {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CalendarEventInput {
-    id: Option<String>,
     title: String,
     description: Option<String>,
     location: Option<String>,
@@ -567,8 +565,8 @@ async fn authenticated_user(headers: &HeaderMap, pool: &SqlitePool) -> Result<St
     .ok_or(AppError::Unauthorized)
 }
 
-async fn append_event(
-    pool: &SqlitePool,
+async fn append_event<'e, E>(
+    executor: E,
     user_id: &str,
     entity_type: &str,
     entity_id: &str,
@@ -576,7 +574,10 @@ async fn append_event(
     entity_version: i64,
     payload_json: Option<String>,
     mutation_id: Option<String>,
-) -> Result<(), AppError> {
+) -> Result<(), AppError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     let timestamp = now();
     let tombstone = operation == "delete";
     sqlx::query(
@@ -597,7 +598,7 @@ async fn append_event(
     .bind(if tombstone { Some(timestamp.clone()) } else { None::<String> })
     .bind(&timestamp)
     .bind(&timestamp)
-    .execute(pool)
+    .execute(executor)
     .await?;
     Ok(())
 }
@@ -723,7 +724,10 @@ async fn list_tasks(
     ))
 }
 
-async fn fetch_task(pool: &SqlitePool, user_id: &str, id: &str) -> Result<Task, AppError> {
+async fn fetch_task<'e, E>(executor: E, user_id: &str, id: &str) -> Result<Task, AppError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     sqlx::query_as::<_, Task>(
         "SELECT id,title,notes,important,urgent,completed,due,due_time,
                 reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
@@ -731,7 +735,7 @@ async fn fetch_task(pool: &SqlitePool, user_id: &str, id: &str) -> Result<Task, 
     )
     .bind(user_id)
     .bind(id)
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await?
     .ok_or(AppError::NotFound)
 }
@@ -751,6 +755,7 @@ async fn create_task(
     }
     let id = new_id();
     let timestamp = now();
+    let mut tx = state.pool.begin().await?;
     sqlx::query(
         "INSERT INTO tasks
          (id,user_id,title,notes,important,urgent,completed,due,due_time,
@@ -771,11 +776,11 @@ async fn create_task(
     .bind(input.recurrence.map(|value| value.to_string()))
     .bind(&timestamp)
     .bind(&timestamp)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
-    let task = fetch_task(&state.pool, &user_id, &id).await?;
+    let task = fetch_task(&mut *tx, &user_id, &id).await?;
     append_event(
-        &state.pool,
+        &mut *tx,
         &user_id,
         "task",
         &id,
@@ -785,6 +790,7 @@ async fn create_task(
         mutation_id(&headers),
     )
     .await?;
+    tx.commit().await?;
     Ok((StatusCode::CREATED, Json(task)))
 }
 
@@ -805,7 +811,8 @@ async fn update_task(
     if due.is_none() && due_time.is_some() {
         return Err(AppError::BadRequest("due_time requires due".into()));
     }
-    sqlx::query(
+    let mut tx = state.pool.begin().await?;
+    let result = sqlx::query(
         "UPDATE tasks SET title=COALESCE(?,title),notes=COALESCE(?,notes),
          important=COALESCE(?,important),urgent=COALESCE(?,urgent),
          completed=COALESCE(?,completed),due=?,due_time=?,
@@ -827,11 +834,14 @@ async fn update_task(
     .bind(&user_id)
     .bind(&id)
     .bind(input.base_version)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
-    let task = fetch_task(&state.pool, &user_id, &id).await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::Conflict("task version changed".into()));
+    }
+    let task = fetch_task(&mut *tx, &user_id, &id).await?;
     append_event(
-        &state.pool,
+        &mut *tx,
         &user_id,
         "task",
         &id,
@@ -841,6 +851,7 @@ async fn update_task(
         mutation_id(&headers),
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(task))
 }
 
@@ -853,17 +864,21 @@ async fn delete_task(
     reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let task = fetch_task(&state.pool, &user_id, &id).await?;
     let timestamp = now();
-    sqlx::query(
+    let mut tx = state.pool.begin().await?;
+    let result = sqlx::query(
         "UPDATE tasks SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?",
     )
     .bind(&timestamp)
     .bind(&timestamp)
     .bind(&user_id)
     .bind(&id)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::Conflict("task version changed".into()));
+    }
     append_event(
-        &state.pool,
+        &mut *tx,
         &user_id,
         "task",
         &id,
@@ -873,6 +888,7 @@ async fn delete_task(
         mutation_id(&headers),
     )
     .await?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -887,11 +903,14 @@ async fn list_projects(
     ).bind(user_id).fetch_all(&state.pool).await?))
 }
 
-async fn fetch_project(pool: &SqlitePool, user_id: &str, id: &str) -> Result<Project, AppError> {
+async fn fetch_project<'e, E>(executor: E, user_id: &str, id: &str) -> Result<Project, AppError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     sqlx::query_as::<_, Project>(
         "SELECT id,name,goal,status,start_date,due,next_action_task_id,created_at,updated_at,version
          FROM projects WHERE user_id=? AND id=? AND deleted_at IS NULL",
-    ).bind(user_id).bind(id).fetch_optional(pool).await?.ok_or(AppError::NotFound)
+    ).bind(user_id).bind(id).fetch_optional(executor).await?.ok_or(AppError::NotFound)
 }
 
 async fn create_project(
@@ -906,11 +925,12 @@ async fn create_project(
     }
     let id = new_id();
     let timestamp = now();
+    let mut tx = state.pool.begin().await?;
     sqlx::query("INSERT INTO projects (id,user_id,name,goal,status,start_date,due,next_action_task_id,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,?,?,?,1)")
-        .bind(&id).bind(&user_id).bind(input.name.trim()).bind(input.goal).bind(input.status.unwrap_or_else(|| "active".into())).bind(input.start_date).bind(input.due).bind(input.next_action_task_id).bind(&timestamp).bind(&timestamp).execute(&state.pool).await?;
-    let project = fetch_project(&state.pool, &user_id, &id).await?;
+        .bind(&id).bind(&user_id).bind(input.name.trim()).bind(input.goal).bind(input.status.unwrap_or_else(|| "active".into())).bind(input.start_date).bind(input.due).bind(input.next_action_task_id).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await?;
+    let project = fetch_project(&mut *tx, &user_id, &id).await?;
     append_event(
-        &state.pool,
+        &mut *tx,
         &user_id,
         "project",
         &id,
@@ -920,6 +940,7 @@ async fn create_project(
         mutation_id(&headers),
     )
     .await?;
+    tx.commit().await?;
     Ok((StatusCode::CREATED, Json(project)))
 }
 
@@ -935,11 +956,15 @@ async fn update_project(
     if current.version != input.base_version {
         return Err(AppError::Conflict("project version changed".into()));
     }
-    sqlx::query("UPDATE projects SET name=COALESCE(?,name),goal=COALESCE(?,goal),status=COALESCE(?,status),start_date=COALESCE(?,start_date),due=COALESCE(?,due),next_action_task_id=COALESCE(?,next_action_task_id),updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
-        .bind(input.name).bind(input.goal).bind(input.status).bind(input.start_date).bind(input.due).bind(input.next_action_task_id).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&state.pool).await?;
-    let project = fetch_project(&state.pool, &user_id, &id).await?;
+    let mut tx = state.pool.begin().await?;
+    let result = sqlx::query("UPDATE projects SET name=COALESCE(?,name),goal=COALESCE(?,goal),status=COALESCE(?,status),start_date=COALESCE(?,start_date),due=COALESCE(?,due),next_action_task_id=COALESCE(?,next_action_task_id),updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
+        .bind(input.name).bind(input.goal).bind(input.status).bind(input.start_date).bind(input.due).bind(input.next_action_task_id).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&mut *tx).await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::Conflict("project version changed".into()));
+    }
+    let project = fetch_project(&mut *tx, &user_id, &id).await?;
     append_event(
-        &state.pool,
+        &mut *tx,
         &user_id,
         "project",
         &id,
@@ -949,6 +974,7 @@ async fn update_project(
         mutation_id(&headers),
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(project))
 }
 
@@ -968,15 +994,19 @@ async fn delete_project(
     .fetch_all(&state.pool)
     .await?;
     let timestamp = now();
-    sqlx::query(
+    let mut tx = state.pool.begin().await?;
+    let result = sqlx::query(
         "UPDATE projects SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?",
     )
     .bind(&timestamp)
     .bind(&timestamp)
     .bind(&user_id)
     .bind(&id)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::Conflict("project version changed".into()));
+    }
     sqlx::query(
         "UPDATE project_milestones
          SET deleted_at=?,updated_at=?,version=version+1
@@ -984,11 +1014,11 @@ async fn delete_project(
     )
     .bind(&timestamp)
     .bind(&id)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
     for (milestone_id, version) in milestones {
         append_event(
-            &state.pool,
+            &mut *tx,
             &user_id,
             "project_milestone",
             &milestone_id,
@@ -1000,7 +1030,7 @@ async fn delete_project(
         .await?;
     }
     append_event(
-        &state.pool,
+        &mut *tx,
         &user_id,
         "project",
         &id,
@@ -1010,6 +1040,7 @@ async fn delete_project(
         mutation_id(&headers),
     )
     .await?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1048,12 +1079,15 @@ async fn ensure_project(
     .ok_or(AppError::NotFound)
 }
 
-async fn fetch_milestone(
-    pool: &SqlitePool,
+async fn fetch_milestone<'e, E>(
+    executor: E,
     user_id: &str,
     project_id: &str,
     id: &str,
-) -> Result<Milestone, AppError> {
+) -> Result<Milestone, AppError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     sqlx::query_as::<_, Milestone>(
         "SELECT m.id,p.user_id,m.project_id,m.title,m.due,m.completed,m.completed_at,
                 m.position,m.created_at,m.updated_at,m.version,m.deleted_at
@@ -1065,7 +1099,7 @@ async fn fetch_milestone(
     .bind(user_id)
     .bind(project_id)
     .bind(id)
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await?
     .ok_or(AppError::NotFound)
 }
@@ -1120,6 +1154,7 @@ async fn create_milestone(
     let timestamp = now();
     let completed = input.completed.unwrap_or(false);
     let completed_at = completed.then(|| timestamp.clone());
+    let mut tx = state.pool.begin().await?;
     sqlx::query(
         "INSERT INTO project_milestones
          (id,project_id,title,due,completed,completed_at,position,created_at,updated_at,version)
@@ -1134,11 +1169,11 @@ async fn create_milestone(
     .bind(position)
     .bind(&timestamp)
     .bind(&timestamp)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
-    let milestone = fetch_milestone(&state.pool, &user_id, &project_id, &id).await?;
+    let milestone = fetch_milestone(&mut *tx, &user_id, &project_id, &id).await?;
     append_event(
-        &state.pool,
+        &mut *tx,
         &user_id,
         "project_milestone",
         &id,
@@ -1148,6 +1183,7 @@ async fn create_milestone(
         mutation_id(&headers),
     )
     .await?;
+    tx.commit().await?;
     Ok((StatusCode::CREATED, Json(milestone)))
 }
 
@@ -1184,6 +1220,7 @@ async fn update_milestone(
         (true, false) => None,
         _ => current.completed_at,
     };
+    let mut tx = state.pool.begin().await?;
     let result = sqlx::query(
         "UPDATE project_milestones
          SET title=?,due=?,completed=?,completed_at=?,position=?,updated_at=?,version=version+1
@@ -1198,14 +1235,14 @@ async fn update_milestone(
     .bind(&id)
     .bind(&project_id)
     .bind(input.base_version)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
     if result.rows_affected() != 1 {
         return Err(AppError::Conflict("milestone version changed".into()));
     }
-    let milestone = fetch_milestone(&state.pool, &user_id, &project_id, &id).await?;
+    let milestone = fetch_milestone(&mut *tx, &user_id, &project_id, &id).await?;
     append_event(
-        &state.pool,
+        &mut *tx,
         &user_id,
         "project_milestone",
         &id,
@@ -1215,6 +1252,7 @@ async fn update_milestone(
         mutation_id(&headers),
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(milestone))
 }
 
@@ -1227,7 +1265,8 @@ async fn delete_milestone(
     reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let current = fetch_milestone(&state.pool, &user_id, &project_id, &id).await?;
     let timestamp = now();
-    sqlx::query(
+    let mut tx = state.pool.begin().await?;
+    let result = sqlx::query(
         "UPDATE project_milestones
          SET deleted_at=?,updated_at=?,version=version+1
          WHERE id=? AND project_id=? AND deleted_at IS NULL",
@@ -1236,10 +1275,13 @@ async fn delete_milestone(
     .bind(&timestamp)
     .bind(&id)
     .bind(&project_id)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::Conflict("milestone version changed".into()));
+    }
     append_event(
-        &state.pool,
+        &mut *tx,
         &user_id,
         "project_milestone",
         &id,
@@ -1249,6 +1291,7 @@ async fn delete_milestone(
         mutation_id(&headers),
     )
     .await?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1263,15 +1306,14 @@ async fn list_events(
     ).bind(user_id).fetch_all(&state.pool).await?))
 }
 
-async fn fetch_event(
-    pool: &SqlitePool,
-    user_id: &str,
-    id: &str,
-) -> Result<CalendarEvent, AppError> {
+async fn fetch_event<'e, E>(executor: E, user_id: &str, id: &str) -> Result<CalendarEvent, AppError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     sqlx::query_as::<_, CalendarEvent>(
         "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version
          FROM calendar_events WHERE user_id=? AND id=? AND deleted_at IS NULL",
-    ).bind(user_id).bind(id).fetch_optional(pool).await?.ok_or(AppError::NotFound)
+    ).bind(user_id).bind(id).fetch_optional(executor).await?.ok_or(AppError::NotFound)
 }
 
 async fn create_event(
@@ -1291,11 +1333,12 @@ async fn create_event(
     }
     let id = new_id();
     let timestamp = now();
+    let mut tx = state.pool.begin().await?;
     sqlx::query("INSERT INTO calendar_events (id,user_id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,?,?,?,?,1)")
-        .bind(&id).bind(&user_id).bind(input.title.trim()).bind(input.description).bind(input.location).bind(input.start_at).bind(input.end_at).bind(input.all_day.unwrap_or(false)).bind(input.reminder_minutes).bind(&timestamp).bind(&timestamp).execute(&state.pool).await?;
-    let event = fetch_event(&state.pool, &user_id, &id).await?;
+        .bind(&id).bind(&user_id).bind(input.title.trim()).bind(input.description).bind(input.location).bind(input.start_at).bind(input.end_at).bind(input.all_day.unwrap_or(false)).bind(input.reminder_minutes).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await?;
+    let event = fetch_event(&mut *tx, &user_id, &id).await?;
     append_event(
-        &state.pool,
+        &mut *tx,
         &user_id,
         "calendar_event",
         &id,
@@ -1305,6 +1348,7 @@ async fn create_event(
         mutation_id(&headers),
     )
     .await?;
+    tx.commit().await?;
     Ok((StatusCode::CREATED, Json(event)))
 }
 
@@ -1327,11 +1371,15 @@ async fn update_event(
             "end_at must not precede start_at".into(),
         ));
     }
-    sqlx::query("UPDATE calendar_events SET title=COALESCE(?,title),description=COALESCE(?,description),location=COALESCE(?,location),start_at=?,end_at=?,all_day=COALESCE(?,all_day),reminder_minutes=COALESCE(?,reminder_minutes),updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
-        .bind(input.title).bind(input.description).bind(input.location).bind(start_at).bind(end_at).bind(input.all_day).bind(input.reminder_minutes).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&state.pool).await?;
-    let event = fetch_event(&state.pool, &user_id, &id).await?;
+    let mut tx = state.pool.begin().await?;
+    let result = sqlx::query("UPDATE calendar_events SET title=COALESCE(?,title),description=COALESCE(?,description),location=COALESCE(?,location),start_at=?,end_at=?,all_day=COALESCE(?,all_day),reminder_minutes=COALESCE(?,reminder_minutes),updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
+        .bind(input.title).bind(input.description).bind(input.location).bind(start_at).bind(end_at).bind(input.all_day).bind(input.reminder_minutes).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&mut *tx).await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::Conflict("calendar event version changed".into()));
+    }
+    let event = fetch_event(&mut *tx, &user_id, &id).await?;
     append_event(
-        &state.pool,
+        &mut *tx,
         &user_id,
         "calendar_event",
         &id,
@@ -1341,6 +1389,7 @@ async fn update_event(
         mutation_id(&headers),
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(event))
 }
 
@@ -1353,10 +1402,14 @@ async fn delete_event(
     reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let event = fetch_event(&state.pool, &user_id, &id).await?;
     let timestamp = now();
-    sqlx::query("UPDATE calendar_events SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?")
-        .bind(&timestamp).bind(&timestamp).bind(&user_id).bind(&id).execute(&state.pool).await?;
+    let mut tx = state.pool.begin().await?;
+    let result = sqlx::query("UPDATE calendar_events SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?")
+        .bind(&timestamp).bind(&timestamp).bind(&user_id).bind(&id).execute(&mut *tx).await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::Conflict("calendar event version changed".into()));
+    }
     append_event(
-        &state.pool,
+        &mut *tx,
         &user_id,
         "calendar_event",
         &id,
@@ -1366,6 +1419,7 @@ async fn delete_event(
         mutation_id(&headers),
     )
     .await?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -3,9 +3,8 @@
 本文档定义 Oris 当前服务端已经提供的 API，以及下一步建议实现的同步能力。
 
 本文档以 `oris-server/src/main.rs`、`oris-core/src/lib.rs` 和
-`oris-server/migrations/` 的当前工作树为准。未标记为“建议”的接口可以作为
-已完成基础实现的契约使用；“工作树草稿/建议”部分尚未验收，不应视为线上
-可用能力。
+`oris-server/migrations/` 的当前工作树为准。标记为“建议”的内容仍属于后续
+设计，其余接口可作为已完成基础实现的契约使用。
 
 ## 1. 基本约定
 
@@ -464,9 +463,8 @@ Authorization: Session <accessToken>
 - `payloadJson`：upsert 时为 JSON 文本，delete 时为 `null`。
 - `cursor`：按用户递增；客户端只应在成功处理事件后保存 `nextCursor`。
 
-创建、更新和软删除任务、项目、日程都会追加事件。当前实现把实体写入
-和事件追加作为两个数据库操作，后续应改为同一事务，避免实体已变更但
-事件追加失败时造成同步缺口。
+创建、更新和软删除任务、项目、日程及里程碑都会追加事件。实体写入与事件
+追加在同一 SQLite 事务中提交；任一步失败都会回滚，避免形成同步缺口。
 
 当前没有游标过期检测、事件清理策略或快照回退接口。
 
@@ -485,7 +483,6 @@ Authorization: Session <accessToken>
 ```json
 {
   "cursor": 44,
-  "generatedAt": "2026-09-16T08:10:00Z",
   "tasks": [],
   "projects": [],
   "calendarEvents": [],
@@ -505,12 +502,10 @@ Authorization: Session <accessToken>
 5. 快照读取完成后，客户端从返回的 `cursor` 继续请求
    `/api/v1/sync/events?after=<cursor>`。
 
-## 9. 工作树草稿/建议：`Idempotency-Key`
+## 9. `Idempotency-Key`
 
-当前服务端尚未完成 `Idempotency-Key`。工作树已加入请求头解析、重复检查
-函数和 `sync_events.mutation_id` 数据库字段，但这些逻辑尚未接入所有写入
-handler，也未形成可用的重放响应。当前 `sync_events` 查询还没有完整接入
-该字段，不能把它当作已生效的去重机制。
+写入接口支持 `Idempotency-Key`。服务端按用户和 Key 拒绝已成功处理的重复
+写入，并将 Key 与同步事件关联；客户端应在网络超时后复用原 Key。
 
 建议所有业务写入请求支持：
 
@@ -526,6 +521,9 @@ Idempotency-Key: 01J7...client-generated-key
 - `POST /api/v1/projects`
 - `PATCH /api/v1/projects/{id}`
 - `DELETE /api/v1/projects/{id}`
+- `POST /api/v1/projects/{project_id}/milestones`
+- `PATCH /api/v1/projects/{project_id}/milestones/{id}`
+- `DELETE /api/v1/projects/{project_id}/milestones/{id}`
 - `POST /api/v1/calendar-events`
 - `PATCH /api/v1/calendar-events/{id}`
 - `DELETE /api/v1/calendar-events/{id}`
@@ -541,8 +539,7 @@ Idempotency-Key: 01J7...client-generated-key
 5. 失败的业务请求不应占用 Key；服务端错误允许客户端使用同一 Key 重试。
 6. 客户端应为每个逻辑写入操作生成新 Key，并在网络超时后复用原 Key。
 
-建议实现时将 `mutation_id` 作为内部去重字段；是否直接把它暴露为同步
-事件字段，需在实现幂等层时一并确定。当前 API 不要求客户端把 Key 放进
+服务端将 `mutation_id` 作为同步事件字段返回。当前 API 不要求客户端把 Key 放进
 JSON body。
 
 ## 10. 版本、同步和任务/日程边界
@@ -604,9 +601,8 @@ JSON 解析失败等由 Axum 提取器直接生成的错误，当前不一定符
 - 日期和时间输入尚未做完整格式校验。
 - 任务 `recurrence` 当前只作为字符串保存，没有循环任务执行器。
 - 里程碑通过项目嵌套路由提供 CRUD、乐观并发控制和删除墓碑事件。
-- 增量事件追加尚未与实体变更放在同一个事务中。
-- `Idempotency-Key` 和 `sync/snapshot` 只有未验收的工作树草稿，尚未作为稳定 API 发布。
+- `sync/snapshot` 当前未包含独立的生成时间字段；客户端应以返回的 `cursor`
+  作为恢复边界。
 - 当前没有分页和时间范围查询，列表接口不适合大数据量长期使用。
 
-建议下一步顺序：先统一实体与同步事件的事务边界，再补齐严格字段校验、
-列表分页/筛选和项目进度摘要。
+建议下一步顺序：补齐严格字段校验、列表分页/筛选和项目进度摘要。
