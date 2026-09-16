@@ -5,12 +5,10 @@ use axum::{
     response::IntoResponse,
 };
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, Mutex};
 
-use crate::{authenticated_user, AppState};
+use crate::{agent_gateway::protocol::MobileEnvelope, authenticated_user, AppState};
 
 const PROTOCOL_VERSION: u32 = 1;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -43,23 +41,17 @@ impl MobileRegistry {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct MobileEnvelope {
-    version: u32,
-    #[serde(rename = "type")]
-    message_type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    request_id: Option<String>,
-    payload: Value,
-}
-
 pub async fn upgrade(
     ws: WebSocketUpgrade,
     headers: HeaderMap,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let Ok(user_id) = authenticated_user(&headers, &state.pool).await else {
-        return (axum::http::StatusCode::UNAUTHORIZED, "valid session required").into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            "valid session required",
+        )
+            .into_response();
     };
     ws.on_upgrade(move |socket| handle_socket(socket, state, user_id))
         .into_response()

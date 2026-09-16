@@ -698,6 +698,7 @@ async fn authenticated_user(headers: &HeaderMap, pool: &SqlitePool) -> Result<St
     }
     let device_id = headers
         .get("x-orialis-device-id")
+        .or_else(|| headers.get("x-oris-device-id"))
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -773,6 +774,25 @@ where
     .execute(executor)
     .await?;
     Ok(())
+}
+
+async fn notify_sync_change(state: &AppState, user_id: &str, entity: Option<&str>) {
+    let cursor = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(MAX(cursor), 0) FROM sync_events WHERE user_id=?",
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await;
+    match cursor {
+        Ok(cursor) if cursor > 0 => state.mobile.notify(
+            user_id,
+            agent_gateway::protocol::mobile_sync_change_hint(cursor, entity),
+        ),
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(%error, "could not read sync cursor for realtime notification")
+        }
+    }
 }
 
 async fn register(
@@ -1140,6 +1160,7 @@ async fn create_task(
     )
     .await?;
     tx.commit().await?;
+    notify_sync_change(&state, &user_id, Some("task")).await;
     Ok((StatusCode::CREATED, Json(task)))
 }
 
@@ -1213,6 +1234,7 @@ async fn update_task(
     )
     .await?;
     tx.commit().await?;
+    notify_sync_change(&state, &user_id, Some("task")).await;
     Ok(Json(task))
 }
 
@@ -1250,6 +1272,7 @@ async fn delete_task(
     )
     .await?;
     tx.commit().await?;
+    notify_sync_change(&state, &user_id, Some("task")).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1304,6 +1327,7 @@ async fn create_project(
     )
     .await?;
     tx.commit().await?;
+    notify_sync_change(&state, &user_id, Some("project")).await;
     Ok((StatusCode::CREATED, Json(project)))
 }
 
@@ -1347,6 +1371,7 @@ async fn update_project(
     )
     .await?;
     tx.commit().await?;
+    notify_sync_change(&state, &user_id, Some("project")).await;
     Ok(Json(project))
 }
 
@@ -1413,6 +1438,7 @@ async fn delete_project(
     )
     .await?;
     tx.commit().await?;
+    notify_sync_change(&state, &user_id, None).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1613,6 +1639,7 @@ async fn create_milestone(
     )
     .await?;
     tx.commit().await?;
+    notify_sync_change(&state, &user_id, Some("project_milestone")).await;
     Ok((StatusCode::CREATED, Json(milestone)))
 }
 
@@ -1682,6 +1709,7 @@ async fn update_milestone(
     )
     .await?;
     tx.commit().await?;
+    notify_sync_change(&state, &user_id, Some("project_milestone")).await;
     Ok(Json(milestone))
 }
 
@@ -1721,6 +1749,7 @@ async fn delete_milestone(
     )
     .await?;
     tx.commit().await?;
+    notify_sync_change(&state, &user_id, Some("project_milestone")).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1780,6 +1809,7 @@ async fn create_event(
     )
     .await?;
     tx.commit().await?;
+    notify_sync_change(&state, &user_id, Some("calendar_event")).await;
     Ok((StatusCode::CREATED, Json(event)))
 }
 
@@ -1823,6 +1853,7 @@ async fn update_event(
     )
     .await?;
     tx.commit().await?;
+    notify_sync_change(&state, &user_id, Some("calendar_event")).await;
     Ok(Json(event))
 }
 
@@ -1853,6 +1884,7 @@ async fn delete_event(
     )
     .await?;
     tx.commit().await?;
+    notify_sync_change(&state, &user_id, Some("calendar_event")).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

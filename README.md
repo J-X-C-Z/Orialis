@@ -31,7 +31,7 @@ API：
     GET/POST /api/v1/conversations/{conversation_id}/messages
     GET /api/v1/sync/events?after=<cursor>&limit=<n>
     GET /api/v1/sync/snapshot
-    GET /api/v1/ws                    # mobile heartbeat/change channel
+    GET /api/v1/ws                    # mobile authenticated realtime/change channel
     GET /api/v1/mobile/ws             # compatible alias
     GET /api/v1/agent/ws
     POST /api/v1/agent/debug/message  # development only
@@ -40,7 +40,7 @@ API：
 
 更新请求使用 baseVersion 做乐观并发控制，版本冲突返回 409。同步事件返回用户级递增 cursor，删除事件保留 tombstone。
 
-Agent Track（M0–M5）已落地：服务器提供 WebSocket Agent Gateway、开发触发器、ACK、去重和自动重连；Hermes 插件源代码位于 `integrations/hermes/orialis/`，本机插件目录为 `~/.hermes/plugins/orialis/`。
+Agent Track（M0–M5）已落地：服务器提供 WebSocket Agent Gateway、ACK、去重和自动重连；手机消息提交后会异步投递给已连接的 Hermes，助手回复会持久化并通过手机实时通道推送。开发触发器仍仅用于本地协议测试；Hermes 插件源代码位于 `integrations/hermes/orialis/`，本机插件目录为 `~/.hermes/plugins/orialis/`。
 
 生产接入时，在服务端设置 `ORIALIS_AGENT_DEVICE_TOKEN`，并在 Hermes 插件设置对应的 `ORIALIS_DEVICE_TOKEN`；插件会通过 `Authorization: Bearer` 发送令牌。开发环境未配置服务端令牌时允许本地无认证联调。
 
@@ -70,4 +70,4 @@ Agent Track（M0–M5）已落地：服务器提供 WebSocket Agent Gateway、�
 
     ORIALIS_DATABASE_URL=sqlite:///var/lib/orialis/orialis.db?mode=rwc
 
-当前迭代暂不包含网页、LLM 和第三方日历连接。手机端第一阶段边界见 docs/architecture.md、docs/mobile-architecture.md 和 docs/sync.md；旧项目的迁移边界见 docs/fangcun-migration.md。
+当前迭代暂不包含网页、内置 LLM 和第三方日历连接；Hermes 是外部 Agent 执行端。手机端第一阶段边界见 docs/architecture.md、docs/mobile-architecture.md 和 docs/sync.md；旧项目的迁移边界见 docs/fangcun-migration.md。

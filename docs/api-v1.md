@@ -60,14 +60,16 @@ Cookie: orialis_session=<accessToken>
 | GET/POST | `/api/v1/conversations/{conversation_id}/messages` | 是 | 已实现 | 查询或保存聊天消息 |
 | GET | `/api/v1/sync/events` | 是 | 已实现 | 按游标读取增量事件 |
 | GET | `/api/v1/sync/snapshot` | 是 | 已实现 | 获取可替换本地数据的完整快照 |
-| GET | `/api/v1/ws` | 否 | 已实现 | 手机端实时连接握手与心跳 |
+| GET | `/api/v1/ws` | 是 | 已实现 | 手机端实时连接、心跳、同步提示和消息推送 |
 
 当前没有网页接口或第三方日历接口。里程碑已通过项目嵌套路由
-对外提供 HTTP API。
+对外提供 HTTP API。消息 POST 成功后会先持久化用户消息，再异步投递给已连接的
+Hermes；收到匹配的 `message.reply` 后，服务端会保存 `role=assistant` 的消息。
 
 手机端首通阶段可在本地开发环境启用 `ORIALIS_DEV_DEVICE_AUTH=true`，然后使用
-`X-Orialis-Device-Id` 访问需要认证的接口。该模式只用于本地开发，生产环境必须
-保持关闭并改用正式 Session 认证。
+`X-Orialis-Device-Id` 访问需要认证的 HTTP 和 WebSocket 接口。该模式只用于本地
+开发，生产环境必须保持关闭并改用正式 Session 认证；WebSocket 握手也要发送
+`Authorization: Session <accessToken>`。
 
 ## 3. 认证接口
 
@@ -652,7 +654,9 @@ JSON 解析失败等由 Axum 提取器直接生成的错误，当前不一定符
 - `sync/snapshot` 当前未包含独立的生成时间字段；客户端应以返回的 `cursor`
   作为恢复边界。
 - 项目、日程和里程碑列表当前仍没有分页或时间范围查询。
-- 手机 WebSocket 当前只提供握手、心跳和基础 envelope，不承载持久化数据。
-- 聊天消息当前只保存用户消息，不生成 Agent 回复。
+- 手机 WebSocket 提供握手、心跳、同步变化提示和聊天消息推送；持久化状态仍以
+  HTTP 增量同步和消息查询为准。
+- 聊天消息会保存用户消息；如果 Hermes 已连接，服务端会异步保存匹配的 Agent 回复，
+  Hermes 不在线时用户消息仍会保留。
 
 建议下一步顺序：项目进度摘要，再为其他资源补齐分页/筛选。
