@@ -26,6 +26,7 @@ API：
     GET /api/v1/auth/session
     GET/POST/PATCH/DELETE /api/v1/tasks
     GET/POST/PATCH/DELETE /api/v1/projects
+    GET/POST/PATCH/DELETE /api/v1/projects/{project_id}/milestones
     GET/POST/PATCH/DELETE /api/v1/calendar-events
     GET /api/v1/sync/events?after=<cursor>&limit=<n>
     GET /api/v1/sync/snapshot

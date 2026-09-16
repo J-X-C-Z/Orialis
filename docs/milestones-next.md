@@ -2,7 +2,8 @@
 
 > 范围：审查 `fangcun-backup` 与当前 Oris 模型后，为 `project_milestones` API 固化下一阶段契约。
 >
-> 本文只定义边界和迁移注意事项，不代表本阶段已经实现 API，也不改变当前代码。
+> 本文记录边界和迁移注意事项；第 2–6 节已落实为当前服务端 API，第 8 节保留
+> 尚未完成的验收项。
 
 ## 1. 审查结论
 
@@ -25,7 +26,8 @@ progress       = completedUnits / totalUnits * 100
 
 这部分可以作为 Oris 后续项目详情/摘要接口的计算规则，但不应把 `progress` 写入里程碑表，也不应把里程碑转换成日程。里程碑仍然是项目内的截止事项。
 
-当前 Oris 已有 `project_milestones` 表和 `oris-core::Milestone` 模型，但尚未注册路由或实现 handler。当前表已经具备 `position`、`version`、`deleted_at` 和完成状态约束，适合作为独立资源的基础。
+当前 Oris 已通过项目嵌套路由提供里程碑 CRUD。表结构具备 `position`、`version`、
+`deleted_at` 和完成状态约束，适合作为独立资源的基础。
 
 ## 2. 推荐资源边界
 
@@ -185,8 +187,8 @@ payload     = upsert 时的完整返回对象；delete 时为空
 1. `oris-core::Milestone` 包含 `user_id`，而 `project_milestones` 表没有 `user_id`；确定采用 JOIN 注入还是补列，本文件推荐 JOIN。
 2. `oris-core::Project` 包含 `description`，SQL 表也有该列，但当前 server 的 `Project` DTO 和项目查询没有读取/写入它。
 3. SQL 表有 `projects.color`，当前 core/server 项目模型没有暴露它；决定保留为展示元数据，还是延后加入模型。不要在里程碑 API 中隐式带出未统一的项目字段。
-4. 当前项目路由只有项目 CRUD，没有里程碑路由；应先加入嵌套路由和独立 DTO，再补同步事务测试。
-5. 当前项目删除只写项目墓碑，没有处理子里程碑；必须在项目删除实现中补齐子记录策略。
+4. 里程碑已使用嵌套路由和独立 DTO；仍需补充更完整的同步事务测试。
+5. 项目删除已处理子里程碑软删除和对应墓碑事件；仍需将整个操作收束到同一事务。
 6. 进度、已完成数量和下一行动是读取投影，不写入 `project_milestones`；它们应在项目详情/摘要 API 中单独设计。
 
 ## 8. 下一阶段验收标准

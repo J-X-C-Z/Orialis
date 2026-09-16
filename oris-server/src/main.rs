@@ -5,7 +5,7 @@ use axum::{
     routing::{get, patch, post},
     Json, Router,
 };
-use chrono::{Duration, Utc};
+use chrono::{Duration, NaiveDate, Utc};
 use oris_core::{metadata, ServiceMetadata, API_VERSION, SERVICE_NAME};
 use scrypt::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -164,6 +164,7 @@ struct Task {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TaskInput {
+    id: Option<String>,
     title: String,
     notes: Option<String>,
     important: Option<bool>,
@@ -249,6 +250,7 @@ struct CalendarEvent {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CalendarEventInput {
+    id: Option<String>,
     title: String,
     description: Option<String>,
     location: Option<String>,
@@ -305,6 +307,43 @@ struct SyncSnapshot {
     tasks: Vec<Task>,
     projects: Vec<Project>,
     calendar_events: Vec<CalendarEvent>,
+    milestones: Vec<Milestone>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+struct Milestone {
+    id: String,
+    user_id: String,
+    project_id: String,
+    title: String,
+    due: Option<String>,
+    completed: bool,
+    completed_at: Option<String>,
+    position: i64,
+    created_at: String,
+    updated_at: String,
+    version: i64,
+    deleted_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MilestoneInput {
+    title: String,
+    due: Option<String>,
+    completed: Option<bool>,
+    position: Option<i64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MilestonePatch {
+    title: Option<String>,
+    due: Option<Option<String>>,
+    completed: Option<bool>,
+    position: Option<i64>,
+    base_version: i64,
 }
 
 #[tokio::main]
@@ -365,6 +404,16 @@ async fn main() {
         .route(
             "/api/v1/projects/{id}",
             patch(update_project).delete(delete_project),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/milestones",
+            get(list_milestones).post(create_milestone),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/milestones/{id}",
+            get(get_milestone)
+                .patch(update_milestone)
+                .delete(delete_milestone),
         )
         .route(
             "/api/v1/calendar-events",
@@ -911,6 +960,13 @@ async fn delete_project(
     let user_id = authenticated_user(&headers, &state.pool).await?;
     reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let project = fetch_project(&state.pool, &user_id, &id).await?;
+    let milestones = sqlx::query_as::<_, (String, i64)>(
+        "SELECT id,version FROM project_milestones
+         WHERE project_id=? AND deleted_at IS NULL",
+    )
+    .bind(&id)
+    .fetch_all(&state.pool)
+    .await?;
     let timestamp = now();
     sqlx::query(
         "UPDATE projects SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?",
@@ -921,6 +977,28 @@ async fn delete_project(
     .bind(&id)
     .execute(&state.pool)
     .await?;
+    sqlx::query(
+        "UPDATE project_milestones
+         SET deleted_at=?,updated_at=?,version=version+1
+         WHERE project_id=? AND deleted_at IS NULL",
+    )
+    .bind(&timestamp)
+    .bind(&id)
+    .execute(&state.pool)
+    .await?;
+    for (milestone_id, version) in milestones {
+        append_event(
+            &state.pool,
+            &user_id,
+            "project_milestone",
+            &milestone_id,
+            "delete",
+            version + 1,
+            None,
+            None,
+        )
+        .await?;
+    }
     append_event(
         &state.pool,
         &user_id,
@@ -928,6 +1006,245 @@ async fn delete_project(
         &id,
         "delete",
         project.version + 1,
+        None,
+        mutation_id(&headers),
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn validate_milestone(title: &str, due: Option<&str>, position: i64) -> Result<(), AppError> {
+    let length = title.trim().chars().count();
+    if !(1..=200).contains(&length) {
+        return Err(AppError::BadRequest(
+            "milestone title must be 1-200 characters".into(),
+        ));
+    }
+    if let Some(due) = due {
+        NaiveDate::parse_from_str(due, "%Y-%m-%d")
+            .map_err(|_| AppError::BadRequest("milestone due must be YYYY-MM-DD".into()))?;
+    }
+    if position < 0 {
+        return Err(AppError::BadRequest(
+            "milestone position must be non-negative".into(),
+        ));
+    }
+    Ok(())
+}
+
+async fn ensure_project(
+    pool: &SqlitePool,
+    user_id: &str,
+    project_id: &str,
+) -> Result<(), AppError> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT id FROM projects WHERE id=? AND user_id=? AND deleted_at IS NULL",
+    )
+    .bind(project_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?
+    .map(|_| ())
+    .ok_or(AppError::NotFound)
+}
+
+async fn fetch_milestone(
+    pool: &SqlitePool,
+    user_id: &str,
+    project_id: &str,
+    id: &str,
+) -> Result<Milestone, AppError> {
+    sqlx::query_as::<_, Milestone>(
+        "SELECT m.id,p.user_id,m.project_id,m.title,m.due,m.completed,m.completed_at,
+                m.position,m.created_at,m.updated_at,m.version,m.deleted_at
+         FROM project_milestones m
+         JOIN projects p ON p.id=m.project_id
+         WHERE p.user_id=? AND p.deleted_at IS NULL
+           AND m.project_id=? AND m.id=? AND m.deleted_at IS NULL",
+    )
+    .bind(user_id)
+    .bind(project_id)
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::NotFound)
+}
+
+async fn list_milestones(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(project_id): Path<String>,
+) -> Result<Json<Vec<Milestone>>, AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    ensure_project(&state.pool, &user_id, &project_id).await?;
+    Ok(Json(
+        sqlx::query_as::<_, Milestone>(
+            "SELECT m.id,p.user_id,m.project_id,m.title,m.due,m.completed,m.completed_at,
+                    m.position,m.created_at,m.updated_at,m.version,m.deleted_at
+             FROM project_milestones m
+             JOIN projects p ON p.id=m.project_id
+             WHERE p.user_id=? AND p.deleted_at IS NULL
+               AND m.project_id=? AND m.deleted_at IS NULL
+             ORDER BY m.position,m.id",
+        )
+        .bind(user_id)
+        .bind(project_id)
+        .fetch_all(&state.pool)
+        .await?,
+    ))
+}
+
+async fn create_milestone(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(project_id): Path<String>,
+    Json(input): Json<MilestoneInput>,
+) -> Result<(StatusCode, Json<Milestone>), AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
+    ensure_project(&state.pool, &user_id, &project_id).await?;
+    let count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM project_milestones WHERE project_id=? AND deleted_at IS NULL",
+    )
+    .bind(&project_id)
+    .fetch_one(&state.pool)
+    .await?;
+    if count >= 100 {
+        return Err(AppError::BadRequest(
+            "project cannot have more than 100 milestones".into(),
+        ));
+    }
+    let position = input.position.unwrap_or(count);
+    validate_milestone(&input.title, input.due.as_deref(), position)?;
+    let id = new_id();
+    let timestamp = now();
+    let completed = input.completed.unwrap_or(false);
+    let completed_at = completed.then(|| timestamp.clone());
+    sqlx::query(
+        "INSERT INTO project_milestones
+         (id,project_id,title,due,completed,completed_at,position,created_at,updated_at,version)
+         VALUES (?,?,?,?,?,?,?,?,?,1)",
+    )
+    .bind(&id)
+    .bind(&project_id)
+    .bind(input.title.trim())
+    .bind(input.due)
+    .bind(completed)
+    .bind(completed_at)
+    .bind(position)
+    .bind(&timestamp)
+    .bind(&timestamp)
+    .execute(&state.pool)
+    .await?;
+    let milestone = fetch_milestone(&state.pool, &user_id, &project_id, &id).await?;
+    append_event(
+        &state.pool,
+        &user_id,
+        "project_milestone",
+        &id,
+        "upsert",
+        milestone.version,
+        Some(serde_json::to_string(&milestone).unwrap()),
+        mutation_id(&headers),
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(milestone)))
+}
+
+async fn get_milestone(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((project_id, id)): Path<(String, String)>,
+) -> Result<Json<Milestone>, AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    Ok(Json(
+        fetch_milestone(&state.pool, &user_id, &project_id, &id).await?,
+    ))
+}
+
+async fn update_milestone(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((project_id, id)): Path<(String, String)>,
+    Json(input): Json<MilestonePatch>,
+) -> Result<Json<Milestone>, AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
+    let current = fetch_milestone(&state.pool, &user_id, &project_id, &id).await?;
+    if current.version != input.base_version {
+        return Err(AppError::Conflict("milestone version changed".into()));
+    }
+    let title = input.title.unwrap_or(current.title);
+    let due = input.due.unwrap_or(current.due);
+    let completed = input.completed.unwrap_or(current.completed);
+    let position = input.position.unwrap_or(current.position);
+    validate_milestone(&title, due.as_deref(), position)?;
+    let completed_at = match (current.completed, completed) {
+        (false, true) => Some(now()),
+        (true, false) => None,
+        _ => current.completed_at,
+    };
+    let result = sqlx::query(
+        "UPDATE project_milestones
+         SET title=?,due=?,completed=?,completed_at=?,position=?,updated_at=?,version=version+1
+         WHERE id=? AND project_id=? AND version=? AND deleted_at IS NULL",
+    )
+    .bind(title.trim())
+    .bind(due)
+    .bind(completed)
+    .bind(completed_at)
+    .bind(position)
+    .bind(now())
+    .bind(&id)
+    .bind(&project_id)
+    .bind(input.base_version)
+    .execute(&state.pool)
+    .await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::Conflict("milestone version changed".into()));
+    }
+    let milestone = fetch_milestone(&state.pool, &user_id, &project_id, &id).await?;
+    append_event(
+        &state.pool,
+        &user_id,
+        "project_milestone",
+        &id,
+        "upsert",
+        milestone.version,
+        Some(serde_json::to_string(&milestone).unwrap()),
+        mutation_id(&headers),
+    )
+    .await?;
+    Ok(Json(milestone))
+}
+
+async fn delete_milestone(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((project_id, id)): Path<(String, String)>,
+) -> Result<StatusCode, AppError> {
+    let user_id = authenticated_user(&headers, &state.pool).await?;
+    reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
+    let current = fetch_milestone(&state.pool, &user_id, &project_id, &id).await?;
+    let timestamp = now();
+    sqlx::query(
+        "UPDATE project_milestones
+         SET deleted_at=?,updated_at=?,version=version+1
+         WHERE id=? AND project_id=? AND deleted_at IS NULL",
+    )
+    .bind(&timestamp)
+    .bind(&timestamp)
+    .bind(&id)
+    .bind(&project_id)
+    .execute(&state.pool)
+    .await?;
+    append_event(
+        &state.pool,
+        &user_id,
+        "project_milestone",
+        &id,
+        "delete",
+        current.version + 1,
         None,
         mutation_id(&headers),
     )
@@ -1092,6 +1409,17 @@ async fn sync_snapshot(
         "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version
          FROM calendar_events WHERE user_id=? AND deleted_at IS NULL ORDER BY start_at",
     ).bind(&user_id).fetch_all(&state.pool).await?;
+    let milestones = sqlx::query_as::<_, Milestone>(
+        "SELECT m.id,p.user_id,m.project_id,m.title,m.due,m.completed,m.completed_at,
+                m.position,m.created_at,m.updated_at,m.version,m.deleted_at
+         FROM project_milestones m
+         JOIN projects p ON p.id=m.project_id
+         WHERE p.user_id=? AND p.deleted_at IS NULL AND m.deleted_at IS NULL
+         ORDER BY m.project_id,m.position,m.id",
+    )
+    .bind(&user_id)
+    .fetch_all(&state.pool)
+    .await?;
     let cursor =
         sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(cursor) FROM sync_events WHERE user_id=?")
             .bind(&user_id)
@@ -1103,6 +1431,7 @@ async fn sync_snapshot(
         tasks,
         projects,
         calendar_events,
+        milestones,
     }))
 }
 

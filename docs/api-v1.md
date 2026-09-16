@@ -53,13 +53,15 @@ Cookie: oris_session=<accessToken>
 | PATCH/DELETE | `/api/v1/tasks/{id}` | 是 | 已实现 | 更新或软删除任务 |
 | GET/POST | `/api/v1/projects` | 是 | 已实现 | 查询或创建项目 |
 | PATCH/DELETE | `/api/v1/projects/{id}` | 是 | 已实现 | 更新或软删除项目 |
+| GET/POST | `/api/v1/projects/{project_id}/milestones` | 是 | 已实现 | 查询或创建项目里程碑 |
+| GET/PATCH/DELETE | `/api/v1/projects/{project_id}/milestones/{id}` | 是 | 已实现 | 查询、更新或软删除里程碑 |
 | GET/POST | `/api/v1/calendar-events` | 是 | 已实现 | 查询或创建日程 |
 | PATCH/DELETE | `/api/v1/calendar-events/{id}` | 是 | 已实现 | 更新或软删除日程 |
 | GET | `/api/v1/sync/events` | 是 | 已实现 | 按游标读取增量事件 |
 | GET | `/api/v1/sync/snapshot` | 是 | 已实现 | 获取可替换本地数据的完整快照 |
 
-当前没有网页接口、Agent 接口、第三方日历接口或里程碑 HTTP API。
-`project_milestones` 已存在于数据库迁移和核心模型中，但暂未对外开放。
+当前没有网页接口、Agent 接口或第三方日历接口。里程碑已通过项目嵌套路由
+对外提供 HTTP API。
 
 ## 3. 认证接口
 
@@ -455,8 +457,7 @@ Authorization: Session <accessToken>
 
 当前事件字段：
 
-- `entityType`：`task`、`project`、`calendar_event`；数据库也允许
-  `project_milestone`，但当前没有对应 HTTP 写入接口。
+- `entityType`：`task`、`project`、`calendar_event` 或 `project_milestone`。
 - `operation`：`upsert` 或 `delete`。
 - `entityVersion`：事件对应实体版本。
 - `tombstone`：删除事件为 `true`，普通 upsert 为 `false`。
@@ -469,11 +470,10 @@ Authorization: Session <accessToken>
 
 当前没有游标过期检测、事件清理策略或快照回退接口。
 
-## 8. 工作树草稿/建议：完整同步快照
+## 8. 完整同步快照
 
-当前工作树已经加入以下路由和读取 handler 草稿，但该改动尚未通过编译和
-一致性验收，因此暂不视为已实现接口。它的目标是作为游标失效、首次同步
-或本地数据损坏时的恢复协议。
+该接口用于游标失效、首次同步或本地数据损坏时的恢复。当前返回任务、项目、
+日程和未删除的项目里程碑。
 
 ```http
 GET /api/v1/sync/snapshot
@@ -488,14 +488,15 @@ Authorization: Session <accessToken>
   "generatedAt": "2026-09-16T08:10:00Z",
   "tasks": [],
   "projects": [],
-  "calendarEvents": []
+  "calendarEvents": [],
+  "milestones": []
 }
 ```
 
 契约要求：
 
 1. 快照必须在一个一致性边界内读取，并返回生成时用户最新的同步游标。
-2. `tasks`、`projects` 和 `calendarEvents` 使用与各自资源 API 相同的
+2. `tasks`、`projects`、`calendarEvents` 和 `milestones` 使用与各自资源 API 相同的
    `camelCase` 对象结构。
 3. 快照代表完整当前状态；客户端恢复时应替换本地对应数据集，而不是
    把快照对象当作普通增量事件重复合并。
@@ -503,9 +504,6 @@ Authorization: Session <accessToken>
    不应依赖“缺少某个对象”来表示单条删除事件。
 5. 快照读取完成后，客户端从返回的 `cursor` 继续请求
    `/api/v1/sync/events?after=<cursor>`。
-
-建议未来增加 `projectMilestones`，但应与里程碑 HTTP API 同步开放，不能
-只在快照中出现而没有实体写入契约。
 
 ## 9. 工作树草稿/建议：`Idempotency-Key`
 
@@ -605,10 +603,10 @@ JSON 解析失败等由 Axum 提取器直接生成的错误，当前不一定符
 - PATCH 尚不能可靠区分“省略字段”和“显式清空字段”。
 - 日期和时间输入尚未做完整格式校验。
 - 任务 `recurrence` 当前只作为字符串保存，没有循环任务执行器。
-- 里程碑虽有数据库表和核心模型，但没有 HTTP API。
+- 里程碑通过项目嵌套路由提供 CRUD、乐观并发控制和删除墓碑事件。
 - 增量事件追加尚未与实体变更放在同一个事务中。
 - `Idempotency-Key` 和 `sync/snapshot` 只有未验收的工作树草稿，尚未作为稳定 API 发布。
 - 当前没有分页和时间范围查询，列表接口不适合大数据量长期使用。
 
-建议下一步顺序：先统一写入事务和请求幂等，再实现快照恢复，随后补齐
-严格字段校验、列表分页/筛选和里程碑 API。
+建议下一步顺序：先统一实体与同步事件的事务边界，再补齐严格字段校验、
+列表分页/筛选和项目进度摘要。
