@@ -54,6 +54,8 @@ struct Config {
 
 impl Config {
     fn from_env() -> Result<Self, String> {
+        let environment = env::var("ORIALIS_ENV").unwrap_or_else(|_| "development".into());
+        validate_environment_security(&environment, development_device_auth_enabled())?;
         let port = env::var("ORIALIS_PORT")
             .unwrap_or_else(|_| "18443".into())
             .parse::<u16>()
@@ -61,7 +63,7 @@ impl Config {
         Ok(Self {
             host: env::var("ORIALIS_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
             port,
-            environment: env::var("ORIALIS_ENV").unwrap_or_else(|_| "development".into()),
+            environment,
             public_url: env::var("ORIALIS_PUBLIC_URL")
                 .unwrap_or_else(|_| "https://orialis.jxcz.top".into()),
             database_url: env::var("ORIALIS_DATABASE_URL")
@@ -84,6 +86,16 @@ impl Config {
             .parse()
             .map_err(|_| "ORIALIS_HOST and ORIALIS_PORT do not form a valid socket address".into())
     }
+}
+
+fn validate_environment_security(
+    environment: &str,
+    development_device_auth: bool,
+) -> Result<(), String> {
+    if environment.eq_ignore_ascii_case("production") && development_device_auth {
+        return Err("ORIALIS_DEV_DEVICE_AUTH must be disabled in production".to_string());
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -1103,6 +1115,16 @@ fn development_device_auth_enabled() -> bool {
         std::env::var("ORIALIS_DEV_DEVICE_AUTH").as_deref(),
         Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
     )
+}
+
+#[cfg(test)]
+mod config_security_tests {
+    #[test]
+    fn production_rejects_development_device_auth() {
+        assert!(super::validate_environment_security("production", true).is_err());
+        assert!(super::validate_environment_security("production", false).is_ok());
+        assert!(super::validate_environment_security("development", true).is_ok());
+    }
 }
 
 async fn append_event<'e, E>(

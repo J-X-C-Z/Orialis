@@ -55,10 +55,6 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       if (!mounted) return;
       setState(() => _agentEvents.apply(event));
     });
-    unawaited(realtime.connect());
-    // Recover replies that arrived while this screen or the realtime channel
-    // was not active. Realtime remains the fast path; sync is the backstop.
-    unawaited(ref.read(syncEngineProvider).syncOnce());
   }
 
   @override
@@ -352,7 +348,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       );
       // Keep local-first semantics, but flush the queued message immediately
       // so the chat send action reaches Hermes without a separate sync step.
-      await ref.read(syncEngineProvider).syncOnce();
+      await ref.read(syncCoordinatorProvider).requestSync();
       if (mounted) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_scrollController.hasClients) {

@@ -9,6 +9,7 @@ import '../features/events/data/event_repository.dart';
 import '../features/chat/data/chat_repository.dart';
 import '../core/realtime/mobile_realtime_client.dart';
 import '../core/sync/sync_engine.dart';
+import '../core/sync/sync_coordinator.dart';
 import 'router/app_router.dart';
 import 'design/app_theme.dart';
 
@@ -40,28 +41,36 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
 
 final realtimeClientProvider = Provider<MobileRealtimeClient>((ref) {
   final client = MobileRealtimeClient(config: ref.watch(appConfigProvider));
-  final chatRepository = ref.watch(chatRepositoryProvider);
-  final syncEngine = ref.read(syncEngineProvider);
-  final subscription = client.events.listen((event) {
-    if (event.type == 'message') {
-      unawaited(chatRepository.applyRemoteMessage(event.payload));
-    } else if (event.type == 'hello.ack') {
-      // A reply can be persisted while the phone's realtime channel is
-      // disconnected. Pull after every successful reconnect so the channel
-      // is only the fast path, never the sole delivery path.
-      unawaited(syncEngine.syncOnce());
-    }
-  });
-  ref.onDispose(subscription.cancel);
   ref.onDispose(client.dispose);
   return client;
 });
 
-class OrialisApp extends ConsumerWidget {
+final syncCoordinatorProvider = Provider<SyncCoordinator>((ref) {
+  final coordinator = SyncCoordinator(
+    sync: ref.watch(syncEngineProvider).syncOnce,
+    realtime: ref.watch(realtimeClientProvider),
+    chatRepository: ref.watch(chatRepositoryProvider),
+  );
+  ref.onDispose(coordinator.dispose);
+  return coordinator;
+});
+
+class OrialisApp extends ConsumerStatefulWidget {
   const OrialisApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<OrialisApp> createState() => _OrialisAppState();
+}
+
+class _OrialisAppState extends ConsumerState<OrialisApp> {
+  @override
+  void initState() {
+    super.initState();
+    unawaited(ref.read(syncCoordinatorProvider).start());
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return MaterialApp.router(
       title: 'Orialis',
       debugShowCheckedModeBanner: false,

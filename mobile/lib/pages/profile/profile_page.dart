@@ -269,8 +269,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     onPressed: () async {
                       setState(() => _syncState = SyncState.syncing);
                       final result = await ref
-                          .read(syncEngineProvider)
-                          .syncOnce();
+                          .read(syncCoordinatorProvider)
+                          .requestSync();
                       if (mounted) {
                         setState(() {
                           _syncState = result;

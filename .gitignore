@@ -1,5 +1,9 @@
 /target/
 /data/
+*.db
+*.db-shm
+*.db-wal
+uploads/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
@@ -11,6 +15,7 @@ mobile/.dart_tool/
 mobile/android/.gradle/
 mobile/android/local.properties
 mobile/.flutter-plugins-dependencies
+mobile/.flutter-plugins
 mobile/.idea/
 mobile/*.iml
 
