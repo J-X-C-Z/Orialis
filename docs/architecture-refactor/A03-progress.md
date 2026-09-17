@@ -68,8 +68,10 @@ and the full Hermes validation was rerun successfully.
   fix.
 - Production cross-end Chat/attachment/reconnect evidence remains unclaimed:
   production health is reachable from the host and the selected device, but
-  the device's authenticated test send entered the retry state, and attachment
-  upload plus realtime reconnect are still not exercised.
+  the Agent Gateway device `JXCZ_MBA_Hermes` now passes authenticated WSS
+  `hello_ack` and `ping → pong`; the device's authenticated test send entered
+  the retry state, and attachment upload plus realtime reconnect are still not
+  exercised.
 
 ## Deferred and explicit risks
 
@@ -77,9 +79,9 @@ and the full Hermes validation was rerun successfully.
   `sync_events` stream; the API-refresh path is the accepted A03 behavior.
 - Production cross-end validation remains a release-stage follow-up; the
   physical-device UI smoke gate and unauthenticated production reachability are
-  complete, but the authenticated Chat send entered retry and delivery,
-  attachment upload, and realtime reconnect against production remain
-  unproven.
+  complete, and the Agent Gateway handshake is healthy, but the authenticated
+  Chat send entered retry and delivery, attachment upload, and realtime
+  reconnect against production remain unproven.
 - Visual redesign remains deferred. UI is functional placeholder quality by
   design; no final design-system migration is part of A03.
 
