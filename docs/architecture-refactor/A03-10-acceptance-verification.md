@@ -74,9 +74,10 @@ Riverpod providers. The A03-08 boundary claim holds.
    Mi 10 / Android 13 (API 33), including the preserved-data database upgrade.
    Production reachability is now verified from the host with
    `GET /api/v1/health` returning 200 and from the selected device with DNS and
-   ICMP success. Interactive authenticated send/reply, attachment upload, and
-   realtime reconnect remain unproven. This is a release-stage follow-up, not
-   an A03 acceptance blocker.
+   ICMP success. A device-side authenticated test send entered the retry state;
+   authenticated delivery, attachment upload, and realtime reconnect therefore
+   remain unproven. This is a release-stage follow-up, not an A03 acceptance
+   blocker.
 2. **Conversation sync stream.** Conversation CRUD remains on the Conversation
    API refresh path by explicit A03 scope decision; Message realtime and the
    existing sync contracts remain unchanged. A future unified Conversation
