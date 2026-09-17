@@ -33,6 +33,12 @@
 部署前必须用目标数据库做一次 SQLx migration checksum 预检。旧生产环境可能
 使用 `/opt/oris`、`oris.service` 和 `/var/lib/oris`（而不是本仓库示例中的
 `orialis` 路径）；应以 `systemctl cat oris.service` 和 `/etc/oris.env` 为准。
+可把目标环境的 migrations 目录只读复制到临时目录后运行：
+
+```sh
+python scripts/check-migration-checksums.py --reference-dir /path/to/reference/migrations
+```
+
 若旧 migration 的字节内容与当前工作树不同，即使只是注释，也会触发
 `VersionMismatch`。此时停止发布、保留旧二进制并回滚，禁止直接修改
 `_sqlx_migrations` 表；应在隔离构建副本中复现并制定兼容升级方案。
