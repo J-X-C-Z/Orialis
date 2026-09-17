@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/domain/mutation-request-v1.schema.json",
+  "title": "Orialis mutation request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "mutationId",
+    "baseVersion",
+    "entityVersion",
+    "entityType",
+    "entityId",
+    "tombstone"
+  ],
+  "properties": {
+    "mutationId": { "type": "string", "minLength": 1 },
+    "baseVersion": { "type": "integer", "minimum": 0 },
+    "entityVersion": { "type": "integer", "minimum": 1 },
+    "entityType": { "enum": ["task", "schedule"] },
+    "entityId": { "$ref": "./common.schema.json#/$defs/entityId" },
+    "tombstone": { "type": "boolean" }
+  }
+}

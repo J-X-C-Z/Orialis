@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/domain/task-v1.schema.json",
+  "title": "Orialis Task v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "notes",
+    "important",
+    "urgent",
+    "completed",
+    "completedAt",
+    "due",
+    "dueTime",
+    "reminderMinutes",
+    "projectId",
+    "recurrence",
+    "createdAt",
+    "updatedAt",
+    "version",
+    "deletedAt"
+  ],
+  "properties": {
+    "id": { "$ref": "./common.schema.json#/$defs/entityId" },
+    "title": { "type": "string", "minLength": 1 },
+    "notes": { "$ref": "./common.schema.json#/$defs/nullableString" },
+    "important": { "type": ["boolean", "null"] },
+    "urgent": { "type": ["boolean", "null"] },
+    "completed": { "type": "boolean" },
+    "completedAt": { "$ref": "./common.schema.json#/$defs/nullableTimestamp" },
+    "due": { "$ref": "./common.schema.json#/$defs/nullableDate" },
+    "dueTime": { "$ref": "./common.schema.json#/$defs/nullableLocalTime" },
+    "reminderMinutes": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "projectId": { "$ref": "./common.schema.json#/$defs/nullableEntityId" },
+    "recurrence": { "$ref": "./common.schema.json#/$defs/recurrence" },
+    "createdAt": { "$ref": "./common.schema.json#/$defs/timestamp" },
+    "updatedAt": { "$ref": "./common.schema.json#/$defs/timestamp" },
+    "version": { "type": "integer", "minimum": 1 },
+    "deletedAt": { "$ref": "./common.schema.json#/$defs/nullableTimestamp" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "completed": { "const": false } } },
+      "then": { "properties": { "completedAt": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "completed": { "const": true } } },
+      "then": {
+        "required": ["completedAt"],
+        "properties": {
+          "completedAt": { "$ref": "./common.schema.json#/$defs/timestamp" }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/domain/common-v1.schema.json",
+  "title": "Orialis common domain definitions v1",
+  "$defs": {
+    "entityId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opaque entity identifier. New client-created IDs use UUIDv7."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 timestamp. Persisted values are UTC."
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "Calendar date without a time zone."
+    },
+    "nullableDate": {
+      "anyOf": [
+        { "$ref": "#/$defs/date" },
+        { "type": "null" }
+      ]
+    },
+    "localTime": {
+      "type": "string",
+      "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$",
+      "description": "Local wall-clock time without a time zone."
+    },
+    "nullableLocalTime": {
+      "anyOf": [
+        { "$ref": "#/$defs/localTime" },
+        { "type": "null" }
+      ]
+    },
+    "nullableString": {
+      "type": ["string", "null"]
+    },
+    "nullableTimestamp": {
+      "anyOf": [
+        { "$ref": "#/$defs/timestamp" },
+        { "type": "null" }
+      ]
+    },
+    "nullableEntityId": {
+      "anyOf": [
+        { "$ref": "#/$defs/entityId" },
+        { "type": "null" }
+      ]
+    },
+    "recurrence": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rule", "until"],
+          "properties": {
+            "rule": {
+              "type": "string",
+              "minLength": 1,
+              "description": "RFC 5545 RRULE expression."
+            },
+            "until": {
+              "$ref": "#/$defs/date"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

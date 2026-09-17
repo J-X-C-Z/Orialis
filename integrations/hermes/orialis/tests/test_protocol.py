@@ -6,6 +6,8 @@ from .. import protocol
 
 
 EXAMPLES = Path(__file__).resolve().parents[4] / "protocol" / "agent-gateway" / "examples"
+CONTRACT_FIXTURES = Path(__file__).resolve().parents[4] / "protocol" / "contracts" / "fixtures"
+PLUGIN_FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 class ProtocolTests(unittest.TestCase):
@@ -39,6 +41,35 @@ class ProtocolTests(unittest.TestCase):
     def test_message_ack_is_valid(self):
         message = protocol.ack("msg_001")
         self.assertEqual(protocol.parse_message(message), message)
+
+    def test_agent_ack_is_valid(self):
+        message = protocol.parse_message({
+            "version": 1,
+            "type": "agent.ack",
+            "event_id": "evt_001",
+            "seq": 3,
+            "status": "received",
+        })
+        self.assertEqual(message["event_id"], "evt_001")
+        self.assertEqual(message["seq"], 3)
+
+    def test_agent_ack_payload_status_and_gap_are_validated(self):
+        for fixture_name in ("agent_ack_received.json", "agent_ack_gap.json"):
+            with self.subTest(fixture_name=fixture_name):
+                message = json.loads((PLUGIN_FIXTURES / fixture_name).read_text(encoding="utf-8"))
+                self.assertEqual(protocol.parse_message(message)["type"], "agent.ack")
+        with self.assertRaisesRegex(protocol.ProtocolError, "status is invalid"):
+            protocol.parse_message({"version": 1, "type": "agent.ack", "event_id": "e", "seq": 1, "status": "done"})
+        with self.assertRaisesRegex(protocol.ProtocolError, "requires a positive expected_seq"):
+            protocol.parse_message({"version": 1, "type": "agent.ack", "event_id": "e", "seq": 1, "status": "gap"})
+
+    def test_request_and_tombstone_fixtures_keep_ack_and_entity_semantics_separate(self):
+        request = json.loads((PLUGIN_FIXTURES / "message_send_request.json").read_text(encoding="utf-8"))
+        self.assertEqual(protocol.parse_message(request)["type"], "message.send")
+        tombstone = json.loads((PLUGIN_FIXTURES / "task_tombstone.json").read_text(encoding="utf-8"))
+        parsed = protocol.validate_domain_record("task", tombstone)
+        self.assertIsNotNone(parsed["deletedAt"])
+        self.assertEqual(protocol.parse_message(protocol.ack("msg-request"))["type"], "message.ack")
 
     def test_structured_attachments_are_valid_and_audio_video_are_rejected(self):
         attachment = {
@@ -80,11 +111,46 @@ class ProtocolTests(unittest.TestCase):
                 }],
             })
 
-    def test_future_domain_contracts_keep_task_and_schedule_distinct(self):
-        task = {"id": "t", "title": "Do", "createdAt": "1", "updatedAt": "2", "version": 1}
-        schedule = {"id": "s", "title": "Meet", "startAt": "2", "endAt": "3",
-                    "createdAt": "1", "updatedAt": "2", "version": 1}
-        self.assertEqual(protocol.validate_domain_record("task", task), task)
-        self.assertEqual(protocol.validate_domain_record("schedule", schedule), schedule)
-        with self.assertRaisesRegex(protocol.ProtocolError, "schedule.endAt"):
-            protocol.validate_domain_record("schedule", {**schedule, "endAt": "1"})
+    def test_task_and_schedule_fixtures_follow_shared_v1_contract(self):
+        for kind in ("task", "schedule"):
+            with self.subTest(kind=kind):
+                fixture_name = "task-unclassified.json" if kind == "task" else "schedule-v1.json"
+                record = json.loads((CONTRACT_FIXTURES / fixture_name).read_text(encoding="utf-8"))
+                self.assertEqual(protocol.validate_domain_record(kind, record), record)
+
+    def test_task_priority_is_tristate_and_recurrence_is_not_arbitrary_json(self):
+        task = json.loads((CONTRACT_FIXTURES / "task-unclassified.json").read_text(encoding="utf-8"))
+        for value in (None, False, True):
+            with self.subTest(value=value):
+                candidate = {**task, "important": value, "urgent": value}
+                self.assertEqual(protocol.validate_domain_record("task", candidate), candidate)
+        for field in ("important", "urgent"):
+            with self.subTest(field=field), self.assertRaisesRegex(protocol.ProtocolError, "boolean or null"):
+                protocol.validate_domain_record("task", {**task, field: "false"})
+        recurrence = {"rule": "FREQ=DAILY", "until": "2026-12-31"}
+        self.assertEqual(
+            protocol.validate_domain_record("task", {**task, "recurrence": recurrence})["recurrence"],
+            recurrence,
+        )
+        for invalid in ("nonsense", {"rule": "FREQ=DAILY"}, {"rule": "FREQ=DAILY", "until": "2026-12-31", "extra": 1}, {"rule": "FREQ=DAILY", "until": "2026-02-30"}):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(protocol.ProtocolError, "recurrence"):
+                protocol.validate_domain_record("task", {**task, "recurrence": invalid})
+        with self.assertRaisesRegex(protocol.ProtocolError, "valid YYYY-MM-DD"):
+            protocol.validate_domain_record("task", {**task, "due": "2026-02-30"})
+        with self.assertRaisesRegex(protocol.ProtocolError, "required"):
+            protocol.validate_domain_record("task", {key: value for key, value in task.items() if key != "important"})
+        with self.assertRaisesRegex(protocol.ProtocolError, "requires task.due"):
+            protocol.validate_domain_record("task", {**task, "due": None, "dueTime": "23:59"})
+
+    def test_schedule_has_exact_public_fields_and_calendar_event_is_only_wire_compatibility(self):
+        schedule = json.loads((CONTRACT_FIXTURES / "schedule-v1.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            set(schedule),
+            {"id", "title", "description", "location", "startAt", "endAt", "allDay",
+             "reminderMinutes", "createdAt", "updatedAt", "version", "deletedAt"},
+        )
+        for deferred_field in ("taskId", "projectId", "source", "externalId"):
+            with self.subTest(field=deferred_field), self.assertRaisesRegex(protocol.ProtocolError, "unsupported fields"):
+                protocol.validate_domain_record("schedule", {**schedule, deferred_field: "not-v1"})
+        with self.assertRaisesRegex(protocol.ProtocolError, "unsupported domain kind"):
+            protocol.validate_domain_record("calendar_event", schedule)

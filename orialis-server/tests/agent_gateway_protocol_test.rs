@@ -5,6 +5,7 @@ use protocol::{
     parse_message, parse_mobile_envelope, GatewayMessage, ProtocolError, MOBILE_MESSAGE,
     PROTOCOL_VERSION,
 };
+use serde_json::Value;
 
 #[test]
 fn mobile_envelope_accepts_request_id_and_object_payload() {
@@ -56,4 +57,23 @@ fn hermes_legacy_message_shape_still_round_trips() {
     let wire = serde_json::to_string(&original).unwrap();
 
     assert_eq!(parse_message(&wire).unwrap(), original);
+}
+
+#[test]
+fn sync_contract_fixtures_preserve_versions_and_tombstones() {
+    let mutation: Value = serde_json::from_str(include_str!(
+        "../../protocol/contracts/fixtures/mutation-request-v1.json"
+    ))
+    .unwrap();
+    let event: Value = serde_json::from_str(include_str!(
+        "../../protocol/contracts/fixtures/sync-event-tombstone-v1.json"
+    ))
+    .unwrap();
+
+    assert_eq!(mutation["mutationId"], "mobile-mutation-42");
+    assert_eq!(mutation["baseVersion"], 2);
+    assert_eq!(mutation["entityVersion"], 3);
+    assert_eq!(event["entityVersion"], 3);
+    assert_eq!(event["tombstone"], true);
+    assert_eq!(event["payload"], Value::Null);
 }

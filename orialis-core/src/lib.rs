@@ -50,7 +50,7 @@ pub enum Quadrant {
 /// A task is work with a deadline, not a calendar time block.
 ///
 /// In particular, tasks intentionally have no `start_at`/`end_at`. A course or
-/// other time-bounded item belongs in [`CalendarEvent`]. `quadrant` is likewise
+/// other time-bounded item belongs in [`Schedule`]. `quadrant` is likewise
 /// not a stored field: it is calculated from `important` and `urgent`.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -67,11 +67,19 @@ pub struct Task {
     pub due_time: Option<String>,
     pub reminder_minutes: Option<i64>,
     pub project_id: Option<EntityId>,
-    pub recurrence: Option<String>,
+    pub recurrence: Option<Recurrence>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     pub version: u64,
     pub deleted_at: Option<Timestamp>,
+}
+
+/// RFC 5545 recurrence metadata for a Task.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Recurrence {
+    pub rule: String,
+    pub until: String,
 }
 
 impl Task {
@@ -151,10 +159,10 @@ pub struct Milestone {
     pub deleted_at: Option<Timestamp>,
 }
 
-/// A calendar item always represents a concrete time interval.
+/// A schedule always represents a concrete time interval.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct CalendarEvent {
+pub struct Schedule {
     pub id: EntityId,
     pub user_id: EntityId,
     pub title: String,
@@ -164,15 +172,14 @@ pub struct CalendarEvent {
     pub end_at: Timestamp,
     pub all_day: bool,
     pub reminder_minutes: Option<i64>,
-    pub task_id: Option<EntityId>,
-    pub project_id: Option<EntityId>,
-    pub source: String,
-    pub external_id: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     pub version: u64,
     pub deleted_at: Option<Timestamp>,
 }
+
+/// Storage and v1 HTTP compatibility name for [`Schedule`].
+pub type CalendarEvent = Schedule;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -259,6 +266,18 @@ mod tests {
     }
 
     #[test]
+    fn task_recurrence_is_structured() {
+        let mut value = task(Some(true), Some(false));
+        value.recurrence = Some(Recurrence {
+            rule: "FREQ=WEEKLY;BYDAY=MO".into(),
+            until: "2026-12-31".into(),
+        });
+        let json = serde_json::to_value(value).unwrap();
+        assert_eq!(json["recurrence"]["rule"], "FREQ=WEEKLY;BYDAY=MO");
+        assert_eq!(json["recurrence"]["until"], "2026-12-31");
+    }
+
+    #[test]
     fn unknown_priority_is_not_forced_into_a_quadrant() {
         let value = task(None, Some(true));
         assert_eq!(value.quadrant(), None);
@@ -318,7 +337,7 @@ mod tests {
 
     #[test]
     fn calendar_event_has_an_interval_separate_from_task_deadline() {
-        let event = CalendarEvent {
+        let event = Schedule {
             id: "event-1".into(),
             user_id: "user-1".into(),
             title: "高等数学".into(),
@@ -328,10 +347,6 @@ mod tests {
             end_at: "2026-09-17T09:40:00+08:00".into(),
             all_day: false,
             reminder_minutes: Some(10),
-            task_id: None,
-            project_id: None,
-            source: "orialis".into(),
-            external_id: None,
             created_at: "2026-09-16T08:00:00Z".into(),
             updated_at: "2026-09-16T08:00:00Z".into(),
             version: 1,
@@ -341,7 +356,7 @@ mod tests {
         let json = serde_json::to_value(event).unwrap();
         assert_eq!(json["startAt"], "2026-09-17T08:00:00+08:00");
         assert_eq!(json["endAt"], "2026-09-17T09:40:00+08:00");
-        assert_eq!(json["source"], "orialis");
+        assert!(json.get("taskId").is_none());
     }
 
     #[test]

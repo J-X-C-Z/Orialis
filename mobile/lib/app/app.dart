@@ -41,9 +41,15 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
 final realtimeClientProvider = Provider<MobileRealtimeClient>((ref) {
   final client = MobileRealtimeClient(config: ref.watch(appConfigProvider));
   final chatRepository = ref.watch(chatRepositoryProvider);
+  final syncEngine = ref.read(syncEngineProvider);
   final subscription = client.events.listen((event) {
     if (event.type == 'message') {
       unawaited(chatRepository.applyRemoteMessage(event.payload));
+    } else if (event.type == 'hello.ack') {
+      // A reply can be persisted while the phone's realtime channel is
+      // disconnected. Pull after every successful reconnect so the channel
+      // is only the fast path, never the sole delivery path.
+      unawaited(syncEngine.syncOnce());
     }
   });
   ref.onDispose(subscription.cancel);

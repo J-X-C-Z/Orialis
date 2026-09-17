@@ -5,3 +5,16 @@
 *.sqlite-wal
 .env
 
+# Flutter / Android generated output
+mobile/build/
+mobile/.dart_tool/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/.flutter-plugins-dependencies
+mobile/.idea/
+mobile/*.iml
+
+# Python caches and local test tooling
+**/__pycache__/
+*.py[cod]
+.pytest_cache/

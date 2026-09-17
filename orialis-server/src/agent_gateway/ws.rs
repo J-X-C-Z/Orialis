@@ -551,7 +551,15 @@ async fn handle_text(
             state.agent.resolve_reply(message).await
         }
         Ok(message @ protocol::GatewayMessage::Error { .. }) => {
-            state.agent.resolve_reply(message).await
+            // Unsolicited agent errors are diagnostic events, not replies to a
+            // pending request. Only route correlated errors through the reply
+            // resolver; otherwise they create misleading `without reply_to`
+            // warnings and can interfere with delivery diagnostics.
+            if message.reply_to().is_some() {
+                state.agent.resolve_reply(message).await
+            } else {
+                tracing::warn!(device_id = %device_id, "received unsolicited Orialis Agent error");
+            }
         }
         Ok(protocol::GatewayMessage::MessageAck {
             message_id, status, ..
@@ -782,6 +790,7 @@ pub(crate) async fn dispatch_message(
         Ok(Ok(reply)) => reply,
         Ok(Err(_)) => {
             tracing::warn!(%message_id, "Hermes disconnected before replying to mobile message");
+            state.agent.cancel_request(&message_id).await;
             fail_delivery(
                 &state,
                 &message_id,
@@ -793,6 +802,7 @@ pub(crate) async fn dispatch_message(
         }
         Err(_) => {
             tracing::warn!(%message_id, "Hermes reply timed out for mobile message");
+            state.agent.cancel_request(&message_id).await;
             fail_delivery(
                 &state,
                 &message_id,
@@ -932,9 +942,6 @@ pub(crate) async fn dispatch_message(
             "failed to commit agent delivery".into(),
         )
         .await;
-        return;
-    }
-    if result.rows_affected() == 0 {
         return;
     }
     state.mobile.notify(

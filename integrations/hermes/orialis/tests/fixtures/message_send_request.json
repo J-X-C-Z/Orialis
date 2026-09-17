@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "type": "message.send",
+  "message_id": "msg-request",
+  "conversation_id": "conv-fixture",
+  "content": "fixture request"
+}

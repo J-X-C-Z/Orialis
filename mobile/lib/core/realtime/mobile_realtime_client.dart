@@ -44,6 +44,9 @@ class MobileRealtimeClient {
   WebSocketChannel? _channel;
   StreamSubscription<Object?>? _subscription;
   Future<void>? _connectFuture;
+  Timer? _reconnectTimer;
+  int _reconnectAttempt = 0;
+  bool _disposed = false;
   Set<String> _capabilities = const {};
   bool _capabilitiesNegotiated = false;
 
@@ -68,10 +71,14 @@ class MobileRealtimeClient {
   };
 
   Future<void> connect() async {
+    _disposed = false;
     if (_channel != null) return;
     _connectFuture ??= _connect();
     try {
       await _connectFuture;
+    } catch (_) {
+      _scheduleReconnect();
+      rethrow;
     } finally {
       _connectFuture = null;
     }
@@ -100,12 +107,10 @@ class MobileRealtimeClient {
     _subscription = channel.stream.listen(
       _receive,
       onDone: () {
-        _channel = null;
-        _capabilitiesNegotiated = false;
+        _handleDisconnected(channel);
       },
       onError: (_, _) {
-        _channel = null;
-        _capabilitiesNegotiated = false;
+        _handleDisconnected(channel);
       },
     );
     _send(
@@ -129,6 +134,7 @@ class MobileRealtimeClient {
         jsonDecode(value) as Map<String, dynamic>,
       );
       if (envelope.type == 'hello.ack') {
+        _reconnectAttempt = 0;
         final declared =
             envelope.payload['capabilities'] ?? envelope.payload['features'];
         if (declared is List) {
@@ -175,7 +181,28 @@ class MobileRealtimeClient {
     );
   }
 
+  void _handleDisconnected(WebSocketChannel channel) {
+    if (!identical(_channel, channel)) return;
+    _channel = null;
+    _capabilitiesNegotiated = false;
+    if (!_disposed) _scheduleReconnect();
+  }
+
+  void _scheduleReconnect() {
+    if (_disposed || _reconnectTimer != null || _connectFuture != null) return;
+    final attempt = _reconnectAttempt.clamp(0, 5).toInt();
+    final delaySeconds = 1 << attempt;
+    _reconnectAttempt = (attempt + 1).clamp(0, 5).toInt();
+    _reconnectTimer = Timer(Duration(seconds: delaySeconds), () {
+      _reconnectTimer = null;
+      unawaited(connect().catchError((_) {}));
+    });
+  }
+
   Future<void> disconnect() async {
+    _disposed = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     final channel = _channel;
     _channel = null;
     await _subscription?.cancel();

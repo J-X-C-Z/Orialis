@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/domain/sync-event-v1.schema.json",
+  "title": "Orialis sync event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "cursor",
+    "entityType",
+    "entityId",
+    "operation",
+    "entityVersion",
+    "tombstone",
+    "mutationId",
+    "payload",
+    "deletedAt"
+  ],
+  "properties": {
+    "cursor": { "type": "integer", "minimum": 0 },
+    "entityType": { "enum": ["task", "schedule"] },
+    "entityId": { "$ref": "./common.schema.json#/$defs/entityId" },
+    "operation": { "enum": ["upsert", "delete"] },
+    "entityVersion": { "type": "integer", "minimum": 1 },
+    "tombstone": { "type": "boolean" },
+    "mutationId": { "$ref": "./common.schema.json#/$defs/nullableString" },
+    "payload": {},
+    "deletedAt": { "$ref": "./common.schema.json#/$defs/nullableTimestamp" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "operation": { "const": "delete" } } },
+      "then": {
+        "properties": {
+          "tombstone": { "const": true },
+          "payload": { "type": "null" },
+          "deletedAt": { "$ref": "./common.schema.json#/$defs/timestamp" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "operation": { "const": "upsert" } } },
+      "then": {
+        "properties": {
+          "tombstone": { "const": false },
+          "deletedAt": { "type": "null" }
+        }
+      }
+    }
+  ]
+}

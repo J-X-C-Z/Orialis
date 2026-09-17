@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "type": "agent.ack",
+  "event_id": "evt_001",
+  "seq": 3,
+  "status": "received"
+}

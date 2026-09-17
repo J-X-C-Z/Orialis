@@ -213,15 +213,20 @@ class OrialisApiClient {
     }
   }
 
-  Future<void> deleteSchedule(String id, String mutationId) async {
+  Future<void> deleteSchedule(
+    String id,
+    int? baseVersion,
+    String mutationId,
+  ) async {
     try {
       await _dio.delete<void>(
         '/api/v1/schedules/${Uri.encodeComponent(id)}',
+        data: {'baseVersion': baseVersion},
         options: Options(headers: {'Idempotency-Key': mutationId}),
       );
     } on DioException catch (error) {
       if (error.response?.statusCode != 404) rethrow;
-      await deleteCalendarEvent(id, mutationId);
+      await deleteCalendarEvent(id, baseVersion, mutationId);
     }
   }
 
@@ -250,9 +255,14 @@ class OrialisApiClient {
     return response.data ?? <String, dynamic>{};
   }
 
-  Future<void> deleteTask(String id, String mutationId) async {
+  Future<void> deleteTask(
+    String id,
+    int? baseVersion,
+    String mutationId,
+  ) async {
     await _dio.delete<void>(
       '/api/v1/tasks/$id',
+      data: {'baseVersion': baseVersion},
       options: Options(headers: {'Idempotency-Key': mutationId}),
     );
   }
@@ -282,9 +292,14 @@ class OrialisApiClient {
     return response.data ?? <String, dynamic>{};
   }
 
-  Future<void> deleteCalendarEvent(String id, String mutationId) async {
+  Future<void> deleteCalendarEvent(
+    String id,
+    int? baseVersion,
+    String mutationId,
+  ) async {
     await _dio.delete<void>(
       '/api/v1/calendar-events/$id',
+      data: {'baseVersion': baseVersion},
       options: Options(headers: {'Idempotency-Key': mutationId}),
     );
   }

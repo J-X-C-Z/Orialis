@@ -1,0 +1,14 @@
+{
+  "id": "0198f3b5-2d5a-7abc-8f14-7e46e6d7f030",
+  "title": "物理实验课",
+  "description": null,
+  "location": "实验楼 302",
+  "startAt": "2026-09-18T09:00:00Z",
+  "endAt": "2026-09-18T11:00:00Z",
+  "allDay": false,
+  "reminderMinutes": 30,
+  "createdAt": "2026-09-17T08:00:00Z",
+  "updatedAt": "2026-09-17T08:00:00Z",
+  "version": 1,
+  "deletedAt": null
+}

@@ -28,6 +28,13 @@ request/delivery ID 并按能力协商执行。调度触发仍由 Hermes Cron �
 | `ORIALIS_DEVICE_ID` | 是 | 稳定设备 ID，格式为 `<USER>_<DEVICE>_<Agent>`，例如 `JXCZ_MBA_Hermes`。每段仅允许 ASCII 字母或数字，长度为 2–24；总长度不超过 80。 |
 | `ORIALIS_DEVICE_TOKEN` | 条件 | 当服务端设置了 `ORIALIS_AGENT_DEVICE_TOKEN` 时必须设置，并与其完全相同。 |
 
+仓库级静态/协议门禁可运行 `python scripts/validate-contracts.py`。若要运行
+依赖 Hermes `gateway` 包的完整插件测试，使用 Hermes 虚拟环境：
+
+```sh
+HERMES_PYTHON=/path/to/hermes/venv/bin/python scripts/validate-hermes-plugin.sh
+```
+
 生产环境请启用并配置设备 token。插件通过 `Authorization: Bearer <device-token>` 认证；不要将 token 提交到仓库或写入日志。开发模式下，仅当服务端 token 未设置时，允许本机未认证连接。
 
 ## macOS / Windows

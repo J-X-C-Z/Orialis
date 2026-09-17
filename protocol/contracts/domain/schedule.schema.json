@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/domain/schedule-v1.schema.json",
+  "title": "Orialis Schedule v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "description",
+    "location",
+    "startAt",
+    "endAt",
+    "allDay",
+    "reminderMinutes",
+    "createdAt",
+    "updatedAt",
+    "version",
+    "deletedAt"
+  ],
+  "properties": {
+    "id": { "$ref": "./common.schema.json#/$defs/entityId" },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "$ref": "./common.schema.json#/$defs/nullableString" },
+    "location": { "$ref": "./common.schema.json#/$defs/nullableString" },
+    "startAt": { "$ref": "./common.schema.json#/$defs/timestamp" },
+    "endAt": { "$ref": "./common.schema.json#/$defs/timestamp" },
+    "allDay": { "type": "boolean" },
+    "reminderMinutes": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "createdAt": { "$ref": "./common.schema.json#/$defs/timestamp" },
+    "updatedAt": { "$ref": "./common.schema.json#/$defs/timestamp" },
+    "version": { "type": "integer", "minimum": 1 },
+    "deletedAt": { "$ref": "./common.schema.json#/$defs/nullableTimestamp" }
+  },
+  "description": "startAt must be strictly earlier than endAt; this cross-field invariant is enforced by API and contract tests."
+}

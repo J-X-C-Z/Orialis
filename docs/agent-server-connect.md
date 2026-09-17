@@ -5,9 +5,10 @@
 
 ## 服务器侧
 
-1. 将 `orialis-server` 二进制、`deploy/orialis.service` 和
-   `deploy/orialis.env.example` 部署到服务器 `/opt/orialis`，并创建服务用户可读的
-   `/etc/orialis.env`。
+1. 将 `orialis-server` 二进制安装到 `/opt/orialis/bin/orialis-server`，将
+   `deploy/orialis.service` 安装为 `/etc/systemd/system/orialis.service`，并依据
+   `deploy/orialis.env.example` 创建服务用户可读的 `/etc/orialis.env`。不要把
+   systemd unit 或生产环境文件放进 `/opt/orialis`；该目录只用于应用文件。
 2. 在 `/etc/orialis.env` 设置生产值：
 
    ```env
@@ -28,6 +29,13 @@
    GET https://orialis.jxcz.top/api/v1/health
    WebSocket wss://orialis.jxcz.top/api/v1/agent/ws
    ```
+
+部署前必须用目标数据库做一次 SQLx migration checksum 预检。旧生产环境可能
+使用 `/opt/oris`、`oris.service` 和 `/var/lib/oris`（而不是本仓库示例中的
+`orialis` 路径）；应以 `systemctl cat oris.service` 和 `/etc/oris.env` 为准。
+若旧 migration 的字节内容与当前工作树不同，即使只是注释，也会触发
+`VersionMismatch`。此时停止发布、保留旧二进制并回滚，禁止直接修改
+`_sqlx_migrations` 表；应在隔离构建副本中复现并制定兼容升级方案。
 
 ## Hermes 侧
 

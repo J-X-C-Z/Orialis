@@ -1,0 +1,18 @@
+{
+  "id": "0198f3b5-2d5a-7abc-8f14-7e46e6d7f001",
+  "title": "已删除任务",
+  "notes": null,
+  "important": null,
+  "urgent": null,
+  "completed": false,
+  "completedAt": null,
+  "due": null,
+  "dueTime": null,
+  "reminderMinutes": null,
+  "projectId": null,
+  "recurrence": null,
+  "createdAt": "2026-09-17T08:00:00Z",
+  "updatedAt": "2026-09-17T09:00:00Z",
+  "version": 2,
+  "deletedAt": "2026-09-17T09:00:00Z"
+}

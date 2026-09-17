@@ -10,13 +10,16 @@ class Tasks extends Table {
   TextColumn get notes => text().nullable()();
   TextColumn get due => text().nullable()();
   TextColumn get dueTime => text().nullable()();
-  BoolColumn get important => boolean().withDefault(const Constant(false))();
-  BoolColumn get urgent => boolean().withDefault(const Constant(false))();
+  BoolColumn get important => boolean().nullable()();
+  BoolColumn get urgent => boolean().nullable()();
   BoolColumn get completed => boolean().withDefault(const Constant(false))();
   TextColumn get completedAt => text().nullable()();
+  IntColumn get reminderMinutes => integer().nullable()();
   TextColumn get projectId => text().nullable()();
+  TextColumn get recurrence => text().nullable()();
   IntColumn get version => integer().withDefault(const Constant(1))();
   IntColumn get remoteVersion => integer().withDefault(const Constant(0))();
+  IntColumn get localRevision => integer().withDefault(const Constant(0))();
   TextColumn get createdAt => text()();
   TextColumn get updatedAt => text()();
   TextColumn get deletedAt => text().nullable()();
@@ -34,8 +37,10 @@ class CalendarEvents extends Table {
   TextColumn get startAt => text()();
   TextColumn get endAt => text()();
   BoolColumn get allDay => boolean().withDefault(const Constant(false))();
+  IntColumn get reminderMinutes => integer().nullable()();
   IntColumn get version => integer().withDefault(const Constant(1))();
   IntColumn get remoteVersion => integer().withDefault(const Constant(0))();
+  IntColumn get localRevision => integer().withDefault(const Constant(0))();
   TextColumn get createdAt => text()();
   TextColumn get updatedAt => text()();
   TextColumn get deletedAt => text().nullable()();
@@ -82,14 +87,37 @@ class SyncMetadata extends Table {
   Set<Column<Object>> get primaryKey => {key};
 }
 
+class OutboxMutations extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get mutationId => text().unique()();
+  TextColumn get entityType => text()();
+  TextColumn get entityId => text()();
+  TextColumn get operation => text()();
+  TextColumn get payloadJson => text()();
+  IntColumn get baseVersion => integer().nullable()();
+  IntColumn get entityRevision => integer().withDefault(const Constant(0))();
+  TextColumn get status => text().withDefault(const Constant('pending'))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+  IntColumn get attemptCount => integer().withDefault(const Constant(0))();
+  TextColumn get lastError => text().nullable()();
+}
+
 @DriftDatabase(
-  tables: [Tasks, CalendarEvents, Messages, Conversations, SyncMetadata],
+  tables: [
+    Tasks,
+    CalendarEvents,
+    Messages,
+    Conversations,
+    SyncMetadata,
+    OutboxMutations,
+  ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase({QueryExecutor? executor}) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -107,6 +135,56 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 5) {
         await m.createTable(conversations);
+      }
+      if (from < 6) {
+        await customStatement('ALTER TABLE tasks RENAME TO tasks_v5');
+        await customStatement('''
+          CREATE TABLE tasks (
+            id TEXT NOT NULL PRIMARY KEY,
+            title TEXT NOT NULL,
+            notes TEXT,
+            due TEXT,
+            due_time TEXT,
+            important INTEGER,
+            urgent INTEGER,
+            completed INTEGER NOT NULL DEFAULT 0,
+            completed_at TEXT,
+            reminder_minutes INTEGER,
+            project_id TEXT,
+            recurrence TEXT,
+            version INTEGER NOT NULL DEFAULT 1,
+            remote_version INTEGER NOT NULL DEFAULT 0,
+            local_revision INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT,
+            sync_status TEXT NOT NULL DEFAULT 'synced'
+          )
+        ''');
+        final oldTaskColumns = await customSelect(
+          'PRAGMA table_info(tasks_v5)',
+        ).get();
+        final hasOldRecurrence = oldTaskColumns.any(
+          (row) => row.data['name'] == 'recurrence',
+        );
+        final oldRecurrence = hasOldRecurrence ? 'recurrence' : 'NULL';
+        await customStatement('''
+          INSERT INTO tasks (
+            id, title, notes, due, due_time, important, urgent, completed,
+            completed_at, reminder_minutes, project_id, recurrence, version,
+            remote_version, created_at,
+            updated_at, deleted_at, sync_status
+          )
+          SELECT id, title, notes, due, due_time, important, urgent, completed,
+            completed_at, NULL, project_id, $oldRecurrence, version,
+            remote_version, created_at,
+            updated_at, deleted_at, sync_status
+          FROM tasks_v5
+        ''');
+        await customStatement('DROP TABLE tasks_v5');
+        await m.addColumn(calendarEvents, calendarEvents.reminderMinutes);
+        await m.addColumn(calendarEvents, calendarEvents.localRevision);
+        await m.createTable(outboxMutations);
       }
     },
   );

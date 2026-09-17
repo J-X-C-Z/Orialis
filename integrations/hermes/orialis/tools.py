@@ -44,14 +44,22 @@ PLUGIN_OPERATIONS = (
 # callable tools until the corresponding server endpoints are implemented.
 DOMAIN_CONTRACTS = {
     "task": {
+        "domain": "Task",
         "resource": "/api/v1/tasks",
-        "required": ["id", "title", "createdAt", "updatedAt", "version"],
-        "calendar_visible": False,
+        "fields": ["id", "title", "notes", "important", "urgent", "completed", "completedAt", "due", "dueTime", "reminderMinutes", "projectId", "recurrence", "createdAt", "updatedAt", "version", "deletedAt"],
+        "nullable_fields": ["notes", "important", "urgent", "completedAt", "due", "dueTime", "reminderMinutes", "projectId", "recurrence", "deletedAt"],
+        "deleted_at_field": "deletedAt",
+        "callable": False,
     },
     "schedule": {
-        "resource": "/api/v1/calendar-events (future /api/v1/schedules alias)",
-        "required": ["id", "title", "startAt", "endAt", "createdAt", "updatedAt", "version"],
-        "calendar_visible": True,
+        "domain": "Schedule",
+        "resource": "/api/v1/schedules",
+        "compatibility_resource": "/api/v1/calendar-events",
+        "wire_entity_type": "calendar_event",
+        "fields": ["id", "title", "description", "location", "startAt", "endAt", "allDay", "reminderMinutes", "createdAt", "updatedAt", "version", "deletedAt"],
+        "nullable_fields": ["description", "location", "reminderMinutes", "deletedAt"],
+        "deleted_at_field": "deletedAt",
+        "callable": False,
     },
     "conversation": {
         "resource": "not available in current server API",

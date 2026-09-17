@@ -35,7 +35,7 @@ void main() {
       database.conversations,
     )..where((row) => row.id.equals(conversation.id))).getSingle();
     expect(renamed.title, '项目讨论 2');
-    expect(renamed.syncStatus, 'pendingUpdate');
+    expect(renamed.syncStatus, 'pendingCreate');
 
     await expectLater(
       repository.deleteConversation(

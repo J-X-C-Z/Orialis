@@ -8,7 +8,9 @@ know the message/attachment subset; newer peers advertise extra capabilities in
 from __future__ import annotations
 
 import json
+import re
 import uuid
+from datetime import date, datetime
 from typing import Any, Mapping, Optional, Sequence
 
 PROTOCOL_VERSION = 1
@@ -29,7 +31,7 @@ HELPER_CAPABILITIES = frozenset({
 KNOWN_CAPABILITIES = SUPPORTED_CAPABILITIES | HELPER_CAPABILITIES
 LEGACY_CAPABILITIES = frozenset({"messages", "attachments", "ack", "reconnect", "device_auth"})
 KNOWN_TYPES = frozenset({
-    "hello", "hello_ack", "ping", "pong", "message.send", "message.reply", "message.ack", "error",
+    "hello", "hello_ack", "ping", "pong", "message.send", "message.reply", "message.ack", "agent.ack", "error",
     "capabilities.hello", "capabilities.ack",
     "typing", "typing.start", "typing.stop", "stream.start", "stream.delta", "stream.end",
     "agent.state", "tool.state", "clarify.request", "clarify.response", "approval.request", "approval.response",
@@ -52,14 +54,26 @@ _EXCLUDED_ATTACHMENT_PREFIXES = ("audio/", "video/")
 _ALLOWED_APPROVAL_CHOICES = frozenset({"once", "session", "always", "deny"})
 _ALLOWED_SLASH_CHOICES = frozenset({"once", "always", "cancel"})
 _ALLOWED_APPROVAL_DECISIONS = frozenset({"once", "session", "always", "deny", "timeout", "cancelled"})
+_ALLOWED_AGENT_ACK_STATUSES = frozenset({"received", "duplicate", "gap", "unknown"})
 _ALLOWED_TYPING_STATES = frozenset({"start", "stop", "started", "stopped"})
 ATTACHMENT_METADATA_FIELDS = frozenset({"id", "name", "mime_type", "size", "download_url"})
 
 DOMAIN_CONTRACTS = {
-    "task": ("id", "title", "createdAt", "updatedAt", "version"),
-    "schedule": ("id", "title", "startAt", "endAt", "createdAt", "updatedAt", "version"),
+    "task": (
+        "id", "title", "notes", "important", "urgent", "completed", "completedAt",
+        "due", "dueTime", "reminderMinutes", "projectId", "recurrence", "createdAt",
+        "updatedAt", "version", "deletedAt",
+    ),
+    "schedule": (
+        "id", "title", "description", "location", "startAt", "endAt", "allDay",
+        "reminderMinutes", "createdAt", "updatedAt", "version", "deletedAt",
+    ),
     "conversation": ("id", "title", "createdAt", "updatedAt"),
 }
+
+_DATE_PATTERN = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+_LOCAL_TIME_PATTERN = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+_RRULE_FREQUENCY_PATTERN = re.compile(r"(?:^|;)FREQ=[A-Z]+(?:;|$)")
 
 
 class ProtocolError(ValueError):
@@ -182,22 +196,131 @@ def _validate_attachments(value: Any) -> list[dict[str, Any]]:
     return result
 
 
+def _domain_timestamp(value: Any, field: str, *, nullable: bool = False) -> Optional[datetime]:
+    if value is None and nullable:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ProtocolError(f"{field} must be an RFC 3339 timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ProtocolError(f"{field} must be an RFC 3339 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ProtocolError(f"{field} must include a timezone")
+    return parsed
+
+
+def _nullable_string(value: Any, field: str) -> None:
+    if value is not None and (not isinstance(value, str)):
+        raise ProtocolError(f"{field} must be a string or null")
+
+
+def _nullable_boolean(value: Any, field: str) -> None:
+    if value is not None and not isinstance(value, bool):
+        raise ProtocolError(f"{field} must be a boolean or null")
+
+
+def _nullable_non_negative_integer(value: Any, field: str) -> None:
+    if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+        raise ProtocolError(f"{field} must be a non-negative integer or null")
+
+
+def _nullable_date(value: Any, field: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str) or not _DATE_PATTERN.fullmatch(value):
+        raise ProtocolError(f"{field} must be a YYYY-MM-DD date or null")
+    try:
+        date.fromisoformat(value)
+    except ValueError as exc:
+        raise ProtocolError(f"{field} must be a valid YYYY-MM-DD date or null") from exc
+
+
+def _validate_recurrence(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping) or set(value) != {"rule", "until"}:
+        raise ProtocolError("recurrence must be null or an object with rule and until")
+    rule, until = value["rule"], value["until"]
+    if not isinstance(rule, str) or not rule.strip() or not _RRULE_FREQUENCY_PATTERN.search(rule):
+        raise ProtocolError("recurrence.rule must be a non-empty RFC 5545 RRULE string")
+    _nullable_date(until, "recurrence.until")
+
+
+def _validate_task_record(record: Mapping[str, Any]) -> None:
+    if not isinstance(record.get("title"), str) or not record["title"].strip():
+        raise ProtocolError("task.title is required")
+    for field in ("important", "urgent"):
+        _nullable_boolean(record[field], f"task.{field}")
+    if not isinstance(record["completed"], bool):
+        raise ProtocolError("task.completed must be a boolean")
+    _nullable_string(record["notes"], "task.notes")
+    _domain_timestamp(record["completedAt"], "task.completedAt", nullable=True)
+    if record["completed"] and record["completedAt"] is None:
+        raise ProtocolError("task.completedAt is required when task.completed is true")
+    if not record["completed"] and record["completedAt"] is not None:
+        raise ProtocolError("task.completedAt must be null when task.completed is false")
+    due = record["due"]
+    _nullable_date(due, "task.due")
+    due_time = record["dueTime"]
+    if due_time is not None and (not isinstance(due_time, str) or not _LOCAL_TIME_PATTERN.fullmatch(due_time)):
+        raise ProtocolError("task.dueTime must be an HH:MM local time or null")
+    if due is None and due_time is not None:
+        raise ProtocolError("task.dueTime requires task.due")
+    _nullable_non_negative_integer(record["reminderMinutes"], "task.reminderMinutes")
+    _nullable_string(record["projectId"], "task.projectId")
+    _validate_recurrence(record["recurrence"])
+
+
 def validate_domain_record(kind: str, record: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate a future Task/Schedule/Conversation API record."""
+    """Validate the shared v1 Task/Schedule shape without creating domain entities."""
     if kind not in DOMAIN_CONTRACTS:
         raise ProtocolError(f"unsupported domain kind {kind}", code="UNKNOWN_DOMAIN")
     if not isinstance(record, Mapping):
         raise ProtocolError(f"{kind} must be an object")
     normalized = dict(record)
+    missing = set(DOMAIN_CONTRACTS[kind]) - set(normalized)
+    if missing:
+        raise ProtocolError(f"{kind}.{sorted(missing)[0]} is required")
+    unexpected = set(normalized) - set(DOMAIN_CONTRACTS[kind])
+    if unexpected:
+        raise ProtocolError(f"{kind} has unsupported fields: {', '.join(sorted(unexpected))}")
     for field in DOMAIN_CONTRACTS[kind]:
         value = normalized.get(field)
         if field == "version":
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ProtocolError(f"{kind}.{field} must be a positive integer")
+        elif field in {"createdAt", "updatedAt"}:
+            _domain_timestamp(value, f"{kind}.{field}")
+        elif field == "deletedAt":
+            _domain_timestamp(value, f"{kind}.{field}", nullable=True)
+        elif field == "id":
+            if not isinstance(value, str) or not value.strip():
+                raise ProtocolError(f"{kind}.{field} is required")
+        elif kind == "schedule" and field in {"startAt", "endAt"}:
+            _domain_timestamp(value, f"schedule.{field}")
+        elif kind == "schedule" and field in {"description", "location"}:
+            _nullable_string(value, f"schedule.{field}")
+        elif kind == "schedule" and field == "allDay":
+            if not isinstance(value, bool):
+                raise ProtocolError("schedule.allDay must be a boolean")
+        elif kind == "schedule" and field == "reminderMinutes":
+            _nullable_non_negative_integer(value, "schedule.reminderMinutes")
+        elif kind == "task" and field not in {"id", "title", "createdAt", "updatedAt", "version"}:
+            # Task-specific nullable and boolean invariants are checked together below.
+            continue
+        elif kind == "conversation" and field == "title":
+            if not isinstance(value, str) or not value.strip():
+                raise ProtocolError(f"{kind}.{field} is required")
         elif not isinstance(value, str) or not value.strip():
             raise ProtocolError(f"{kind}.{field} is required")
-    if kind == "schedule" and normalized["endAt"] < normalized["startAt"]:
-        raise ProtocolError("schedule.endAt must not precede schedule.startAt")
+    if kind == "task":
+        _validate_task_record(normalized)
+    elif kind == "schedule":
+        start_at = _domain_timestamp(normalized["startAt"], "schedule.startAt")
+        end_at = _domain_timestamp(normalized["endAt"], "schedule.endAt")
+        if start_at >= end_at:
+            raise ProtocolError("schedule.startAt must be earlier than schedule.endAt")
     return normalized
 
 
@@ -447,6 +570,21 @@ def parse_message(raw: Any) -> dict[str, Any]:
     elif message_type == "message.ack":
         for field in ("message_id", "status"):
             _required_text(message, field)
+    elif message_type == "agent.ack":
+        for field in ("event_id", "status"):
+            _required_text(message, field)
+        if message["status"] not in _ALLOWED_AGENT_ACK_STATUSES:
+            raise ProtocolError("agent.ack.status is invalid")
+        _non_negative_int(message, "seq")
+        if message["seq"] < 1:
+            raise ProtocolError("agent.ack.seq must be a positive integer")
+        _non_negative_int(message, "expected_seq", optional=True)
+        if message["status"] == "gap" and (
+            not isinstance(message.get("expected_seq"), int)
+            or isinstance(message["expected_seq"], bool)
+            or message["expected_seq"] < 1
+        ):
+            raise ProtocolError("agent.ack gap requires a positive expected_seq")
     elif message_type == "error":
         for field in ("code", "message"):
             _required_text(message, field)

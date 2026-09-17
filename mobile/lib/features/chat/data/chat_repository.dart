@@ -53,7 +53,7 @@ class ChatRepository {
         title: Value(title.trim()),
         updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
         version: Value(conversation.version + 1),
-        syncStatus: const Value('pendingUpdate'),
+        syncStatus: Value(_statusAfterLocalEdit(conversation.syncStatus)),
       ),
     );
   }
@@ -80,6 +80,9 @@ class ChatRepository {
           ..orderBy([(row) => OrderingTerm(expression: row.createdAt)]))
         .watch();
   }
+
+  String _statusAfterLocalEdit(String current) =>
+      current == 'pendingCreate' ? 'pendingCreate' : 'pendingUpdate';
 
   Future<Message> sendMessage({
     required String conversationId,

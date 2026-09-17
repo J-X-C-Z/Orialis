@@ -445,6 +445,14 @@ class OrialisAdapter(BasePlatformAdapter):
             request_waiter = self._request_waiters.get(message["message_id"])
             if request_waiter is not None and not request_waiter.done():
                 request_waiter.set_result(message)
+        elif message_type == "agent.ack":
+            logger.debug(
+                "[%s] received agent acknowledgement event_id=%s seq=%s status=%s",
+                self.name,
+                message["event_id"],
+                message["seq"],
+                message["status"],
+            )
         elif message_type == "capabilities.ack":
             self._server_capabilities = protocol.capabilities_from_ack(message)
             self._negotiated = True

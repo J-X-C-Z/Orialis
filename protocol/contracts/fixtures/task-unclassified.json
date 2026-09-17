@@ -1,0 +1,18 @@
+{
+  "id": "0198f3b5-2d5a-7abc-8f14-7e46e6d7f001",
+  "title": "完成实验报告",
+  "notes": null,
+  "important": null,
+  "urgent": null,
+  "completed": false,
+  "completedAt": null,
+  "due": "2026-09-20",
+  "dueTime": "23:59",
+  "reminderMinutes": 30,
+  "projectId": null,
+  "recurrence": null,
+  "createdAt": "2026-09-17T08:00:00Z",
+  "updatedAt": "2026-09-17T08:00:00Z",
+  "version": 1,
+  "deletedAt": null
+}

@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 from ..tools import (
     CAPABILITY_SCHEMA,
+    DOMAIN_CONTRACTS,
+    PLUGIN_OPERATIONS,
     _display_server_url,
     _http_capabilities_url,
     handle_capabilities,
@@ -15,6 +17,28 @@ from ..tools import (
 
 
 class CapabilityToolTests(unittest.TestCase):
+    def test_domain_contract_metadata_does_not_create_task_or_schedule_tools(self):
+        self.assertEqual(DOMAIN_CONTRACTS["task"]["domain"], "Task")
+        self.assertEqual(DOMAIN_CONTRACTS["task"]["resource"], "/api/v1/tasks")
+        self.assertEqual(DOMAIN_CONTRACTS["task"]["deleted_at_field"], "deletedAt")
+        self.assertIn("important", DOMAIN_CONTRACTS["task"]["fields"])
+        self.assertIn("recurrence", DOMAIN_CONTRACTS["task"]["nullable_fields"])
+        self.assertFalse(DOMAIN_CONTRACTS["task"]["callable"])
+        self.assertEqual(DOMAIN_CONTRACTS["schedule"]["domain"], "Schedule")
+        self.assertEqual(
+            DOMAIN_CONTRACTS["schedule"]["resource"],
+            "/api/v1/schedules",
+        )
+        self.assertEqual(DOMAIN_CONTRACTS["schedule"]["compatibility_resource"], "/api/v1/calendar-events")
+        self.assertEqual(DOMAIN_CONTRACTS["schedule"]["wire_entity_type"], "calendar_event")
+        self.assertIn("deletedAt", DOMAIN_CONTRACTS["schedule"]["fields"])
+        self.assertIn("location", DOMAIN_CONTRACTS["schedule"]["nullable_fields"])
+        self.assertFalse(DOMAIN_CONTRACTS["schedule"]["callable"])
+        self.assertEqual(
+            {item["protocol"] for item in PLUGIN_OPERATIONS},
+            {"message.send", "message.reply", "message.ack"},
+        )
+
     def test_capability_url_is_derived_from_agent_gateway_url(self):
         self.assertEqual(
             _http_capabilities_url(

@@ -267,15 +267,23 @@ impl AgentRegistry {
         self.state.lock().await.pending.remove(message_id);
     }
 
+    pub(crate) async fn cancel_request(&self, message_id: &str) {
+        self.pending_remove(message_id).await;
+    }
+
     pub(crate) async fn resolve_reply(&self, message: GatewayMessage) {
-        let Some(reply_to) = message.reply_to() else {
+        let Some(reply_to) = message.reply_to().map(ToOwned::to_owned) else {
             tracing::warn!("received Orialis Agent message without reply_to");
             return;
         };
-        let sender = {
+        let delivered = {
             let mut state = self.state.lock().await;
-            let sender = state.pending.remove(reply_to);
-            if sender.is_some() {
+            let Some(pending) = state.pending.remove(&reply_to) else {
+                tracing::warn!(reply_to = %reply_to, "received reply for unknown Orialis Agent request");
+                return;
+            };
+            let delivered = pending.reply_tx.send(message).is_ok();
+            if delivered {
                 state.completed.insert(reply_to.to_owned());
                 state.completed_order.push_back(reply_to.to_owned());
                 while state.completed_order.len() > COMPLETED_REQUEST_CACHE {
@@ -284,13 +292,12 @@ impl AgentRegistry {
                     }
                 }
             }
-            sender
+            delivered
         };
-        if let Some(pending) = sender {
+        if delivered {
             tracing::info!(reply_to = %reply_to, "agent reply received from Orialis Hermes plugin");
-            let _ = pending.reply_tx.send(message);
         } else {
-            tracing::warn!(reply_to = %reply_to, "received reply for unknown Orialis Agent request");
+            tracing::warn!(reply_to = %reply_to, "received reply after Orialis Agent request timed out");
         }
     }
 
@@ -583,6 +590,66 @@ mod tests {
                 .await,
             Err(RegistryError::DuplicateMessage)
         ));
+    }
+
+    #[tokio::test]
+    async fn cancelled_request_can_be_retried_with_the_same_message_id() {
+        let registry = AgentRegistry::default();
+        let (command_tx, _command_rx) = mpsc::channel(2);
+        registry
+            .register_connection(
+                "connection-1".into(),
+                "user-1".into(),
+                "device-1".into(),
+                "test".into(),
+                command_tx,
+            )
+            .await;
+        let message = GatewayMessage::MessageSend {
+            version: 1,
+            message_id: "msg_timeout".into(),
+            conversation_id: "conv_1".into(),
+            content: "hello".into(),
+            attachments: vec![],
+        };
+        let _receiver = registry.send_request(message.clone()).await.unwrap();
+        registry.cancel_request("msg_timeout").await;
+        assert!(registry.send_request(message).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn late_reply_after_receiver_timeout_does_not_block_retry() {
+        let registry = AgentRegistry::default();
+        let (command_tx, _command_rx) = mpsc::channel(2);
+        registry
+            .register_connection(
+                "connection-1".into(),
+                "user-1".into(),
+                "device-1".into(),
+                "test".into(),
+                command_tx,
+            )
+            .await;
+        let message = GatewayMessage::MessageSend {
+            version: 1,
+            message_id: "msg_late_reply".into(),
+            conversation_id: "conv_1".into(),
+            content: "hello".into(),
+            attachments: vec![],
+        };
+        let receiver = registry.send_request(message.clone()).await.unwrap();
+        drop(receiver);
+        registry
+            .resolve_reply(GatewayMessage::MessageReply {
+                version: 1,
+                message_id: "reply_late".into(),
+                reply_to: "msg_late_reply".into(),
+                conversation_id: "conv_1".into(),
+                content: "done".into(),
+                attachments: vec![],
+            })
+            .await;
+        assert!(registry.send_request(message).await.is_ok());
     }
 
     #[tokio::test]

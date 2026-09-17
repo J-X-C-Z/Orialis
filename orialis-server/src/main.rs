@@ -173,25 +173,79 @@ struct SessionResponse {
     expires_at: String,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Task {
     id: String,
     title: String,
     notes: Option<String>,
-    important: bool,
-    urgent: bool,
+    important: Option<bool>,
+    urgent: Option<bool>,
     completed: bool,
     completed_at: Option<String>,
     due: Option<String>,
     due_time: Option<String>,
     reminder_minutes: Option<i64>,
     project_id: Option<String>,
-    #[serde(rename = "recurrence")]
-    recurrence_rule: Option<String>,
+    recurrence: Option<Recurrence>,
     created_at: String,
     updated_at: String,
     version: i64,
+    deleted_at: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct TaskRow {
+    id: String,
+    title: String,
+    notes: Option<String>,
+    important: Option<bool>,
+    urgent: Option<bool>,
+    completed: bool,
+    completed_at: Option<String>,
+    due: Option<String>,
+    due_time: Option<String>,
+    reminder_minutes: Option<i64>,
+    project_id: Option<String>,
+    recurrence_rule: Option<String>,
+    recurrence_until: Option<String>,
+    created_at: String,
+    updated_at: String,
+    version: i64,
+    deleted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct Recurrence {
+    rule: String,
+    until: String,
+}
+
+impl TaskRow {
+    fn into_task(self) -> Task {
+        Task {
+            id: self.id,
+            title: self.title,
+            notes: self.notes,
+            important: self.important,
+            urgent: self.urgent,
+            completed: self.completed,
+            completed_at: self.completed_at,
+            due: self.due,
+            due_time: self.due_time,
+            reminder_minutes: self.reminder_minutes,
+            project_id: self.project_id,
+            recurrence: match (self.recurrence_rule, self.recurrence_until) {
+                (Some(rule), Some(until)) => Some(Recurrence { rule, until }),
+                _ => None,
+            },
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            version: self.version,
+            deleted_at: self.deleted_at,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -208,7 +262,7 @@ struct TaskInput {
     due_time: Option<String>,
     reminder_minutes: Option<i64>,
     project_id: Option<String>,
-    recurrence: Option<Value>,
+    recurrence: Option<Recurrence>,
 }
 
 #[derive(Deserialize)]
@@ -235,7 +289,7 @@ struct TaskPatch {
     #[serde(default, deserialize_with = "deserialize_patch")]
     project_id: Option<PatchValue<String>>,
     #[serde(default, deserialize_with = "deserialize_patch")]
-    recurrence: Option<PatchValue<Value>>,
+    recurrence: Option<PatchValue<Recurrence>>,
     base_version: i64,
 }
 
@@ -320,7 +374,7 @@ struct ProjectPatch {
 
 #[derive(Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
-struct CalendarEvent {
+struct Schedule {
     id: String,
     title: String,
     description: Option<String>,
@@ -332,11 +386,12 @@ struct CalendarEvent {
     created_at: String,
     updated_at: String,
     version: i64,
+    deleted_at: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CalendarEventInput {
+struct ScheduleInput {
     id: Option<String>,
     title: String,
     description: Option<String>,
@@ -484,7 +539,7 @@ struct AgentDevicesResponse {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CalendarEventPatch {
+struct SchedulePatch {
     #[serde(default, deserialize_with = "deserialize_patch")]
     title: Option<PatchValue<String>>,
     #[serde(default, deserialize_with = "deserialize_patch")]
@@ -499,6 +554,12 @@ struct CalendarEventPatch {
     all_day: Option<PatchValue<bool>>,
     #[serde(default, deserialize_with = "deserialize_patch")]
     reminder_minutes: Option<PatchValue<i64>>,
+    base_version: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VersionedDeleteInput {
     base_version: i64,
 }
 
@@ -535,7 +596,7 @@ struct SyncSnapshot {
     cursor: i64,
     tasks: Vec<Task>,
     projects: Vec<Project>,
-    calendar_events: Vec<CalendarEvent>,
+    calendar_events: Vec<Schedule>,
     milestones: Vec<Milestone>,
 }
 
@@ -617,14 +678,14 @@ struct ProjectCursor {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CalendarEventListResponse {
-    items: Vec<CalendarEvent>,
+struct ScheduleListResponse {
+    items: Vec<Schedule>,
     next_cursor: Option<String>,
     has_more: bool,
 }
 
 #[derive(Deserialize)]
-struct CalendarEventListQuery {
+struct ScheduleListQuery {
     after: Option<String>,
     limit: Option<i64>,
     from: Option<String>,
@@ -632,7 +693,7 @@ struct CalendarEventListQuery {
 }
 
 #[derive(Serialize, Deserialize)]
-struct CalendarEventCursor {
+struct ScheduleCursor {
     v: u8,
     start_at: String,
     id: String,
@@ -1798,10 +1859,11 @@ async fn list_tasks(
     }
     let cursor = query.after.map(decode_task_cursor).transpose()?;
     let fetch_limit = limit + 1;
-    let mut tasks = if let Some(cursor) = cursor {
-        sqlx::query_as::<_, Task>(
+    let task_rows = if let Some(cursor) = cursor {
+        sqlx::query_as::<_, TaskRow>(
             "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
-                    reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
+                    reminder_minutes,project_id,recurrence_rule,recurrence_until,
+                    created_at,updated_at,version,deleted_at
              FROM tasks
              WHERE user_id=? AND deleted_at IS NULL
                AND (due IS NULL,COALESCE(due,''),due_time IS NULL,
@@ -1820,9 +1882,10 @@ async fn list_tasks(
         .fetch_all(&state.pool)
         .await?
     } else {
-        sqlx::query_as::<_, Task>(
+        sqlx::query_as::<_, TaskRow>(
             "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
-                    reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
+                    reminder_minutes,project_id,recurrence_rule,recurrence_until,
+                    created_at,updated_at,version,deleted_at
              FROM tasks WHERE user_id=? AND deleted_at IS NULL
              ORDER BY due IS NULL,due,due_time IS NULL,due_time,created_at,id
              LIMIT ?",
@@ -1832,6 +1895,7 @@ async fn list_tasks(
         .fetch_all(&state.pool)
         .await?
     };
+    let mut tasks: Vec<Task> = task_rows.into_iter().map(TaskRow::into_task).collect();
     let has_more = tasks.len() > limit as usize;
     if has_more {
         tasks.pop();
@@ -1886,16 +1950,18 @@ async fn fetch_task<'e, E>(executor: E, user_id: &str, id: &str) -> Result<Task,
 where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
-    sqlx::query_as::<_, Task>(
+    let row = sqlx::query_as::<_, TaskRow>(
         "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
-                reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
+                reminder_minutes,project_id,recurrence_rule,recurrence_until,
+                created_at,updated_at,version,deleted_at
          FROM tasks WHERE user_id=? AND id=? AND deleted_at IS NULL",
     )
     .bind(user_id)
     .bind(id)
     .fetch_optional(executor)
     .await?
-    .ok_or(AppError::NotFound)
+    .ok_or(AppError::NotFound)?;
+    Ok(row.into_task())
 }
 
 async fn create_task(
@@ -1919,12 +1985,20 @@ async fn create_task(
     validate_date("due", input.due.as_deref())?;
     validate_time("dueTime", input.due_time.as_deref())?;
     validate_reminder(input.reminder_minutes)?;
+    validate_recurrence(input.recurrence.as_ref())?;
     if let Some(project_id) = input.project_id.as_deref() {
         ensure_project(&state.pool, &user_id, project_id).await?;
     }
     let id = input.id.unwrap_or_else(new_id);
+    validate_entity_id("id", &id)?;
+    ensure_client_id_available(&state.pool, &user_id, "tasks", &id).await?;
     let timestamp = now();
     let completed = input.completed.unwrap_or(false);
+    if !completed && input.completed_at.is_some() {
+        return Err(AppError::BadRequest(
+            "completedAt requires completed=true".into(),
+        ));
+    }
     let completed_at = if completed {
         let completed_at = input.completed_at.unwrap_or_else(|| timestamp.clone());
         validate_timestamp("completedAt", &completed_at)?;
@@ -1936,23 +2010,24 @@ async fn create_task(
     let result = sqlx::query(
         "INSERT INTO tasks
          (id,user_id,title,notes,important,urgent,completed,completed_at,due,due_time,
-          reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+          reminder_minutes,project_id,recurrence_rule,recurrence_until,created_at,updated_at,version)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
          ON CONFLICT(id) DO NOTHING",
     )
     .bind(&id)
     .bind(&user_id)
     .bind(input.title.trim())
     .bind(input.notes)
-    .bind(input.important.unwrap_or(false))
-    .bind(input.urgent.unwrap_or(false))
+    .bind(input.important)
+    .bind(input.urgent)
     .bind(completed)
     .bind(completed_at)
     .bind(input.due)
     .bind(input.due_time)
     .bind(input.reminder_minutes)
     .bind(input.project_id)
-    .bind(input.recurrence.map(|value| value.to_string()))
+    .bind(input.recurrence.as_ref().map(|value| value.rule.clone()))
+    .bind(input.recurrence.as_ref().map(|value| value.until.clone()))
     .bind(&timestamp)
     .bind(&timestamp)
     .execute(&mut *tx)
@@ -1993,9 +2068,14 @@ async fn update_task(
     }
     let title = resolve_required(input.title, current.title, "title")?;
     let notes = resolve_nullable(input.notes, current.notes);
-    let important = resolve_required(input.important, current.important, "important")?;
-    let urgent = resolve_required(input.urgent, current.urgent, "urgent")?;
+    let important = resolve_nullable(input.important, current.important);
+    let urgent = resolve_nullable(input.urgent, current.urgent);
     let completed = resolve_required(input.completed, current.completed, "completed")?;
+    if !completed && matches!(input.completed_at, Some(PatchValue::Value(_))) {
+        return Err(AppError::BadRequest(
+            "completedAt requires completed=true".into(),
+        ));
+    }
     let completed_at = if completed {
         match input.completed_at {
             Some(PatchValue::Value(value)) => {
@@ -2017,8 +2097,8 @@ async fn update_task(
     let reminder_minutes = resolve_nullable(input.reminder_minutes, current.reminder_minutes);
     let project_id = resolve_nullable(input.project_id, current.project_id);
     let recurrence = match input.recurrence {
-        None => current.recurrence_rule,
-        Some(PatchValue::Value(value)) => Some(value.to_string()),
+        None => current.recurrence,
+        Some(PatchValue::Value(value)) => Some(value),
         Some(PatchValue::Null(())) => None,
     };
     validate_date("due", due.as_deref())?;
@@ -2027,13 +2107,14 @@ async fn update_task(
     if due.is_none() && due_time.is_some() {
         return Err(AppError::BadRequest("due_time requires due".into()));
     }
+    validate_recurrence(recurrence.as_ref())?;
     if let Some(project_id) = project_id.as_deref() {
         ensure_project(&state.pool, &user_id, project_id).await?;
     }
     let mut tx = state.pool.begin().await?;
     let result = sqlx::query(
         "UPDATE tasks SET title=?,notes=?,important=?,urgent=?,completed=?,completed_at=?,due=?,due_time=?,
-         reminder_minutes=?,project_id=?,recurrence_rule=?,updated_at=?,version=version+1
+         reminder_minutes=?,project_id=?,recurrence_rule=?,recurrence_until=?,updated_at=?,version=version+1
          WHERE user_id=? AND id=? AND version=?",
     )
     .bind(title.trim())
@@ -2046,7 +2127,8 @@ async fn update_task(
     .bind(due_time)
     .bind(reminder_minutes)
     .bind(project_id)
-    .bind(recurrence)
+    .bind(recurrence.as_ref().map(|value| value.rule.clone()))
+    .bind(recurrence.as_ref().map(|value| value.until.clone()))
     .bind(now())
     .bind(&user_id)
     .bind(&id)
@@ -2077,19 +2159,25 @@ async fn delete_task(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Json(input): Json<VersionedDeleteInput>,
 ) -> Result<StatusCode, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let task = fetch_task(&state.pool, &user_id, &id).await?;
+    if task.version != input.base_version {
+        return Err(AppError::Conflict("task version changed".into()));
+    }
     let timestamp = now();
     let mut tx = state.pool.begin().await?;
     let result = sqlx::query(
-        "UPDATE tasks SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?",
+        "UPDATE tasks SET deleted_at=?,updated_at=?,version=version+1
+         WHERE user_id=? AND id=? AND version=?",
     )
     .bind(&timestamp)
     .bind(&timestamp)
     .bind(&user_id)
     .bind(&id)
+    .bind(input.base_version)
     .execute(&mut *tx)
     .await?;
     if result.rows_affected() != 1 {
@@ -2329,9 +2417,10 @@ async fn project_summary(
     .bind(&id)
     .fetch_one(&state.pool)
     .await?;
-    let next_action = sqlx::query_as::<_, Task>(
+    let next_action = sqlx::query_as::<_, TaskRow>(
         "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
-                reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
+                reminder_minutes,project_id,recurrence_rule,recurrence_until,
+                created_at,updated_at,version,deleted_at
          FROM tasks
          WHERE user_id=? AND project_id=? AND deleted_at IS NULL AND completed=0
          ORDER BY due IS NULL,due,due_time IS NULL,due_time,created_at,id LIMIT 1",
@@ -2339,7 +2428,8 @@ async fn project_summary(
     .bind(&user_id)
     .bind(&id)
     .fetch_optional(&state.pool)
-    .await?;
+    .await?
+    .map(TaskRow::into_task);
     let total_units = total_tasks + total_milestones;
     let completed_units = completed_tasks + completed_milestones;
     let progress = if total_units == 0 {
@@ -2451,6 +2541,78 @@ fn validate_date(field: &str, value: Option<&str>) -> Result<(), AppError> {
     if let Some(value) = value {
         NaiveDate::parse_from_str(value, "%Y-%m-%d")
             .map_err(|_| AppError::BadRequest(format!("{field} must be YYYY-MM-DD")))?;
+    }
+    Ok(())
+}
+
+fn validate_entity_id(field: &str, value: &str) -> Result<(), AppError> {
+    if value.is_empty()
+        || value.trim() != value
+        || value.chars().count() > 128
+        || value.chars().any(char::is_control)
+    {
+        return Err(AppError::BadRequest(format!(
+            "{field} must be a non-empty opaque identifier of at most 128 characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_recurrence(value: Option<&Recurrence>) -> Result<(), AppError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    if value.rule.trim().is_empty() || value.rule.chars().any(char::is_whitespace) {
+        return Err(AppError::BadRequest(
+            "recurrence.rule must be a valid RFC 5545 RRULE".into(),
+        ));
+    }
+    let mut has_frequency = false;
+    for component in value.rule.split(';') {
+        let (key, component_value) = component
+            .split_once('=')
+            .filter(|(_, component_value)| !component_value.is_empty())
+            .ok_or_else(|| {
+                AppError::BadRequest("recurrence.rule must be a valid RFC 5545 RRULE".into())
+            })?;
+        if key.eq_ignore_ascii_case("FREQ") {
+            has_frequency = true;
+            if !matches!(
+                component_value.to_ascii_uppercase().as_str(),
+                "SECONDLY" | "MINUTELY" | "HOURLY" | "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY"
+            ) {
+                return Err(AppError::BadRequest(
+                    "recurrence.rule has an invalid FREQ".into(),
+                ));
+            }
+        }
+    }
+    if !has_frequency {
+        return Err(AppError::BadRequest(
+            "recurrence.rule must include FREQ".into(),
+        ));
+    }
+    validate_date("recurrence.until", Some(&value.until))
+}
+
+async fn ensure_client_id_available(
+    pool: &SqlitePool,
+    user_id: &str,
+    table: &str,
+    id: &str,
+) -> Result<(), AppError> {
+    let query = format!("SELECT user_id,deleted_at FROM {table} WHERE id=?");
+    let existing = sqlx::query_as::<_, (String, Option<String>)>(&query)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    if let Some((owner_id, deleted_at)) = existing {
+        if owner_id != user_id {
+            return Err(AppError::Conflict("id belongs to another user".into()));
+        }
+        if deleted_at.is_some() {
+            return Err(AppError::Conflict("id has already been deleted".into()));
+        }
     }
     Ok(())
 }
@@ -2834,8 +2996,8 @@ async fn delete_milestone(
 async fn list_events(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Query(query): Query<CalendarEventListQuery>,
-) -> Result<Json<CalendarEventListResponse>, AppError> {
+    Query(query): Query<ScheduleListQuery>,
+) -> Result<Json<ScheduleListResponse>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     for (field, value) in [("from", query.from.as_deref()), ("to", query.to.as_deref())] {
         if let Some(value) = value {
@@ -2853,9 +3015,9 @@ async fn list_events(
             "limit must be between 1 and 100".into(),
         ));
     }
-    let cursor = query.after.map(decode_calendar_event_cursor).transpose()?;
-    let mut events = sqlx::query_as::<_, CalendarEvent>(
-        "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version
+    let cursor = query.after.map(decode_schedule_cursor).transpose()?;
+    let mut events = sqlx::query_as::<_, Schedule>(
+        "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version,deleted_at
          FROM calendar_events
          WHERE user_id=? AND deleted_at IS NULL
            AND (? IS NULL OR start_at>=?) AND (? IS NULL OR start_at<?)
@@ -2879,37 +3041,37 @@ async fn list_events(
         .then(|| {
             events
                 .last()
-                .map(calendar_event_cursor)
-                .map(encode_calendar_event_cursor)
+                .map(schedule_cursor)
+                .map(encode_schedule_cursor)
         })
         .flatten()
         .transpose()?;
-    Ok(Json(CalendarEventListResponse {
+    Ok(Json(ScheduleListResponse {
         items: events,
         next_cursor,
         has_more,
     }))
 }
 
-fn calendar_event_cursor(event: &CalendarEvent) -> CalendarEventCursor {
-    CalendarEventCursor {
+fn schedule_cursor(event: &Schedule) -> ScheduleCursor {
+    ScheduleCursor {
         v: 1,
         start_at: event.start_at.clone(),
         id: event.id.clone(),
     }
 }
 
-fn encode_calendar_event_cursor(cursor: CalendarEventCursor) -> Result<String, AppError> {
+fn encode_schedule_cursor(cursor: ScheduleCursor) -> Result<String, AppError> {
     let payload = serde_json::to_vec(&cursor)
         .map_err(|_| AppError::BadRequest("invalid calendar cursor".into()))?;
     Ok(URL_SAFE_NO_PAD.encode(payload))
 }
 
-fn decode_calendar_event_cursor(value: String) -> Result<CalendarEventCursor, AppError> {
+fn decode_schedule_cursor(value: String) -> Result<ScheduleCursor, AppError> {
     let payload = URL_SAFE_NO_PAD
         .decode(value)
         .map_err(|_| AppError::BadRequest("invalid calendar cursor".into()))?;
-    let cursor: CalendarEventCursor = serde_json::from_slice(&payload)
+    let cursor: ScheduleCursor = serde_json::from_slice(&payload)
         .map_err(|_| AppError::BadRequest("invalid calendar cursor".into()))?;
     if cursor.v != 1 || cursor.start_at.is_empty() || cursor.id.is_empty() {
         return Err(AppError::BadRequest("invalid calendar cursor".into()));
@@ -2917,12 +3079,12 @@ fn decode_calendar_event_cursor(value: String) -> Result<CalendarEventCursor, Ap
     Ok(cursor)
 }
 
-async fn fetch_event<'e, E>(executor: E, user_id: &str, id: &str) -> Result<CalendarEvent, AppError>
+async fn fetch_event<'e, E>(executor: E, user_id: &str, id: &str) -> Result<Schedule, AppError>
 where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
-    sqlx::query_as::<_, CalendarEvent>(
-        "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version
+    sqlx::query_as::<_, Schedule>(
+        "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version,deleted_at
          FROM calendar_events WHERE user_id=? AND id=? AND deleted_at IS NULL",
     ).bind(user_id).bind(id).fetch_optional(executor).await?.ok_or(AppError::NotFound)
 }
@@ -2930,8 +3092,8 @@ where
 async fn create_event(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(input): Json<CalendarEventInput>,
-) -> Result<(StatusCode, Json<CalendarEvent>), AppError> {
+    Json(input): Json<ScheduleInput>,
+) -> Result<(StatusCode, Json<Schedule>), AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     if input.title.trim().is_empty() {
@@ -2940,6 +3102,8 @@ async fn create_event(
     validate_calendar_range(&input.start_at, &input.end_at)?;
     validate_reminder(input.reminder_minutes)?;
     let id = input.id.unwrap_or_else(new_id);
+    validate_entity_id("id", &id)?;
+    ensure_client_id_available(&state.pool, &user_id, "calendar_events", &id).await?;
     let timestamp = now();
     let mut tx = state.pool.begin().await?;
     let result = sqlx::query("INSERT INTO calendar_events (id,user_id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO NOTHING")
@@ -2970,8 +3134,8 @@ async fn update_event(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Json(input): Json<CalendarEventPatch>,
-) -> Result<Json<CalendarEvent>, AppError> {
+    Json(input): Json<SchedulePatch>,
+) -> Result<Json<Schedule>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let current = fetch_event(&state.pool, &user_id, &id).await?;
@@ -3014,14 +3178,18 @@ async fn delete_event(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Json(input): Json<VersionedDeleteInput>,
 ) -> Result<StatusCode, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     reject_replayed_mutation(&state.pool, &user_id, &headers).await?;
     let event = fetch_event(&state.pool, &user_id, &id).await?;
+    if event.version != input.base_version {
+        return Err(AppError::Conflict("calendar event version changed".into()));
+    }
     let timestamp = now();
     let mut tx = state.pool.begin().await?;
-    let result = sqlx::query("UPDATE calendar_events SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=?")
-        .bind(&timestamp).bind(&timestamp).bind(&user_id).bind(&id).execute(&mut *tx).await?;
+    let result = sqlx::query("UPDATE calendar_events SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
+        .bind(&timestamp).bind(&timestamp).bind(&user_id).bind(&id).bind(input.base_version).execute(&mut *tx).await?;
     if result.rows_affected() != 1 {
         return Err(AppError::Conflict("calendar event version changed".into()));
     }
@@ -3066,20 +3234,24 @@ async fn sync_snapshot(
 ) -> Result<Json<SyncSnapshot>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     let mut tx = state.pool.begin().await?;
-    let tasks = sqlx::query_as::<_, Task>(
+    let tasks = sqlx::query_as::<_, TaskRow>(
         "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
-                reminder_minutes,project_id,recurrence_rule,created_at,updated_at,version
+                reminder_minutes,project_id,recurrence_rule,recurrence_until,
+                created_at,updated_at,version,deleted_at
          FROM tasks WHERE user_id=? AND deleted_at IS NULL ORDER BY created_at",
     )
     .bind(&user_id)
     .fetch_all(&mut *tx)
-    .await?;
+    .await?
+    .into_iter()
+    .map(TaskRow::into_task)
+    .collect();
     let projects = sqlx::query_as::<_, Project>(
         "SELECT id,name,goal,description,color,status,start_date,due,next_action_task_id,created_at,updated_at,version
          FROM projects WHERE user_id=? AND deleted_at IS NULL ORDER BY created_at",
     ).bind(&user_id).fetch_all(&mut *tx).await?;
-    let calendar_events = sqlx::query_as::<_, CalendarEvent>(
-        "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version
+    let calendar_events = sqlx::query_as::<_, Schedule>(
+        "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version,deleted_at
          FROM calendar_events WHERE user_id=? AND deleted_at IS NULL ORDER BY start_at",
     ).bind(&user_id).fetch_all(&mut *tx).await?;
     let milestones = sqlx::query_as::<_, Milestone>(
@@ -3187,5 +3359,28 @@ mod attachment_tests {
         assert!(MAX_TOTAL_ATTACHMENT_BYTES >= MAX_ATTACHMENT_BYTES);
         assert!(MAX_ATTACHMENT_REQUEST_BYTES > MAX_TOTAL_ATTACHMENT_BYTES);
         assert_eq!(MAX_ATTACHMENT_COUNT, 10);
+    }
+
+    #[test]
+    fn task_contract_keeps_priority_tri_state_and_validates_recurrence() {
+        assert!(validate_entity_id("id", "client-task-1").is_ok());
+        assert!(validate_entity_id("id", "").is_err());
+        assert!(validate_entity_id("id", " client-task-1").is_err());
+
+        let recurrence = Recurrence {
+            rule: "FREQ=WEEKLY;BYDAY=MO,WE".into(),
+            until: "2026-12-31".into(),
+        };
+        assert!(validate_recurrence(Some(&recurrence)).is_ok());
+        assert!(validate_recurrence(Some(&Recurrence {
+            rule: "DAILY".into(),
+            until: "2026-12-31".into(),
+        }))
+        .is_err());
+        assert!(validate_recurrence(Some(&Recurrence {
+            rule: "FREQ=DAILY".into(),
+            until: "31-12-2026".into(),
+        }))
+        .is_err());
     }
 }

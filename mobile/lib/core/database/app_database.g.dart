@@ -62,26 +62,24 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
   late final GeneratedColumn<bool> important = GeneratedColumn<bool>(
     'important',
     aliasedName,
-    false,
+    true,
     type: DriftSqlType.bool,
     requiredDuringInsert: false,
     defaultConstraints: GeneratedColumn.constraintIsAlways(
       'CHECK ("important" IN (0, 1))',
     ),
-    defaultValue: const Constant(false),
   );
   static const VerificationMeta _urgentMeta = const VerificationMeta('urgent');
   @override
   late final GeneratedColumn<bool> urgent = GeneratedColumn<bool>(
     'urgent',
     aliasedName,
-    false,
+    true,
     type: DriftSqlType.bool,
     requiredDuringInsert: false,
     defaultConstraints: GeneratedColumn.constraintIsAlways(
       'CHECK ("urgent" IN (0, 1))',
     ),
-    defaultValue: const Constant(false),
   );
   static const VerificationMeta _completedMeta = const VerificationMeta(
     'completed',
@@ -109,12 +107,34 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _reminderMinutesMeta = const VerificationMeta(
+    'reminderMinutes',
+  );
+  @override
+  late final GeneratedColumn<int> reminderMinutes = GeneratedColumn<int>(
+    'reminder_minutes',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _projectIdMeta = const VerificationMeta(
     'projectId',
   );
   @override
   late final GeneratedColumn<String> projectId = GeneratedColumn<String>(
     'project_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _recurrenceMeta = const VerificationMeta(
+    'recurrence',
+  );
+  @override
+  late final GeneratedColumn<String> recurrence = GeneratedColumn<String>(
+    'recurrence',
     aliasedName,
     true,
     type: DriftSqlType.string,
@@ -138,6 +158,18 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
   @override
   late final GeneratedColumn<int> remoteVersion = GeneratedColumn<int>(
     'remote_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _localRevisionMeta = const VerificationMeta(
+    'localRevision',
+  );
+  @override
+  late final GeneratedColumn<int> localRevision = GeneratedColumn<int>(
+    'local_revision',
     aliasedName,
     false,
     type: DriftSqlType.int,
@@ -200,9 +232,12 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
     urgent,
     completed,
     completedAt,
+    reminderMinutes,
     projectId,
+    recurrence,
     version,
     remoteVersion,
+    localRevision,
     createdAt,
     updatedAt,
     deletedAt,
@@ -278,10 +313,25 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
         ),
       );
     }
+    if (data.containsKey('reminder_minutes')) {
+      context.handle(
+        _reminderMinutesMeta,
+        reminderMinutes.isAcceptableOrUnknown(
+          data['reminder_minutes']!,
+          _reminderMinutesMeta,
+        ),
+      );
+    }
     if (data.containsKey('project_id')) {
       context.handle(
         _projectIdMeta,
         projectId.isAcceptableOrUnknown(data['project_id']!, _projectIdMeta),
+      );
+    }
+    if (data.containsKey('recurrence')) {
+      context.handle(
+        _recurrenceMeta,
+        recurrence.isAcceptableOrUnknown(data['recurrence']!, _recurrenceMeta),
       );
     }
     if (data.containsKey('version')) {
@@ -296,6 +346,15 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
         remoteVersion.isAcceptableOrUnknown(
           data['remote_version']!,
           _remoteVersionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('local_revision')) {
+      context.handle(
+        _localRevisionMeta,
+        localRevision.isAcceptableOrUnknown(
+          data['local_revision']!,
+          _localRevisionMeta,
         ),
       );
     }
@@ -359,11 +418,11 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
       important: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}important'],
-      )!,
+      ),
       urgent: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}urgent'],
-      )!,
+      ),
       completed: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}completed'],
@@ -372,9 +431,17 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
         DriftSqlType.string,
         data['${effectivePrefix}completed_at'],
       ),
+      reminderMinutes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}reminder_minutes'],
+      ),
       projectId: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}project_id'],
+      ),
+      recurrence: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}recurrence'],
       ),
       version: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
@@ -383,6 +450,10 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
       remoteVersion: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}remote_version'],
+      )!,
+      localRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}local_revision'],
       )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
@@ -415,13 +486,16 @@ class Task extends DataClass implements Insertable<Task> {
   final String? notes;
   final String? due;
   final String? dueTime;
-  final bool important;
-  final bool urgent;
+  final bool? important;
+  final bool? urgent;
   final bool completed;
   final String? completedAt;
+  final int? reminderMinutes;
   final String? projectId;
+  final String? recurrence;
   final int version;
   final int remoteVersion;
+  final int localRevision;
   final String createdAt;
   final String updatedAt;
   final String? deletedAt;
@@ -432,13 +506,16 @@ class Task extends DataClass implements Insertable<Task> {
     this.notes,
     this.due,
     this.dueTime,
-    required this.important,
-    required this.urgent,
+    this.important,
+    this.urgent,
     required this.completed,
     this.completedAt,
+    this.reminderMinutes,
     this.projectId,
+    this.recurrence,
     required this.version,
     required this.remoteVersion,
+    required this.localRevision,
     required this.createdAt,
     required this.updatedAt,
     this.deletedAt,
@@ -458,17 +535,28 @@ class Task extends DataClass implements Insertable<Task> {
     if (!nullToAbsent || dueTime != null) {
       map['due_time'] = Variable<String>(dueTime);
     }
-    map['important'] = Variable<bool>(important);
-    map['urgent'] = Variable<bool>(urgent);
+    if (!nullToAbsent || important != null) {
+      map['important'] = Variable<bool>(important);
+    }
+    if (!nullToAbsent || urgent != null) {
+      map['urgent'] = Variable<bool>(urgent);
+    }
     map['completed'] = Variable<bool>(completed);
     if (!nullToAbsent || completedAt != null) {
       map['completed_at'] = Variable<String>(completedAt);
     }
+    if (!nullToAbsent || reminderMinutes != null) {
+      map['reminder_minutes'] = Variable<int>(reminderMinutes);
+    }
     if (!nullToAbsent || projectId != null) {
       map['project_id'] = Variable<String>(projectId);
     }
+    if (!nullToAbsent || recurrence != null) {
+      map['recurrence'] = Variable<String>(recurrence);
+    }
     map['version'] = Variable<int>(version);
     map['remote_version'] = Variable<int>(remoteVersion);
+    map['local_revision'] = Variable<int>(localRevision);
     map['created_at'] = Variable<String>(createdAt);
     map['updated_at'] = Variable<String>(updatedAt);
     if (!nullToAbsent || deletedAt != null) {
@@ -489,17 +577,28 @@ class Task extends DataClass implements Insertable<Task> {
       dueTime: dueTime == null && nullToAbsent
           ? const Value.absent()
           : Value(dueTime),
-      important: Value(important),
-      urgent: Value(urgent),
+      important: important == null && nullToAbsent
+          ? const Value.absent()
+          : Value(important),
+      urgent: urgent == null && nullToAbsent
+          ? const Value.absent()
+          : Value(urgent),
       completed: Value(completed),
       completedAt: completedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(completedAt),
+      reminderMinutes: reminderMinutes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(reminderMinutes),
       projectId: projectId == null && nullToAbsent
           ? const Value.absent()
           : Value(projectId),
+      recurrence: recurrence == null && nullToAbsent
+          ? const Value.absent()
+          : Value(recurrence),
       version: Value(version),
       remoteVersion: Value(remoteVersion),
+      localRevision: Value(localRevision),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
       deletedAt: deletedAt == null && nullToAbsent
@@ -520,13 +619,16 @@ class Task extends DataClass implements Insertable<Task> {
       notes: serializer.fromJson<String?>(json['notes']),
       due: serializer.fromJson<String?>(json['due']),
       dueTime: serializer.fromJson<String?>(json['dueTime']),
-      important: serializer.fromJson<bool>(json['important']),
-      urgent: serializer.fromJson<bool>(json['urgent']),
+      important: serializer.fromJson<bool?>(json['important']),
+      urgent: serializer.fromJson<bool?>(json['urgent']),
       completed: serializer.fromJson<bool>(json['completed']),
       completedAt: serializer.fromJson<String?>(json['completedAt']),
+      reminderMinutes: serializer.fromJson<int?>(json['reminderMinutes']),
       projectId: serializer.fromJson<String?>(json['projectId']),
+      recurrence: serializer.fromJson<String?>(json['recurrence']),
       version: serializer.fromJson<int>(json['version']),
       remoteVersion: serializer.fromJson<int>(json['remoteVersion']),
+      localRevision: serializer.fromJson<int>(json['localRevision']),
       createdAt: serializer.fromJson<String>(json['createdAt']),
       updatedAt: serializer.fromJson<String>(json['updatedAt']),
       deletedAt: serializer.fromJson<String?>(json['deletedAt']),
@@ -542,13 +644,16 @@ class Task extends DataClass implements Insertable<Task> {
       'notes': serializer.toJson<String?>(notes),
       'due': serializer.toJson<String?>(due),
       'dueTime': serializer.toJson<String?>(dueTime),
-      'important': serializer.toJson<bool>(important),
-      'urgent': serializer.toJson<bool>(urgent),
+      'important': serializer.toJson<bool?>(important),
+      'urgent': serializer.toJson<bool?>(urgent),
       'completed': serializer.toJson<bool>(completed),
       'completedAt': serializer.toJson<String?>(completedAt),
+      'reminderMinutes': serializer.toJson<int?>(reminderMinutes),
       'projectId': serializer.toJson<String?>(projectId),
+      'recurrence': serializer.toJson<String?>(recurrence),
       'version': serializer.toJson<int>(version),
       'remoteVersion': serializer.toJson<int>(remoteVersion),
+      'localRevision': serializer.toJson<int>(localRevision),
       'createdAt': serializer.toJson<String>(createdAt),
       'updatedAt': serializer.toJson<String>(updatedAt),
       'deletedAt': serializer.toJson<String?>(deletedAt),
@@ -562,13 +667,16 @@ class Task extends DataClass implements Insertable<Task> {
     Value<String?> notes = const Value.absent(),
     Value<String?> due = const Value.absent(),
     Value<String?> dueTime = const Value.absent(),
-    bool? important,
-    bool? urgent,
+    Value<bool?> important = const Value.absent(),
+    Value<bool?> urgent = const Value.absent(),
     bool? completed,
     Value<String?> completedAt = const Value.absent(),
+    Value<int?> reminderMinutes = const Value.absent(),
     Value<String?> projectId = const Value.absent(),
+    Value<String?> recurrence = const Value.absent(),
     int? version,
     int? remoteVersion,
+    int? localRevision,
     String? createdAt,
     String? updatedAt,
     Value<String?> deletedAt = const Value.absent(),
@@ -579,13 +687,18 @@ class Task extends DataClass implements Insertable<Task> {
     notes: notes.present ? notes.value : this.notes,
     due: due.present ? due.value : this.due,
     dueTime: dueTime.present ? dueTime.value : this.dueTime,
-    important: important ?? this.important,
-    urgent: urgent ?? this.urgent,
+    important: important.present ? important.value : this.important,
+    urgent: urgent.present ? urgent.value : this.urgent,
     completed: completed ?? this.completed,
     completedAt: completedAt.present ? completedAt.value : this.completedAt,
+    reminderMinutes: reminderMinutes.present
+        ? reminderMinutes.value
+        : this.reminderMinutes,
     projectId: projectId.present ? projectId.value : this.projectId,
+    recurrence: recurrence.present ? recurrence.value : this.recurrence,
     version: version ?? this.version,
     remoteVersion: remoteVersion ?? this.remoteVersion,
+    localRevision: localRevision ?? this.localRevision,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
@@ -604,11 +717,20 @@ class Task extends DataClass implements Insertable<Task> {
       completedAt: data.completedAt.present
           ? data.completedAt.value
           : this.completedAt,
+      reminderMinutes: data.reminderMinutes.present
+          ? data.reminderMinutes.value
+          : this.reminderMinutes,
       projectId: data.projectId.present ? data.projectId.value : this.projectId,
+      recurrence: data.recurrence.present
+          ? data.recurrence.value
+          : this.recurrence,
       version: data.version.present ? data.version.value : this.version,
       remoteVersion: data.remoteVersion.present
           ? data.remoteVersion.value
           : this.remoteVersion,
+      localRevision: data.localRevision.present
+          ? data.localRevision.value
+          : this.localRevision,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
@@ -630,9 +752,12 @@ class Task extends DataClass implements Insertable<Task> {
           ..write('urgent: $urgent, ')
           ..write('completed: $completed, ')
           ..write('completedAt: $completedAt, ')
+          ..write('reminderMinutes: $reminderMinutes, ')
           ..write('projectId: $projectId, ')
+          ..write('recurrence: $recurrence, ')
           ..write('version: $version, ')
           ..write('remoteVersion: $remoteVersion, ')
+          ..write('localRevision: $localRevision, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deletedAt: $deletedAt, ')
@@ -652,9 +777,12 @@ class Task extends DataClass implements Insertable<Task> {
     urgent,
     completed,
     completedAt,
+    reminderMinutes,
     projectId,
+    recurrence,
     version,
     remoteVersion,
+    localRevision,
     createdAt,
     updatedAt,
     deletedAt,
@@ -673,9 +801,12 @@ class Task extends DataClass implements Insertable<Task> {
           other.urgent == this.urgent &&
           other.completed == this.completed &&
           other.completedAt == this.completedAt &&
+          other.reminderMinutes == this.reminderMinutes &&
           other.projectId == this.projectId &&
+          other.recurrence == this.recurrence &&
           other.version == this.version &&
           other.remoteVersion == this.remoteVersion &&
+          other.localRevision == this.localRevision &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
           other.deletedAt == this.deletedAt &&
@@ -688,13 +819,16 @@ class TasksCompanion extends UpdateCompanion<Task> {
   final Value<String?> notes;
   final Value<String?> due;
   final Value<String?> dueTime;
-  final Value<bool> important;
-  final Value<bool> urgent;
+  final Value<bool?> important;
+  final Value<bool?> urgent;
   final Value<bool> completed;
   final Value<String?> completedAt;
+  final Value<int?> reminderMinutes;
   final Value<String?> projectId;
+  final Value<String?> recurrence;
   final Value<int> version;
   final Value<int> remoteVersion;
+  final Value<int> localRevision;
   final Value<String> createdAt;
   final Value<String> updatedAt;
   final Value<String?> deletedAt;
@@ -710,9 +844,12 @@ class TasksCompanion extends UpdateCompanion<Task> {
     this.urgent = const Value.absent(),
     this.completed = const Value.absent(),
     this.completedAt = const Value.absent(),
+    this.reminderMinutes = const Value.absent(),
     this.projectId = const Value.absent(),
+    this.recurrence = const Value.absent(),
     this.version = const Value.absent(),
     this.remoteVersion = const Value.absent(),
+    this.localRevision = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.deletedAt = const Value.absent(),
@@ -729,9 +866,12 @@ class TasksCompanion extends UpdateCompanion<Task> {
     this.urgent = const Value.absent(),
     this.completed = const Value.absent(),
     this.completedAt = const Value.absent(),
+    this.reminderMinutes = const Value.absent(),
     this.projectId = const Value.absent(),
+    this.recurrence = const Value.absent(),
     this.version = const Value.absent(),
     this.remoteVersion = const Value.absent(),
+    this.localRevision = const Value.absent(),
     required String createdAt,
     required String updatedAt,
     this.deletedAt = const Value.absent(),
@@ -751,9 +891,12 @@ class TasksCompanion extends UpdateCompanion<Task> {
     Expression<bool>? urgent,
     Expression<bool>? completed,
     Expression<String>? completedAt,
+    Expression<int>? reminderMinutes,
     Expression<String>? projectId,
+    Expression<String>? recurrence,
     Expression<int>? version,
     Expression<int>? remoteVersion,
+    Expression<int>? localRevision,
     Expression<String>? createdAt,
     Expression<String>? updatedAt,
     Expression<String>? deletedAt,
@@ -770,9 +913,12 @@ class TasksCompanion extends UpdateCompanion<Task> {
       if (urgent != null) 'urgent': urgent,
       if (completed != null) 'completed': completed,
       if (completedAt != null) 'completed_at': completedAt,
+      if (reminderMinutes != null) 'reminder_minutes': reminderMinutes,
       if (projectId != null) 'project_id': projectId,
+      if (recurrence != null) 'recurrence': recurrence,
       if (version != null) 'version': version,
       if (remoteVersion != null) 'remote_version': remoteVersion,
+      if (localRevision != null) 'local_revision': localRevision,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (deletedAt != null) 'deleted_at': deletedAt,
@@ -787,13 +933,16 @@ class TasksCompanion extends UpdateCompanion<Task> {
     Value<String?>? notes,
     Value<String?>? due,
     Value<String?>? dueTime,
-    Value<bool>? important,
-    Value<bool>? urgent,
+    Value<bool?>? important,
+    Value<bool?>? urgent,
     Value<bool>? completed,
     Value<String?>? completedAt,
+    Value<int?>? reminderMinutes,
     Value<String?>? projectId,
+    Value<String?>? recurrence,
     Value<int>? version,
     Value<int>? remoteVersion,
+    Value<int>? localRevision,
     Value<String>? createdAt,
     Value<String>? updatedAt,
     Value<String?>? deletedAt,
@@ -810,9 +959,12 @@ class TasksCompanion extends UpdateCompanion<Task> {
       urgent: urgent ?? this.urgent,
       completed: completed ?? this.completed,
       completedAt: completedAt ?? this.completedAt,
+      reminderMinutes: reminderMinutes ?? this.reminderMinutes,
       projectId: projectId ?? this.projectId,
+      recurrence: recurrence ?? this.recurrence,
       version: version ?? this.version,
       remoteVersion: remoteVersion ?? this.remoteVersion,
+      localRevision: localRevision ?? this.localRevision,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: deletedAt ?? this.deletedAt,
@@ -851,14 +1003,23 @@ class TasksCompanion extends UpdateCompanion<Task> {
     if (completedAt.present) {
       map['completed_at'] = Variable<String>(completedAt.value);
     }
+    if (reminderMinutes.present) {
+      map['reminder_minutes'] = Variable<int>(reminderMinutes.value);
+    }
     if (projectId.present) {
       map['project_id'] = Variable<String>(projectId.value);
+    }
+    if (recurrence.present) {
+      map['recurrence'] = Variable<String>(recurrence.value);
     }
     if (version.present) {
       map['version'] = Variable<int>(version.value);
     }
     if (remoteVersion.present) {
       map['remote_version'] = Variable<int>(remoteVersion.value);
+    }
+    if (localRevision.present) {
+      map['local_revision'] = Variable<int>(localRevision.value);
     }
     if (createdAt.present) {
       map['created_at'] = Variable<String>(createdAt.value);
@@ -890,9 +1051,12 @@ class TasksCompanion extends UpdateCompanion<Task> {
           ..write('urgent: $urgent, ')
           ..write('completed: $completed, ')
           ..write('completedAt: $completedAt, ')
+          ..write('reminderMinutes: $reminderMinutes, ')
           ..write('projectId: $projectId, ')
+          ..write('recurrence: $recurrence, ')
           ..write('version: $version, ')
           ..write('remoteVersion: $remoteVersion, ')
+          ..write('localRevision: $localRevision, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deletedAt: $deletedAt, ')
@@ -982,6 +1146,17 @@ class $CalendarEventsTable extends CalendarEvents
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _reminderMinutesMeta = const VerificationMeta(
+    'reminderMinutes',
+  );
+  @override
+  late final GeneratedColumn<int> reminderMinutes = GeneratedColumn<int>(
+    'reminder_minutes',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _versionMeta = const VerificationMeta(
     'version',
   );
@@ -1000,6 +1175,18 @@ class $CalendarEventsTable extends CalendarEvents
   @override
   late final GeneratedColumn<int> remoteVersion = GeneratedColumn<int>(
     'remote_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _localRevisionMeta = const VerificationMeta(
+    'localRevision',
+  );
+  @override
+  late final GeneratedColumn<int> localRevision = GeneratedColumn<int>(
+    'local_revision',
     aliasedName,
     false,
     type: DriftSqlType.int,
@@ -1060,8 +1247,10 @@ class $CalendarEventsTable extends CalendarEvents
     startAt,
     endAt,
     allDay,
+    reminderMinutes,
     version,
     remoteVersion,
+    localRevision,
     createdAt,
     updatedAt,
     deletedAt,
@@ -1129,6 +1318,15 @@ class $CalendarEventsTable extends CalendarEvents
         allDay.isAcceptableOrUnknown(data['all_day']!, _allDayMeta),
       );
     }
+    if (data.containsKey('reminder_minutes')) {
+      context.handle(
+        _reminderMinutesMeta,
+        reminderMinutes.isAcceptableOrUnknown(
+          data['reminder_minutes']!,
+          _reminderMinutesMeta,
+        ),
+      );
+    }
     if (data.containsKey('version')) {
       context.handle(
         _versionMeta,
@@ -1141,6 +1339,15 @@ class $CalendarEventsTable extends CalendarEvents
         remoteVersion.isAcceptableOrUnknown(
           data['remote_version']!,
           _remoteVersionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('local_revision')) {
+      context.handle(
+        _localRevisionMeta,
+        localRevision.isAcceptableOrUnknown(
+          data['local_revision']!,
+          _localRevisionMeta,
         ),
       );
     }
@@ -1209,6 +1416,10 @@ class $CalendarEventsTable extends CalendarEvents
         DriftSqlType.bool,
         data['${effectivePrefix}all_day'],
       )!,
+      reminderMinutes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}reminder_minutes'],
+      ),
       version: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}version'],
@@ -1216,6 +1427,10 @@ class $CalendarEventsTable extends CalendarEvents
       remoteVersion: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}remote_version'],
+      )!,
+      localRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}local_revision'],
       )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
@@ -1250,8 +1465,10 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
   final String startAt;
   final String endAt;
   final bool allDay;
+  final int? reminderMinutes;
   final int version;
   final int remoteVersion;
+  final int localRevision;
   final String createdAt;
   final String updatedAt;
   final String? deletedAt;
@@ -1264,8 +1481,10 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
     required this.startAt,
     required this.endAt,
     required this.allDay,
+    this.reminderMinutes,
     required this.version,
     required this.remoteVersion,
+    required this.localRevision,
     required this.createdAt,
     required this.updatedAt,
     this.deletedAt,
@@ -1285,8 +1504,12 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
     map['start_at'] = Variable<String>(startAt);
     map['end_at'] = Variable<String>(endAt);
     map['all_day'] = Variable<bool>(allDay);
+    if (!nullToAbsent || reminderMinutes != null) {
+      map['reminder_minutes'] = Variable<int>(reminderMinutes);
+    }
     map['version'] = Variable<int>(version);
     map['remote_version'] = Variable<int>(remoteVersion);
+    map['local_revision'] = Variable<int>(localRevision);
     map['created_at'] = Variable<String>(createdAt);
     map['updated_at'] = Variable<String>(updatedAt);
     if (!nullToAbsent || deletedAt != null) {
@@ -1309,8 +1532,12 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
       startAt: Value(startAt),
       endAt: Value(endAt),
       allDay: Value(allDay),
+      reminderMinutes: reminderMinutes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(reminderMinutes),
       version: Value(version),
       remoteVersion: Value(remoteVersion),
+      localRevision: Value(localRevision),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
       deletedAt: deletedAt == null && nullToAbsent
@@ -1333,8 +1560,10 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
       startAt: serializer.fromJson<String>(json['startAt']),
       endAt: serializer.fromJson<String>(json['endAt']),
       allDay: serializer.fromJson<bool>(json['allDay']),
+      reminderMinutes: serializer.fromJson<int?>(json['reminderMinutes']),
       version: serializer.fromJson<int>(json['version']),
       remoteVersion: serializer.fromJson<int>(json['remoteVersion']),
+      localRevision: serializer.fromJson<int>(json['localRevision']),
       createdAt: serializer.fromJson<String>(json['createdAt']),
       updatedAt: serializer.fromJson<String>(json['updatedAt']),
       deletedAt: serializer.fromJson<String?>(json['deletedAt']),
@@ -1352,8 +1581,10 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
       'startAt': serializer.toJson<String>(startAt),
       'endAt': serializer.toJson<String>(endAt),
       'allDay': serializer.toJson<bool>(allDay),
+      'reminderMinutes': serializer.toJson<int?>(reminderMinutes),
       'version': serializer.toJson<int>(version),
       'remoteVersion': serializer.toJson<int>(remoteVersion),
+      'localRevision': serializer.toJson<int>(localRevision),
       'createdAt': serializer.toJson<String>(createdAt),
       'updatedAt': serializer.toJson<String>(updatedAt),
       'deletedAt': serializer.toJson<String?>(deletedAt),
@@ -1369,8 +1600,10 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
     String? startAt,
     String? endAt,
     bool? allDay,
+    Value<int?> reminderMinutes = const Value.absent(),
     int? version,
     int? remoteVersion,
+    int? localRevision,
     String? createdAt,
     String? updatedAt,
     Value<String?> deletedAt = const Value.absent(),
@@ -1383,8 +1616,12 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
     startAt: startAt ?? this.startAt,
     endAt: endAt ?? this.endAt,
     allDay: allDay ?? this.allDay,
+    reminderMinutes: reminderMinutes.present
+        ? reminderMinutes.value
+        : this.reminderMinutes,
     version: version ?? this.version,
     remoteVersion: remoteVersion ?? this.remoteVersion,
+    localRevision: localRevision ?? this.localRevision,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
@@ -1401,10 +1638,16 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
       startAt: data.startAt.present ? data.startAt.value : this.startAt,
       endAt: data.endAt.present ? data.endAt.value : this.endAt,
       allDay: data.allDay.present ? data.allDay.value : this.allDay,
+      reminderMinutes: data.reminderMinutes.present
+          ? data.reminderMinutes.value
+          : this.reminderMinutes,
       version: data.version.present ? data.version.value : this.version,
       remoteVersion: data.remoteVersion.present
           ? data.remoteVersion.value
           : this.remoteVersion,
+      localRevision: data.localRevision.present
+          ? data.localRevision.value
+          : this.localRevision,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
@@ -1424,8 +1667,10 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
           ..write('startAt: $startAt, ')
           ..write('endAt: $endAt, ')
           ..write('allDay: $allDay, ')
+          ..write('reminderMinutes: $reminderMinutes, ')
           ..write('version: $version, ')
           ..write('remoteVersion: $remoteVersion, ')
+          ..write('localRevision: $localRevision, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deletedAt: $deletedAt, ')
@@ -1443,8 +1688,10 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
     startAt,
     endAt,
     allDay,
+    reminderMinutes,
     version,
     remoteVersion,
+    localRevision,
     createdAt,
     updatedAt,
     deletedAt,
@@ -1461,8 +1708,10 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
           other.startAt == this.startAt &&
           other.endAt == this.endAt &&
           other.allDay == this.allDay &&
+          other.reminderMinutes == this.reminderMinutes &&
           other.version == this.version &&
           other.remoteVersion == this.remoteVersion &&
+          other.localRevision == this.localRevision &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
           other.deletedAt == this.deletedAt &&
@@ -1477,8 +1726,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
   final Value<String> startAt;
   final Value<String> endAt;
   final Value<bool> allDay;
+  final Value<int?> reminderMinutes;
   final Value<int> version;
   final Value<int> remoteVersion;
+  final Value<int> localRevision;
   final Value<String> createdAt;
   final Value<String> updatedAt;
   final Value<String?> deletedAt;
@@ -1492,8 +1743,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
     this.startAt = const Value.absent(),
     this.endAt = const Value.absent(),
     this.allDay = const Value.absent(),
+    this.reminderMinutes = const Value.absent(),
     this.version = const Value.absent(),
     this.remoteVersion = const Value.absent(),
+    this.localRevision = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.deletedAt = const Value.absent(),
@@ -1508,8 +1761,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
     required String startAt,
     required String endAt,
     this.allDay = const Value.absent(),
+    this.reminderMinutes = const Value.absent(),
     this.version = const Value.absent(),
     this.remoteVersion = const Value.absent(),
+    this.localRevision = const Value.absent(),
     required String createdAt,
     required String updatedAt,
     this.deletedAt = const Value.absent(),
@@ -1529,8 +1784,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
     Expression<String>? startAt,
     Expression<String>? endAt,
     Expression<bool>? allDay,
+    Expression<int>? reminderMinutes,
     Expression<int>? version,
     Expression<int>? remoteVersion,
+    Expression<int>? localRevision,
     Expression<String>? createdAt,
     Expression<String>? updatedAt,
     Expression<String>? deletedAt,
@@ -1545,8 +1802,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
       if (startAt != null) 'start_at': startAt,
       if (endAt != null) 'end_at': endAt,
       if (allDay != null) 'all_day': allDay,
+      if (reminderMinutes != null) 'reminder_minutes': reminderMinutes,
       if (version != null) 'version': version,
       if (remoteVersion != null) 'remote_version': remoteVersion,
+      if (localRevision != null) 'local_revision': localRevision,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (deletedAt != null) 'deleted_at': deletedAt,
@@ -1563,8 +1822,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
     Value<String>? startAt,
     Value<String>? endAt,
     Value<bool>? allDay,
+    Value<int?>? reminderMinutes,
     Value<int>? version,
     Value<int>? remoteVersion,
+    Value<int>? localRevision,
     Value<String>? createdAt,
     Value<String>? updatedAt,
     Value<String?>? deletedAt,
@@ -1579,8 +1840,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
       startAt: startAt ?? this.startAt,
       endAt: endAt ?? this.endAt,
       allDay: allDay ?? this.allDay,
+      reminderMinutes: reminderMinutes ?? this.reminderMinutes,
       version: version ?? this.version,
       remoteVersion: remoteVersion ?? this.remoteVersion,
+      localRevision: localRevision ?? this.localRevision,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: deletedAt ?? this.deletedAt,
@@ -1613,11 +1876,17 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
     if (allDay.present) {
       map['all_day'] = Variable<bool>(allDay.value);
     }
+    if (reminderMinutes.present) {
+      map['reminder_minutes'] = Variable<int>(reminderMinutes.value);
+    }
     if (version.present) {
       map['version'] = Variable<int>(version.value);
     }
     if (remoteVersion.present) {
       map['remote_version'] = Variable<int>(remoteVersion.value);
+    }
+    if (localRevision.present) {
+      map['local_revision'] = Variable<int>(localRevision.value);
     }
     if (createdAt.present) {
       map['created_at'] = Variable<String>(createdAt.value);
@@ -1647,8 +1916,10 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
           ..write('startAt: $startAt, ')
           ..write('endAt: $endAt, ')
           ..write('allDay: $allDay, ')
+          ..write('reminderMinutes: $reminderMinutes, ')
           ..write('version: $version, ')
           ..write('remoteVersion: $remoteVersion, ')
+          ..write('localRevision: $localRevision, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deletedAt: $deletedAt, ')
@@ -2944,6 +3215,767 @@ class SyncMetadataCompanion extends UpdateCompanion<SyncMetadataData> {
   }
 }
 
+class $OutboxMutationsTable extends OutboxMutations
+    with TableInfo<$OutboxMutationsTable, OutboxMutation> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $OutboxMutationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _mutationIdMeta = const VerificationMeta(
+    'mutationId',
+  );
+  @override
+  late final GeneratedColumn<String> mutationId = GeneratedColumn<String>(
+    'mutation_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _entityTypeMeta = const VerificationMeta(
+    'entityType',
+  );
+  @override
+  late final GeneratedColumn<String> entityType = GeneratedColumn<String>(
+    'entity_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _entityIdMeta = const VerificationMeta(
+    'entityId',
+  );
+  @override
+  late final GeneratedColumn<String> entityId = GeneratedColumn<String>(
+    'entity_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _operationMeta = const VerificationMeta(
+    'operation',
+  );
+  @override
+  late final GeneratedColumn<String> operation = GeneratedColumn<String>(
+    'operation',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _payloadJsonMeta = const VerificationMeta(
+    'payloadJson',
+  );
+  @override
+  late final GeneratedColumn<String> payloadJson = GeneratedColumn<String>(
+    'payload_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _baseVersionMeta = const VerificationMeta(
+    'baseVersion',
+  );
+  @override
+  late final GeneratedColumn<int> baseVersion = GeneratedColumn<int>(
+    'base_version',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _entityRevisionMeta = const VerificationMeta(
+    'entityRevision',
+  );
+  @override
+  late final GeneratedColumn<int> entityRevision = GeneratedColumn<int>(
+    'entity_revision',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('pending'),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _attemptCountMeta = const VerificationMeta(
+    'attemptCount',
+  );
+  @override
+  late final GeneratedColumn<int> attemptCount = GeneratedColumn<int>(
+    'attempt_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _lastErrorMeta = const VerificationMeta(
+    'lastError',
+  );
+  @override
+  late final GeneratedColumn<String> lastError = GeneratedColumn<String>(
+    'last_error',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    mutationId,
+    entityType,
+    entityId,
+    operation,
+    payloadJson,
+    baseVersion,
+    entityRevision,
+    status,
+    createdAt,
+    updatedAt,
+    attemptCount,
+    lastError,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'outbox_mutations';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<OutboxMutation> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('mutation_id')) {
+      context.handle(
+        _mutationIdMeta,
+        mutationId.isAcceptableOrUnknown(data['mutation_id']!, _mutationIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_mutationIdMeta);
+    }
+    if (data.containsKey('entity_type')) {
+      context.handle(
+        _entityTypeMeta,
+        entityType.isAcceptableOrUnknown(data['entity_type']!, _entityTypeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_entityTypeMeta);
+    }
+    if (data.containsKey('entity_id')) {
+      context.handle(
+        _entityIdMeta,
+        entityId.isAcceptableOrUnknown(data['entity_id']!, _entityIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_entityIdMeta);
+    }
+    if (data.containsKey('operation')) {
+      context.handle(
+        _operationMeta,
+        operation.isAcceptableOrUnknown(data['operation']!, _operationMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_operationMeta);
+    }
+    if (data.containsKey('payload_json')) {
+      context.handle(
+        _payloadJsonMeta,
+        payloadJson.isAcceptableOrUnknown(
+          data['payload_json']!,
+          _payloadJsonMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_payloadJsonMeta);
+    }
+    if (data.containsKey('base_version')) {
+      context.handle(
+        _baseVersionMeta,
+        baseVersion.isAcceptableOrUnknown(
+          data['base_version']!,
+          _baseVersionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('entity_revision')) {
+      context.handle(
+        _entityRevisionMeta,
+        entityRevision.isAcceptableOrUnknown(
+          data['entity_revision']!,
+          _entityRevisionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    if (data.containsKey('attempt_count')) {
+      context.handle(
+        _attemptCountMeta,
+        attemptCount.isAcceptableOrUnknown(
+          data['attempt_count']!,
+          _attemptCountMeta,
+        ),
+      );
+    }
+    if (data.containsKey('last_error')) {
+      context.handle(
+        _lastErrorMeta,
+        lastError.isAcceptableOrUnknown(data['last_error']!, _lastErrorMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  OutboxMutation map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return OutboxMutation(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      mutationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}mutation_id'],
+      )!,
+      entityType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}entity_type'],
+      )!,
+      entityId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}entity_id'],
+      )!,
+      operation: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}operation'],
+      )!,
+      payloadJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}payload_json'],
+      )!,
+      baseVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}base_version'],
+      ),
+      entityRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}entity_revision'],
+      )!,
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      attemptCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}attempt_count'],
+      )!,
+      lastError: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}last_error'],
+      ),
+    );
+  }
+
+  @override
+  $OutboxMutationsTable createAlias(String alias) {
+    return $OutboxMutationsTable(attachedDatabase, alias);
+  }
+}
+
+class OutboxMutation extends DataClass implements Insertable<OutboxMutation> {
+  final int id;
+  final String mutationId;
+  final String entityType;
+  final String entityId;
+  final String operation;
+  final String payloadJson;
+  final int? baseVersion;
+  final int entityRevision;
+  final String status;
+  final String createdAt;
+  final String updatedAt;
+  final int attemptCount;
+  final String? lastError;
+  const OutboxMutation({
+    required this.id,
+    required this.mutationId,
+    required this.entityType,
+    required this.entityId,
+    required this.operation,
+    required this.payloadJson,
+    this.baseVersion,
+    required this.entityRevision,
+    required this.status,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.attemptCount,
+    this.lastError,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['mutation_id'] = Variable<String>(mutationId);
+    map['entity_type'] = Variable<String>(entityType);
+    map['entity_id'] = Variable<String>(entityId);
+    map['operation'] = Variable<String>(operation);
+    map['payload_json'] = Variable<String>(payloadJson);
+    if (!nullToAbsent || baseVersion != null) {
+      map['base_version'] = Variable<int>(baseVersion);
+    }
+    map['entity_revision'] = Variable<int>(entityRevision);
+    map['status'] = Variable<String>(status);
+    map['created_at'] = Variable<String>(createdAt);
+    map['updated_at'] = Variable<String>(updatedAt);
+    map['attempt_count'] = Variable<int>(attemptCount);
+    if (!nullToAbsent || lastError != null) {
+      map['last_error'] = Variable<String>(lastError);
+    }
+    return map;
+  }
+
+  OutboxMutationsCompanion toCompanion(bool nullToAbsent) {
+    return OutboxMutationsCompanion(
+      id: Value(id),
+      mutationId: Value(mutationId),
+      entityType: Value(entityType),
+      entityId: Value(entityId),
+      operation: Value(operation),
+      payloadJson: Value(payloadJson),
+      baseVersion: baseVersion == null && nullToAbsent
+          ? const Value.absent()
+          : Value(baseVersion),
+      entityRevision: Value(entityRevision),
+      status: Value(status),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+      attemptCount: Value(attemptCount),
+      lastError: lastError == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastError),
+    );
+  }
+
+  factory OutboxMutation.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return OutboxMutation(
+      id: serializer.fromJson<int>(json['id']),
+      mutationId: serializer.fromJson<String>(json['mutationId']),
+      entityType: serializer.fromJson<String>(json['entityType']),
+      entityId: serializer.fromJson<String>(json['entityId']),
+      operation: serializer.fromJson<String>(json['operation']),
+      payloadJson: serializer.fromJson<String>(json['payloadJson']),
+      baseVersion: serializer.fromJson<int?>(json['baseVersion']),
+      entityRevision: serializer.fromJson<int>(json['entityRevision']),
+      status: serializer.fromJson<String>(json['status']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+      attemptCount: serializer.fromJson<int>(json['attemptCount']),
+      lastError: serializer.fromJson<String?>(json['lastError']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'mutationId': serializer.toJson<String>(mutationId),
+      'entityType': serializer.toJson<String>(entityType),
+      'entityId': serializer.toJson<String>(entityId),
+      'operation': serializer.toJson<String>(operation),
+      'payloadJson': serializer.toJson<String>(payloadJson),
+      'baseVersion': serializer.toJson<int?>(baseVersion),
+      'entityRevision': serializer.toJson<int>(entityRevision),
+      'status': serializer.toJson<String>(status),
+      'createdAt': serializer.toJson<String>(createdAt),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+      'attemptCount': serializer.toJson<int>(attemptCount),
+      'lastError': serializer.toJson<String?>(lastError),
+    };
+  }
+
+  OutboxMutation copyWith({
+    int? id,
+    String? mutationId,
+    String? entityType,
+    String? entityId,
+    String? operation,
+    String? payloadJson,
+    Value<int?> baseVersion = const Value.absent(),
+    int? entityRevision,
+    String? status,
+    String? createdAt,
+    String? updatedAt,
+    int? attemptCount,
+    Value<String?> lastError = const Value.absent(),
+  }) => OutboxMutation(
+    id: id ?? this.id,
+    mutationId: mutationId ?? this.mutationId,
+    entityType: entityType ?? this.entityType,
+    entityId: entityId ?? this.entityId,
+    operation: operation ?? this.operation,
+    payloadJson: payloadJson ?? this.payloadJson,
+    baseVersion: baseVersion.present ? baseVersion.value : this.baseVersion,
+    entityRevision: entityRevision ?? this.entityRevision,
+    status: status ?? this.status,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    attemptCount: attemptCount ?? this.attemptCount,
+    lastError: lastError.present ? lastError.value : this.lastError,
+  );
+  OutboxMutation copyWithCompanion(OutboxMutationsCompanion data) {
+    return OutboxMutation(
+      id: data.id.present ? data.id.value : this.id,
+      mutationId: data.mutationId.present
+          ? data.mutationId.value
+          : this.mutationId,
+      entityType: data.entityType.present
+          ? data.entityType.value
+          : this.entityType,
+      entityId: data.entityId.present ? data.entityId.value : this.entityId,
+      operation: data.operation.present ? data.operation.value : this.operation,
+      payloadJson: data.payloadJson.present
+          ? data.payloadJson.value
+          : this.payloadJson,
+      baseVersion: data.baseVersion.present
+          ? data.baseVersion.value
+          : this.baseVersion,
+      entityRevision: data.entityRevision.present
+          ? data.entityRevision.value
+          : this.entityRevision,
+      status: data.status.present ? data.status.value : this.status,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      attemptCount: data.attemptCount.present
+          ? data.attemptCount.value
+          : this.attemptCount,
+      lastError: data.lastError.present ? data.lastError.value : this.lastError,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OutboxMutation(')
+          ..write('id: $id, ')
+          ..write('mutationId: $mutationId, ')
+          ..write('entityType: $entityType, ')
+          ..write('entityId: $entityId, ')
+          ..write('operation: $operation, ')
+          ..write('payloadJson: $payloadJson, ')
+          ..write('baseVersion: $baseVersion, ')
+          ..write('entityRevision: $entityRevision, ')
+          ..write('status: $status, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('attemptCount: $attemptCount, ')
+          ..write('lastError: $lastError')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    mutationId,
+    entityType,
+    entityId,
+    operation,
+    payloadJson,
+    baseVersion,
+    entityRevision,
+    status,
+    createdAt,
+    updatedAt,
+    attemptCount,
+    lastError,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is OutboxMutation &&
+          other.id == this.id &&
+          other.mutationId == this.mutationId &&
+          other.entityType == this.entityType &&
+          other.entityId == this.entityId &&
+          other.operation == this.operation &&
+          other.payloadJson == this.payloadJson &&
+          other.baseVersion == this.baseVersion &&
+          other.entityRevision == this.entityRevision &&
+          other.status == this.status &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt &&
+          other.attemptCount == this.attemptCount &&
+          other.lastError == this.lastError);
+}
+
+class OutboxMutationsCompanion extends UpdateCompanion<OutboxMutation> {
+  final Value<int> id;
+  final Value<String> mutationId;
+  final Value<String> entityType;
+  final Value<String> entityId;
+  final Value<String> operation;
+  final Value<String> payloadJson;
+  final Value<int?> baseVersion;
+  final Value<int> entityRevision;
+  final Value<String> status;
+  final Value<String> createdAt;
+  final Value<String> updatedAt;
+  final Value<int> attemptCount;
+  final Value<String?> lastError;
+  const OutboxMutationsCompanion({
+    this.id = const Value.absent(),
+    this.mutationId = const Value.absent(),
+    this.entityType = const Value.absent(),
+    this.entityId = const Value.absent(),
+    this.operation = const Value.absent(),
+    this.payloadJson = const Value.absent(),
+    this.baseVersion = const Value.absent(),
+    this.entityRevision = const Value.absent(),
+    this.status = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.attemptCount = const Value.absent(),
+    this.lastError = const Value.absent(),
+  });
+  OutboxMutationsCompanion.insert({
+    this.id = const Value.absent(),
+    required String mutationId,
+    required String entityType,
+    required String entityId,
+    required String operation,
+    required String payloadJson,
+    this.baseVersion = const Value.absent(),
+    this.entityRevision = const Value.absent(),
+    this.status = const Value.absent(),
+    required String createdAt,
+    required String updatedAt,
+    this.attemptCount = const Value.absent(),
+    this.lastError = const Value.absent(),
+  }) : mutationId = Value(mutationId),
+       entityType = Value(entityType),
+       entityId = Value(entityId),
+       operation = Value(operation),
+       payloadJson = Value(payloadJson),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<OutboxMutation> custom({
+    Expression<int>? id,
+    Expression<String>? mutationId,
+    Expression<String>? entityType,
+    Expression<String>? entityId,
+    Expression<String>? operation,
+    Expression<String>? payloadJson,
+    Expression<int>? baseVersion,
+    Expression<int>? entityRevision,
+    Expression<String>? status,
+    Expression<String>? createdAt,
+    Expression<String>? updatedAt,
+    Expression<int>? attemptCount,
+    Expression<String>? lastError,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (mutationId != null) 'mutation_id': mutationId,
+      if (entityType != null) 'entity_type': entityType,
+      if (entityId != null) 'entity_id': entityId,
+      if (operation != null) 'operation': operation,
+      if (payloadJson != null) 'payload_json': payloadJson,
+      if (baseVersion != null) 'base_version': baseVersion,
+      if (entityRevision != null) 'entity_revision': entityRevision,
+      if (status != null) 'status': status,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (attemptCount != null) 'attempt_count': attemptCount,
+      if (lastError != null) 'last_error': lastError,
+    });
+  }
+
+  OutboxMutationsCompanion copyWith({
+    Value<int>? id,
+    Value<String>? mutationId,
+    Value<String>? entityType,
+    Value<String>? entityId,
+    Value<String>? operation,
+    Value<String>? payloadJson,
+    Value<int?>? baseVersion,
+    Value<int>? entityRevision,
+    Value<String>? status,
+    Value<String>? createdAt,
+    Value<String>? updatedAt,
+    Value<int>? attemptCount,
+    Value<String?>? lastError,
+  }) {
+    return OutboxMutationsCompanion(
+      id: id ?? this.id,
+      mutationId: mutationId ?? this.mutationId,
+      entityType: entityType ?? this.entityType,
+      entityId: entityId ?? this.entityId,
+      operation: operation ?? this.operation,
+      payloadJson: payloadJson ?? this.payloadJson,
+      baseVersion: baseVersion ?? this.baseVersion,
+      entityRevision: entityRevision ?? this.entityRevision,
+      status: status ?? this.status,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      attemptCount: attemptCount ?? this.attemptCount,
+      lastError: lastError ?? this.lastError,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (mutationId.present) {
+      map['mutation_id'] = Variable<String>(mutationId.value);
+    }
+    if (entityType.present) {
+      map['entity_type'] = Variable<String>(entityType.value);
+    }
+    if (entityId.present) {
+      map['entity_id'] = Variable<String>(entityId.value);
+    }
+    if (operation.present) {
+      map['operation'] = Variable<String>(operation.value);
+    }
+    if (payloadJson.present) {
+      map['payload_json'] = Variable<String>(payloadJson.value);
+    }
+    if (baseVersion.present) {
+      map['base_version'] = Variable<int>(baseVersion.value);
+    }
+    if (entityRevision.present) {
+      map['entity_revision'] = Variable<int>(entityRevision.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (attemptCount.present) {
+      map['attempt_count'] = Variable<int>(attemptCount.value);
+    }
+    if (lastError.present) {
+      map['last_error'] = Variable<String>(lastError.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OutboxMutationsCompanion(')
+          ..write('id: $id, ')
+          ..write('mutationId: $mutationId, ')
+          ..write('entityType: $entityType, ')
+          ..write('entityId: $entityId, ')
+          ..write('operation: $operation, ')
+          ..write('payloadJson: $payloadJson, ')
+          ..write('baseVersion: $baseVersion, ')
+          ..write('entityRevision: $entityRevision, ')
+          ..write('status: $status, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('attemptCount: $attemptCount, ')
+          ..write('lastError: $lastError')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2952,6 +3984,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $MessagesTable messages = $MessagesTable(this);
   late final $ConversationsTable conversations = $ConversationsTable(this);
   late final $SyncMetadataTable syncMetadata = $SyncMetadataTable(this);
+  late final $OutboxMutationsTable outboxMutations = $OutboxMutationsTable(
+    this,
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2962,6 +3997,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     messages,
     conversations,
     syncMetadata,
+    outboxMutations,
   ];
 }
 
@@ -2972,13 +4008,16 @@ typedef $$TasksTableCreateCompanionBuilder =
       Value<String?> notes,
       Value<String?> due,
       Value<String?> dueTime,
-      Value<bool> important,
-      Value<bool> urgent,
+      Value<bool?> important,
+      Value<bool?> urgent,
       Value<bool> completed,
       Value<String?> completedAt,
+      Value<int?> reminderMinutes,
       Value<String?> projectId,
+      Value<String?> recurrence,
       Value<int> version,
       Value<int> remoteVersion,
+      Value<int> localRevision,
       required String createdAt,
       required String updatedAt,
       Value<String?> deletedAt,
@@ -2992,13 +4031,16 @@ typedef $$TasksTableUpdateCompanionBuilder =
       Value<String?> notes,
       Value<String?> due,
       Value<String?> dueTime,
-      Value<bool> important,
-      Value<bool> urgent,
+      Value<bool?> important,
+      Value<bool?> urgent,
       Value<bool> completed,
       Value<String?> completedAt,
+      Value<int?> reminderMinutes,
       Value<String?> projectId,
+      Value<String?> recurrence,
       Value<int> version,
       Value<int> remoteVersion,
+      Value<int> localRevision,
       Value<String> createdAt,
       Value<String> updatedAt,
       Value<String?> deletedAt,
@@ -3059,8 +4101,18 @@ class $$TasksTableFilterComposer extends Composer<_$AppDatabase, $TasksTable> {
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<int> get reminderMinutes => $composableBuilder(
+    column: $table.reminderMinutes,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get projectId => $composableBuilder(
     column: $table.projectId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get recurrence => $composableBuilder(
+    column: $table.recurrence,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3071,6 +4123,11 @@ class $$TasksTableFilterComposer extends Composer<_$AppDatabase, $TasksTable> {
 
   ColumnFilters<int> get remoteVersion => $composableBuilder(
     column: $table.remoteVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get localRevision => $composableBuilder(
+    column: $table.localRevision,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3149,8 +4206,18 @@ class $$TasksTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get reminderMinutes => $composableBuilder(
+    column: $table.reminderMinutes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get projectId => $composableBuilder(
     column: $table.projectId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get recurrence => $composableBuilder(
+    column: $table.recurrence,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -3161,6 +4228,11 @@ class $$TasksTableOrderingComposer
 
   ColumnOrderings<int> get remoteVersion => $composableBuilder(
     column: $table.remoteVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get localRevision => $composableBuilder(
+    column: $table.localRevision,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -3223,14 +4295,29 @@ class $$TasksTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<int> get reminderMinutes => $composableBuilder(
+    column: $table.reminderMinutes,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get projectId =>
       $composableBuilder(column: $table.projectId, builder: (column) => column);
+
+  GeneratedColumn<String> get recurrence => $composableBuilder(
+    column: $table.recurrence,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<int> get version =>
       $composableBuilder(column: $table.version, builder: (column) => column);
 
   GeneratedColumn<int> get remoteVersion => $composableBuilder(
     column: $table.remoteVersion,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get localRevision => $composableBuilder(
+    column: $table.localRevision,
     builder: (column) => column,
   );
 
@@ -3282,13 +4369,16 @@ class $$TasksTableTableManager
                 Value<String?> notes = const Value.absent(),
                 Value<String?> due = const Value.absent(),
                 Value<String?> dueTime = const Value.absent(),
-                Value<bool> important = const Value.absent(),
-                Value<bool> urgent = const Value.absent(),
+                Value<bool?> important = const Value.absent(),
+                Value<bool?> urgent = const Value.absent(),
                 Value<bool> completed = const Value.absent(),
                 Value<String?> completedAt = const Value.absent(),
+                Value<int?> reminderMinutes = const Value.absent(),
                 Value<String?> projectId = const Value.absent(),
+                Value<String?> recurrence = const Value.absent(),
                 Value<int> version = const Value.absent(),
                 Value<int> remoteVersion = const Value.absent(),
+                Value<int> localRevision = const Value.absent(),
                 Value<String> createdAt = const Value.absent(),
                 Value<String> updatedAt = const Value.absent(),
                 Value<String?> deletedAt = const Value.absent(),
@@ -3304,9 +4394,12 @@ class $$TasksTableTableManager
                 urgent: urgent,
                 completed: completed,
                 completedAt: completedAt,
+                reminderMinutes: reminderMinutes,
                 projectId: projectId,
+                recurrence: recurrence,
                 version: version,
                 remoteVersion: remoteVersion,
+                localRevision: localRevision,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 deletedAt: deletedAt,
@@ -3320,13 +4413,16 @@ class $$TasksTableTableManager
                 Value<String?> notes = const Value.absent(),
                 Value<String?> due = const Value.absent(),
                 Value<String?> dueTime = const Value.absent(),
-                Value<bool> important = const Value.absent(),
-                Value<bool> urgent = const Value.absent(),
+                Value<bool?> important = const Value.absent(),
+                Value<bool?> urgent = const Value.absent(),
                 Value<bool> completed = const Value.absent(),
                 Value<String?> completedAt = const Value.absent(),
+                Value<int?> reminderMinutes = const Value.absent(),
                 Value<String?> projectId = const Value.absent(),
+                Value<String?> recurrence = const Value.absent(),
                 Value<int> version = const Value.absent(),
                 Value<int> remoteVersion = const Value.absent(),
+                Value<int> localRevision = const Value.absent(),
                 required String createdAt,
                 required String updatedAt,
                 Value<String?> deletedAt = const Value.absent(),
@@ -3342,9 +4438,12 @@ class $$TasksTableTableManager
                 urgent: urgent,
                 completed: completed,
                 completedAt: completedAt,
+                reminderMinutes: reminderMinutes,
                 projectId: projectId,
+                recurrence: recurrence,
                 version: version,
                 remoteVersion: remoteVersion,
+                localRevision: localRevision,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 deletedAt: deletedAt,
@@ -3382,8 +4481,10 @@ typedef $$CalendarEventsTableCreateCompanionBuilder =
       required String startAt,
       required String endAt,
       Value<bool> allDay,
+      Value<int?> reminderMinutes,
       Value<int> version,
       Value<int> remoteVersion,
+      Value<int> localRevision,
       required String createdAt,
       required String updatedAt,
       Value<String?> deletedAt,
@@ -3399,8 +4500,10 @@ typedef $$CalendarEventsTableUpdateCompanionBuilder =
       Value<String> startAt,
       Value<String> endAt,
       Value<bool> allDay,
+      Value<int?> reminderMinutes,
       Value<int> version,
       Value<int> remoteVersion,
+      Value<int> localRevision,
       Value<String> createdAt,
       Value<String> updatedAt,
       Value<String?> deletedAt,
@@ -3452,6 +4555,11 @@ class $$CalendarEventsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<int> get reminderMinutes => $composableBuilder(
+    column: $table.reminderMinutes,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<int> get version => $composableBuilder(
     column: $table.version,
     builder: (column) => ColumnFilters(column),
@@ -3459,6 +4567,11 @@ class $$CalendarEventsTableFilterComposer
 
   ColumnFilters<int> get remoteVersion => $composableBuilder(
     column: $table.remoteVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get localRevision => $composableBuilder(
+    column: $table.localRevision,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3527,6 +4640,11 @@ class $$CalendarEventsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get reminderMinutes => $composableBuilder(
+    column: $table.reminderMinutes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get version => $composableBuilder(
     column: $table.version,
     builder: (column) => ColumnOrderings(column),
@@ -3534,6 +4652,11 @@ class $$CalendarEventsTableOrderingComposer
 
   ColumnOrderings<int> get remoteVersion => $composableBuilder(
     column: $table.remoteVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get localRevision => $composableBuilder(
+    column: $table.localRevision,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -3590,11 +4713,21 @@ class $$CalendarEventsTableAnnotationComposer
   GeneratedColumn<bool> get allDay =>
       $composableBuilder(column: $table.allDay, builder: (column) => column);
 
+  GeneratedColumn<int> get reminderMinutes => $composableBuilder(
+    column: $table.reminderMinutes,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<int> get version =>
       $composableBuilder(column: $table.version, builder: (column) => column);
 
   GeneratedColumn<int> get remoteVersion => $composableBuilder(
     column: $table.remoteVersion,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get localRevision => $composableBuilder(
+    column: $table.localRevision,
     builder: (column) => column,
   );
 
@@ -3653,8 +4786,10 @@ class $$CalendarEventsTableTableManager
                 Value<String> startAt = const Value.absent(),
                 Value<String> endAt = const Value.absent(),
                 Value<bool> allDay = const Value.absent(),
+                Value<int?> reminderMinutes = const Value.absent(),
                 Value<int> version = const Value.absent(),
                 Value<int> remoteVersion = const Value.absent(),
+                Value<int> localRevision = const Value.absent(),
                 Value<String> createdAt = const Value.absent(),
                 Value<String> updatedAt = const Value.absent(),
                 Value<String?> deletedAt = const Value.absent(),
@@ -3668,8 +4803,10 @@ class $$CalendarEventsTableTableManager
                 startAt: startAt,
                 endAt: endAt,
                 allDay: allDay,
+                reminderMinutes: reminderMinutes,
                 version: version,
                 remoteVersion: remoteVersion,
+                localRevision: localRevision,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 deletedAt: deletedAt,
@@ -3685,8 +4822,10 @@ class $$CalendarEventsTableTableManager
                 required String startAt,
                 required String endAt,
                 Value<bool> allDay = const Value.absent(),
+                Value<int?> reminderMinutes = const Value.absent(),
                 Value<int> version = const Value.absent(),
                 Value<int> remoteVersion = const Value.absent(),
+                Value<int> localRevision = const Value.absent(),
                 required String createdAt,
                 required String updatedAt,
                 Value<String?> deletedAt = const Value.absent(),
@@ -3700,8 +4839,10 @@ class $$CalendarEventsTableTableManager
                 startAt: startAt,
                 endAt: endAt,
                 allDay: allDay,
+                reminderMinutes: reminderMinutes,
                 version: version,
                 remoteVersion: remoteVersion,
+                localRevision: localRevision,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 deletedAt: deletedAt,
@@ -4411,6 +5552,370 @@ typedef $$SyncMetadataTableProcessedTableManager =
       SyncMetadataData,
       PrefetchHooks Function()
     >;
+typedef $$OutboxMutationsTableCreateCompanionBuilder =
+    OutboxMutationsCompanion Function({
+      Value<int> id,
+      required String mutationId,
+      required String entityType,
+      required String entityId,
+      required String operation,
+      required String payloadJson,
+      Value<int?> baseVersion,
+      Value<int> entityRevision,
+      Value<String> status,
+      required String createdAt,
+      required String updatedAt,
+      Value<int> attemptCount,
+      Value<String?> lastError,
+    });
+typedef $$OutboxMutationsTableUpdateCompanionBuilder =
+    OutboxMutationsCompanion Function({
+      Value<int> id,
+      Value<String> mutationId,
+      Value<String> entityType,
+      Value<String> entityId,
+      Value<String> operation,
+      Value<String> payloadJson,
+      Value<int?> baseVersion,
+      Value<int> entityRevision,
+      Value<String> status,
+      Value<String> createdAt,
+      Value<String> updatedAt,
+      Value<int> attemptCount,
+      Value<String?> lastError,
+    });
+
+class $$OutboxMutationsTableFilterComposer
+    extends Composer<_$AppDatabase, $OutboxMutationsTable> {
+  $$OutboxMutationsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get mutationId => $composableBuilder(
+    column: $table.mutationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get entityType => $composableBuilder(
+    column: $table.entityType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get entityId => $composableBuilder(
+    column: $table.entityId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get operation => $composableBuilder(
+    column: $table.operation,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get payloadJson => $composableBuilder(
+    column: $table.payloadJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get baseVersion => $composableBuilder(
+    column: $table.baseVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get entityRevision => $composableBuilder(
+    column: $table.entityRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get attemptCount => $composableBuilder(
+    column: $table.attemptCount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get lastError => $composableBuilder(
+    column: $table.lastError,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$OutboxMutationsTableOrderingComposer
+    extends Composer<_$AppDatabase, $OutboxMutationsTable> {
+  $$OutboxMutationsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get mutationId => $composableBuilder(
+    column: $table.mutationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get entityType => $composableBuilder(
+    column: $table.entityType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get entityId => $composableBuilder(
+    column: $table.entityId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get operation => $composableBuilder(
+    column: $table.operation,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get payloadJson => $composableBuilder(
+    column: $table.payloadJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get baseVersion => $composableBuilder(
+    column: $table.baseVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get entityRevision => $composableBuilder(
+    column: $table.entityRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get attemptCount => $composableBuilder(
+    column: $table.attemptCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get lastError => $composableBuilder(
+    column: $table.lastError,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$OutboxMutationsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $OutboxMutationsTable> {
+  $$OutboxMutationsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get mutationId => $composableBuilder(
+    column: $table.mutationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get entityType => $composableBuilder(
+    column: $table.entityType,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get entityId =>
+      $composableBuilder(column: $table.entityId, builder: (column) => column);
+
+  GeneratedColumn<String> get operation =>
+      $composableBuilder(column: $table.operation, builder: (column) => column);
+
+  GeneratedColumn<String> get payloadJson => $composableBuilder(
+    column: $table.payloadJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get baseVersion => $composableBuilder(
+    column: $table.baseVersion,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get entityRevision => $composableBuilder(
+    column: $table.entityRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<int> get attemptCount => $composableBuilder(
+    column: $table.attemptCount,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get lastError =>
+      $composableBuilder(column: $table.lastError, builder: (column) => column);
+}
+
+class $$OutboxMutationsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $OutboxMutationsTable,
+          OutboxMutation,
+          $$OutboxMutationsTableFilterComposer,
+          $$OutboxMutationsTableOrderingComposer,
+          $$OutboxMutationsTableAnnotationComposer,
+          $$OutboxMutationsTableCreateCompanionBuilder,
+          $$OutboxMutationsTableUpdateCompanionBuilder,
+          (
+            OutboxMutation,
+            BaseReferences<
+              _$AppDatabase,
+              $OutboxMutationsTable,
+              OutboxMutation
+            >,
+          ),
+          OutboxMutation,
+          PrefetchHooks Function()
+        > {
+  $$OutboxMutationsTableTableManager(
+    _$AppDatabase db,
+    $OutboxMutationsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$OutboxMutationsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$OutboxMutationsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$OutboxMutationsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> mutationId = const Value.absent(),
+                Value<String> entityType = const Value.absent(),
+                Value<String> entityId = const Value.absent(),
+                Value<String> operation = const Value.absent(),
+                Value<String> payloadJson = const Value.absent(),
+                Value<int?> baseVersion = const Value.absent(),
+                Value<int> entityRevision = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
+                Value<String> updatedAt = const Value.absent(),
+                Value<int> attemptCount = const Value.absent(),
+                Value<String?> lastError = const Value.absent(),
+              }) => OutboxMutationsCompanion(
+                id: id,
+                mutationId: mutationId,
+                entityType: entityType,
+                entityId: entityId,
+                operation: operation,
+                payloadJson: payloadJson,
+                baseVersion: baseVersion,
+                entityRevision: entityRevision,
+                status: status,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                attemptCount: attemptCount,
+                lastError: lastError,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String mutationId,
+                required String entityType,
+                required String entityId,
+                required String operation,
+                required String payloadJson,
+                Value<int?> baseVersion = const Value.absent(),
+                Value<int> entityRevision = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                required String createdAt,
+                required String updatedAt,
+                Value<int> attemptCount = const Value.absent(),
+                Value<String?> lastError = const Value.absent(),
+              }) => OutboxMutationsCompanion.insert(
+                id: id,
+                mutationId: mutationId,
+                entityType: entityType,
+                entityId: entityId,
+                operation: operation,
+                payloadJson: payloadJson,
+                baseVersion: baseVersion,
+                entityRevision: entityRevision,
+                status: status,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                attemptCount: attemptCount,
+                lastError: lastError,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$OutboxMutationsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $OutboxMutationsTable,
+      OutboxMutation,
+      $$OutboxMutationsTableFilterComposer,
+      $$OutboxMutationsTableOrderingComposer,
+      $$OutboxMutationsTableAnnotationComposer,
+      $$OutboxMutationsTableCreateCompanionBuilder,
+      $$OutboxMutationsTableUpdateCompanionBuilder,
+      (
+        OutboxMutation,
+        BaseReferences<_$AppDatabase, $OutboxMutationsTable, OutboxMutation>,
+      ),
+      OutboxMutation,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -4425,4 +5930,6 @@ class $AppDatabaseManager {
       $$ConversationsTableTableManager(_db, _db.conversations);
   $$SyncMetadataTableTableManager get syncMetadata =>
       $$SyncMetadataTableTableManager(_db, _db.syncMetadata);
+  $$OutboxMutationsTableTableManager get outboxMutations =>
+      $$OutboxMutationsTableTableManager(_db, _db.outboxMutations);
 }

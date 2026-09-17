@@ -1,0 +1,8 @@
+{
+  "mutationId": "mobile-mutation-42",
+  "baseVersion": 2,
+  "entityVersion": 3,
+  "entityType": "task",
+  "entityId": "0198f3b5-2d5a-7abc-8f14-7e46e6d7f001",
+  "tombstone": true
+}

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "type": "agent.ack",
+  "event_id": "evt_002",
+  "seq": 4,
+  "status": "gap",
+  "expected_seq": 3
+}
