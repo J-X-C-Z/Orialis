@@ -203,6 +203,7 @@ struct TaskInput {
     important: Option<bool>,
     urgent: Option<bool>,
     completed: Option<bool>,
+    completed_at: Option<String>,
     due: Option<String>,
     due_time: Option<String>,
     reminder_minutes: Option<i64>,
@@ -223,6 +224,8 @@ struct TaskPatch {
     urgent: Option<PatchValue<bool>>,
     #[serde(default, deserialize_with = "deserialize_patch")]
     completed: Option<PatchValue<bool>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    completed_at: Option<PatchValue<String>>,
     #[serde(default, deserialize_with = "deserialize_patch")]
     due: Option<PatchValue<String>>,
     #[serde(default, deserialize_with = "deserialize_patch")]
@@ -1922,7 +1925,13 @@ async fn create_task(
     let id = input.id.unwrap_or_else(new_id);
     let timestamp = now();
     let completed = input.completed.unwrap_or(false);
-    let completed_at = completed.then(|| timestamp.clone());
+    let completed_at = if completed {
+        let completed_at = input.completed_at.unwrap_or_else(|| timestamp.clone());
+        validate_timestamp("completedAt", &completed_at)?;
+        Some(completed_at)
+    } else {
+        None
+    };
     let mut tx = state.pool.begin().await?;
     let result = sqlx::query(
         "INSERT INTO tasks
@@ -1987,11 +1996,21 @@ async fn update_task(
     let important = resolve_required(input.important, current.important, "important")?;
     let urgent = resolve_required(input.urgent, current.urgent, "urgent")?;
     let completed = resolve_required(input.completed, current.completed, "completed")?;
-    let completed_at = match (current.completed, completed) {
-        (false, true) => Some(now()),
-        (true, false) => None,
-        (true, true) => current.completed_at,
-        (false, false) => None,
+    let completed_at = if completed {
+        match input.completed_at {
+            Some(PatchValue::Value(value)) => {
+                validate_timestamp("completedAt", &value)?;
+                Some(value)
+            }
+            Some(PatchValue::Null(())) => Some(now()),
+            None => match (current.completed, completed) {
+                (false, true) => Some(now()),
+                (true, true) => current.completed_at,
+                _ => None,
+            },
+        }
+    } else {
+        None
     };
     let due = resolve_nullable(input.due, current.due);
     let due_time = resolve_nullable(input.due_time, current.due_time);
@@ -2434,6 +2453,12 @@ fn validate_date(field: &str, value: Option<&str>) -> Result<(), AppError> {
             .map_err(|_| AppError::BadRequest(format!("{field} must be YYYY-MM-DD")))?;
     }
     Ok(())
+}
+
+fn validate_timestamp(field: &str, value: &str) -> Result<(), AppError> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|_| ())
+        .map_err(|_| AppError::BadRequest(format!("{field} must be a valid RFC 3339 timestamp")))
 }
 
 fn validate_time(field: &str, value: Option<&str>) -> Result<(), AppError> {

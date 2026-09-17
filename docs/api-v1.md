@@ -218,6 +218,7 @@ Authorization: Session <accessToken>
   "important": true,
   "urgent": false,
   "completed": false,
+  "completedAt": null,
   "due": "2026-09-20",
   "dueTime": "23:59",
   "reminderMinutes": 30,
@@ -239,6 +240,7 @@ Authorization: Session <accessToken>
 | `important` | boolean | 重要性，创建时默认为 `false` |
 | `urgent` | boolean | 紧急性，创建时默认为 `false` |
 | `completed` | boolean | 是否完成，创建时默认为 `false` |
+| `completedAt` | string/null | 完成时间；完成任务时为 RFC 3339 时间，未完成时为 `null` |
 | `due` | string/null | 截止日期 |
 | `dueTime` | string/null | 截止时间；没有 `due` 时必须为空 |
 | `reminderMinutes` | integer/null | 提前提醒分钟数 |
@@ -299,6 +301,8 @@ Content-Type: application/json
   "notes": "完成实验报告并上传",
   "important": true,
   "urgent": false,
+  "completed": false,
+  "completedAt": null,
   "due": "2026-09-20",
   "dueTime": "23:59",
   "reminderMinutes": 30,
@@ -309,7 +313,9 @@ Content-Type: application/json
 
 成功返回 `201 Created` 和任务对象。`title` 为空或只有空白字符返回
 `400 Bad Request`；只提供 `dueTime` 而没有 `due` 也返回 `400`。`due` 使用
-`YYYY-MM-DD`，`dueTime` 使用本地时间 `HH:MM`，格式不合法返回 `400`。
+`YYYY-MM-DD`，`dueTime` 使用本地时间 `HH:MM`，`completedAt` 使用 RFC 3339，
+格式不合法返回 `400`。`completed` 为 `true` 时可以携带客户端记录的
+`completedAt`；未完成任务的 `completedAt` 始终返回 `null`。
 
 ### 4.4 更新任务
 
@@ -324,6 +330,7 @@ Content-Type: application/json
 ```json
 {
   "completed": true,
+  "completedAt": "2026-09-17T10:30:00Z",
   "baseVersion": 1
 }
 ```
