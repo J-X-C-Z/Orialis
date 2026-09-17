@@ -67,16 +67,18 @@ and the full Hermes validation was rerun successfully.
   startup produced no unhandled Flutter errors after the realtime readiness
   fix.
 - Production cross-end Chat/attachment/reconnect evidence remains unclaimed:
-  the device could not resolve the configured production host during this run.
+  production health is reachable from the host and the selected device, but
+  authenticated delivery, attachment upload, and realtime reconnect are still
+  not exercised.
 
 ## Deferred and explicit risks
 
 - Conversation CRUD is intentionally not emitted into the unified
   `sync_events` stream; the API-refresh path is the accepted A03 behavior.
 - Production cross-end validation remains a release-stage follow-up; the
-  physical-device UI smoke gate is complete, but authenticated Chat delivery,
-  attachment upload, and realtime reconnect against production were not
-  exercised because the configured host was not resolvable on the device.
+  physical-device UI smoke gate and unauthenticated production reachability are
+  complete, but authenticated Chat delivery, attachment upload, and realtime
+  reconnect against production remain unproven.
 - Visual redesign remains deferred. UI is functional placeholder quality by
   design; no final design-system migration is part of A03.
 

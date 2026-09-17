@@ -72,10 +72,11 @@ Riverpod providers. The A03-08 boundary claim holds.
 
 1. **Production cross-end evidence.** The ADB UI smoke gate passed on a Xiaomi
    Mi 10 / Android 13 (API 33), including the preserved-data database upgrade.
-   The interactive authenticated send/reply, attachment upload, and realtime
-   reconnect against production remain unproven because the device could not
-   resolve `orialis.jxcz.top` during this run. This is a release-stage
-   follow-up, not an A03 acceptance blocker.
+   Production reachability is now verified from the host with
+   `GET /api/v1/health` returning 200 and from the selected device with DNS and
+   ICMP success. Interactive authenticated send/reply, attachment upload, and
+   realtime reconnect remain unproven. This is a release-stage follow-up, not
+   an A03 acceptance blocker.
 2. **Conversation sync stream.** Conversation CRUD remains on the Conversation
    API refresh path by explicit A03 scope decision; Message realtime and the
    existing sync contracts remain unchanged. A future unified Conversation
