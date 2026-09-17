@@ -452,6 +452,7 @@ struct ConversationInput {
 #[serde(rename_all = "camelCase")]
 struct ConversationPatch {
     title: String,
+    base_version: i64,
 }
 
 #[derive(Deserialize)]
@@ -1070,7 +1071,7 @@ async fn notify_sync_change(state: &AppState, user_id: &str, entity: Option<&str
     .fetch_one(&state.pool)
     .await;
     match cursor {
-        Ok(cursor) if cursor > 0 => state.mobile.notify(
+        Ok(cursor) if cursor > 0 || entity == Some("message") => state.mobile.notify(
             user_id,
             agent_gateway::protocol::mobile_sync_change_hint(cursor, entity),
         ),
@@ -1233,8 +1234,9 @@ async fn create_conversation(
     }
     let id = input.id.unwrap_or_else(new_id);
     let timestamp = now();
-    sqlx::query(
-        "INSERT INTO conversations (id,user_id,title,created_at,updated_at) VALUES (?,?,?,?,?)",
+    let result = sqlx::query(
+        "INSERT INTO conversations (id,user_id,title,created_at,updated_at) VALUES (?,?,?,?,?)
+         ON CONFLICT(user_id,id) DO NOTHING",
     )
     .bind(&id)
     .bind(&user_id)
@@ -1245,6 +1247,9 @@ async fn create_conversation(
     .await?;
     let item = sqlx::query_as::<_, Conversation>("SELECT id,title,is_default,CASE WHEN is_default=1 THEN 'main' ELSE 'normal' END AS conversation_type,created_at,updated_at,version FROM conversations WHERE user_id=? AND id=?")
         .bind(&user_id).bind(&id).fetch_one(&state.pool).await?;
+    if result.rows_affected() == 0 {
+        return Ok((StatusCode::OK, Json(item)));
+    }
     Ok((StatusCode::CREATED, Json(item)))
 }
 
@@ -1259,10 +1264,20 @@ async fn rename_conversation(
     if title.is_empty() {
         return Err(AppError::BadRequest("title is required".into()));
     }
-    let result = sqlx::query("UPDATE conversations SET title=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND deleted_at IS NULL")
-        .bind(title).bind(now()).bind(&user_id).bind(&id).execute(&state.pool).await?;
+    let current = sqlx::query_as::<_, Conversation>("SELECT id,title,is_default,CASE WHEN is_default=1 THEN 'main' ELSE 'normal' END AS conversation_type,created_at,updated_at,version FROM conversations WHERE user_id=? AND id=? AND deleted_at IS NULL")
+        .bind(&user_id).bind(&id).fetch_optional(&state.pool).await?.ok_or(AppError::NotFound)?;
+    if current.version != input.base_version {
+        // A retry after a lost response is already applied when the desired
+        // title is present at exactly the next server version.
+        if current.version == input.base_version + 1 && current.title == title {
+            return Ok(Json(current));
+        }
+        return Err(AppError::Conflict("conversation version changed".into()));
+    }
+    let result = sqlx::query("UPDATE conversations SET title=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=? AND deleted_at IS NULL")
+        .bind(title).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&state.pool).await?;
     if result.rows_affected() != 1 {
-        return Err(AppError::NotFound);
+        return Err(AppError::Conflict("conversation version changed".into()));
     }
     let item = sqlx::query_as::<_, Conversation>("SELECT id,title,is_default,CASE WHEN is_default=1 THEN 'main' ELSE 'normal' END AS conversation_type,created_at,updated_at,version FROM conversations WHERE user_id=? AND id=?")
         .bind(user_id).bind(id).fetch_one(&state.pool).await?;
@@ -1273,6 +1288,7 @@ async fn delete_conversation(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Json(input): Json<VersionedDeleteInput>,
 ) -> Result<StatusCode, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     ensure_default_conversation(&state.pool, &user_id).await?;
@@ -1281,10 +1297,21 @@ async fn delete_conversation(
             "default conversation cannot be deleted".into(),
         ));
     }
-    let result = sqlx::query("UPDATE conversations SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND deleted_at IS NULL")
-        .bind(now()).bind(now()).bind(&user_id).bind(&id).execute(&state.pool).await?;
+    let current_version = sqlx::query_scalar::<_, i64>(
+        "SELECT version FROM conversations WHERE user_id=? AND id=? AND deleted_at IS NULL",
+    )
+    .bind(&user_id)
+    .bind(&id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    if current_version != input.base_version {
+        return Err(AppError::Conflict("conversation version changed".into()));
+    }
+    let result = sqlx::query("UPDATE conversations SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=? AND deleted_at IS NULL")
+        .bind(now()).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&state.pool).await?;
     if result.rows_affected() != 1 {
-        return Err(AppError::NotFound);
+        return Err(AppError::Conflict("conversation version changed".into()));
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1540,6 +1567,10 @@ async fn create_message(
         &user_id,
         agent_gateway::protocol::mobile_message(serde_json::to_value(&message).unwrap()),
     );
+    // Messages are stored outside the entity snapshot, so emit the same
+    // monotonic sync hint used by the other persisted resources. The hint is
+    // advisory; clients still fetch the message list as the source of truth.
+    notify_sync_change(&state, &user_id, Some("message")).await;
     let dispatch_state = state.clone();
     let dispatch_user_id = user_id.clone();
     let dispatch_conversation_id = conversation_id.clone();

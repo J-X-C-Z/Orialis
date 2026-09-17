@@ -118,6 +118,7 @@ class Conversations extends Table {
   TextColumn get updatedAt => text()();
   IntColumn get version => integer().withDefault(const Constant(1))();
   IntColumn get remoteVersion => integer().withDefault(const Constant(0))();
+  IntColumn get localRevision => integer().withDefault(const Constant(0))();
   TextColumn get deletedAt => text().nullable()();
   TextColumn get syncStatus => text().withDefault(const Constant('synced'))();
 
@@ -165,7 +166,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase({QueryExecutor? executor}) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -238,6 +239,9 @@ class AppDatabase extends _$AppDatabase {
         await m.createTable(projects);
         await m.createTable(projectMilestones);
         await m.createIndex(idxProjectMilestonesProjectPosition);
+      }
+      if (from < 8) {
+        await m.addColumn(conversations, conversations.localRevision);
       }
     },
   );

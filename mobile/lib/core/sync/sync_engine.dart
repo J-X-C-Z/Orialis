@@ -81,7 +81,7 @@ class SyncEngine {
       final mutationId = mutationIdFor(
         'conversation',
         conversation.id,
-        conversation.version,
+        conversation.localRevision,
         conversation.syncStatus,
       );
       Map<String, dynamic> result;
@@ -93,7 +93,11 @@ class SyncEngine {
         );
       } else if (conversation.syncStatus == 'pendingDelete') {
         try {
-          await api.deleteConversation(conversation.id, mutationId);
+          await api.deleteConversation(
+            conversation.id,
+            conversation.remoteVersion,
+            mutationId,
+          );
         } on DioException catch (error) {
           if (error.response?.statusCode != 404) rethrow;
         }
@@ -102,17 +106,30 @@ class SyncEngine {
         result = await api.renameConversation(
           conversation.id,
           conversation.title,
+          conversation.remoteVersion,
           mutationId,
         );
       }
       final remoteVersion =
-          (result['version'] as num?)?.toInt() ?? conversation.remoteVersion;
+          (result['version'] as num?)?.toInt() ??
+          conversation.remoteVersion +
+              (conversation.syncStatus == 'pendingDelete' ? 1 : 0);
+      final current = await (database.select(
+        database.conversations,
+      )..where((row) => row.id.equals(conversation.id))).getSingle();
       await (database.update(
         database.conversations,
       )..where((row) => row.id.equals(conversation.id))).write(
         ConversationsCompanion(
+          version: Value(remoteVersion),
           remoteVersion: Value(remoteVersion),
-          syncStatus: const Value('synced'),
+          syncStatus: Value(
+            current.localRevision == conversation.localRevision
+                ? 'synced'
+                : current.syncStatus == 'pendingCreate'
+                ? 'pendingUpdate'
+                : current.syncStatus,
+          ),
         ),
       );
     }
@@ -207,11 +224,25 @@ class SyncEngine {
         }
       } on DioException catch (error) {
         if (error.response?.statusCode == 409) {
-          await outbox.markConflict(mutation.mutationId, error);
+          final applied = await api.findAppliedMutation(mutation.mutationId);
+          if (applied == null) {
+            await outbox.markConflict(mutation.mutationId, error);
+            rethrow;
+          }
+          result = <String, dynamic>{
+            'version':
+                applied['entityVersion'] ??
+                applied['entity_version'] ??
+                task.remoteVersion,
+          };
         } else {
-          await outbox.markFailed(mutation.mutationId, error);
+          if (_isRetryableTransportError(error)) {
+            await outbox.markRetryable(mutation.mutationId, error);
+          } else {
+            await outbox.markFailed(mutation.mutationId, error);
+          }
+          rethrow;
         }
-        rethrow;
       }
       final remoteVersion =
           (result['version'] as num?)?.toInt() ?? task.remoteVersion;
@@ -221,6 +252,11 @@ class SyncEngine {
         entityRevision: mutation.entityRevision,
         remoteVersion: remoteVersion,
         serverVersion: (result['version'] as num?)?.toInt(),
+      );
+      await outbox.rebasePendingForEntity(
+        entityType: 'task',
+        entityId: task.id,
+        baseVersion: remoteVersion,
       );
     }
   }
@@ -874,6 +910,12 @@ class SyncEngine {
     String messageId,
   ) => remote.any((value) => value['id'] == messageId);
 
+  bool _isRetryableTransportError(DioException error) {
+    if (error.response == null) return true;
+    final status = error.response?.statusCode ?? 0;
+    return status >= 500 || status == 408 || status == 429;
+  }
+
   /// Remote state must never replace a local mutation that is still queued.
   /// The version check also makes retries and duplicated event pages harmless.
   bool shouldApplyRemote(
@@ -933,11 +975,25 @@ class SyncEngine {
         }
       } on DioException catch (error) {
         if (error.response?.statusCode == 409) {
-          await outbox.markConflict(mutation.mutationId, error);
+          final applied = await api.findAppliedMutation(mutation.mutationId);
+          if (applied == null) {
+            await outbox.markConflict(mutation.mutationId, error);
+            rethrow;
+          }
+          result = <String, dynamic>{
+            'version':
+                applied['entityVersion'] ??
+                applied['entity_version'] ??
+                event.remoteVersion,
+          };
         } else {
-          await outbox.markFailed(mutation.mutationId, error);
+          if (_isRetryableTransportError(error)) {
+            await outbox.markRetryable(mutation.mutationId, error);
+          } else {
+            await outbox.markFailed(mutation.mutationId, error);
+          }
+          rethrow;
         }
-        rethrow;
       }
       final remoteVersion =
           (result['version'] as num?)?.toInt() ?? event.remoteVersion;
@@ -947,6 +1003,11 @@ class SyncEngine {
         entityRevision: mutation.entityRevision,
         remoteVersion: remoteVersion,
         serverVersion: (result['version'] as num?)?.toInt(),
+      );
+      await outbox.rebasePendingForEntity(
+        entityType: 'schedule',
+        entityId: event.id,
+        baseVersion: remoteVersion,
       );
     }
   }

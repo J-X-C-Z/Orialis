@@ -22,6 +22,12 @@ class SyncCoordinator {
   bool _started = false;
   bool _disposed = false;
 
+  static bool isSyncTriggerType(String type) =>
+      type == 'hello.ack' ||
+      type == 'sync.change_hint' ||
+      type == 'change_hint' ||
+      type == 'change.hint';
+
   Future<void> start() async {
     if (_started || _disposed) return;
     _started = true;
@@ -59,9 +65,7 @@ class SyncCoordinator {
       unawaited(chatRepository.applyRemoteMessage(event.payload));
       return;
     }
-    if (event.type == 'hello.ack' ||
-        event.type == 'change_hint' ||
-        event.type == 'change.hint') {
+    if (isSyncTriggerType(event.type)) {
       unawaited(requestSync());
     }
   }

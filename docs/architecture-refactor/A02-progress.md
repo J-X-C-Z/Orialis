@@ -1,8 +1,8 @@
 # A02 — Architecture Integration Progress
 Status: `CODE COMPLETE WITH EXPLICIT ENVIRONMENT GATES`
 
-This document records the completed, verified A02 slices without claiming the
-remaining broad refactors are finished.
+This document records the completed, verified A02 slices without claiming a
+physical-device test that the current environment cannot provide.
 
 ## Completed slices
 
@@ -23,9 +23,10 @@ remaining broad refactors are finished.
 - A02.6 Server boundary: configuration/security loading and health/metadata/
   capability handlers are extracted from `main.rs` without changing routes or
   response compatibility.
-- A02.8 Reliability matrix: lifecycle resume, opaque multi-page message pull,
-  501-entry outbox recovery, continuous local edits, and Hermes runtime
-  discovery are covered by automated tests.
+- A02.8 Reliability closeout: canonical `sync.change_hint`, retryable outbox
+  transport failures, response-lost mutation lookup, post-ack base-version
+  rebase, and Conversation `version`/`localRevision`/`baseVersion` semantics
+  are implemented and regression-tested.
 - A02.7 Release gates: contract validation, public Hermes-independent tests,
   conditional full Hermes discovery when its runtime is installed, Rust
   formatting/tests, and visible-but-non-blocking clippy until the existing
@@ -33,13 +34,18 @@ remaining broad refactors are finished.
 
 ## Verification snapshot
 
-- Mobile: `flutter analyze --no-fatal-infos`; 56 tests passed.
+- Mobile: `flutter analyze --no-fatal-infos`; 59 tests passed; Drift schema v8
+  adds Conversation `localRevision`.
 - Rust: `cargo fmt --all -- --check`; workspace tests passed (8 core, 42
   server, 25 protocol integration).
 - Contracts: 14 fixtures validated against 12 schemas; boundary fixture tests
   10 passed; public Hermes-independent tests 37 passed under the configured
   Hermes runtime.
-- Git: `orialis-refactor` is clean and pushed after the A02 closeout commit.
+- Cross-end smoke: `scripts/chat_bridge_smoke.py` passed against an isolated
+  Rust server using the Hermes runtime, covering Mobile WebSocket + HTTP →
+  Server → Agent Gateway → Hermes-compatible peer → persisted reply → Mobile
+  `message` and `sync.change_hint` frames.
+- Git: pending the final closeout commit and push.
 
 ## Explicitly remaining
 
@@ -47,9 +53,9 @@ remaining broad refactors are finished.
   verification found no ADB device, so the UI send/reply roundtrip is not
   claimed. The production WSS handshake and real Hermes reconnect have passed;
   the synthetic smoke device is not the selected production delivery target.
-- A true end-to-end injected network timeout and attachment-upload failure
-  test still require a controllable gateway/device fixture; the client-side
-  recovery and outbox behavior are covered without overstating that proof.
+- A true injected network timeout and attachment-upload failure still require
+  a controllable physical-device or gateway fixture; client-side recovery and
+  outbox behavior are covered without overstating that proof.
 - Clippy is reported in CI with `continue-on-error` because the pre-existing
   server/test modules still emit warnings. It should become a hard gate after
   that baseline is cleaned.

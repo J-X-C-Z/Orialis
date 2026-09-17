@@ -110,7 +110,7 @@ void main() {
       'rule': 'FREQ=WEEKLY;BYDAY=MO',
       'until': '2026-12-31',
     });
-    expect(database.schemaVersion, 7);
+    expect(database.schemaVersion, 8);
   });
 
   test(
@@ -132,7 +132,7 @@ void main() {
       final schedule = await (database.select(
         database.calendarEvents,
       )..where((row) => row.id.equals('legacy-schedule'))).getSingle();
-      expect(database.schemaVersion, 7);
+      expect(database.schemaVersion, 8);
       expect(task.important, isNull);
       expect(task.urgent, true);
       expect(task.recurrence, contains('FREQ=DAILY'));
@@ -311,6 +311,32 @@ void main() {
     expect(payload['deletedAt'], isNull);
   });
 
+  test('transport retry returns the same mutation to pending', () async {
+    final database = AppDatabase(executor: NativeDatabase.memory());
+    addTearDown(database.close);
+    final store = OutboxStore(database);
+    final created = await store.enqueue(
+      entityType: 'task',
+      entityId: 'task-timeout',
+      operation: 'update',
+      payloadJson: '{"title":"一次发送"}',
+      baseVersion: 7,
+      entityRevision: 3,
+      mutationId: 'timeout-mutation',
+    );
+    await store.markInFlight(created.mutationId);
+    await store.markRetryable(created.mutationId, StateError('response lost'));
+
+    final retry = await (database.select(
+      database.outboxMutations,
+    )..where((row) => row.mutationId.equals(created.mutationId))).getSingle();
+    expect(retry.mutationId, 'timeout-mutation');
+    expect(retry.payloadJson, '{"title":"一次发送"}');
+    expect(retry.baseVersion, 7);
+    expect(retry.status, OutboxStatus.pending);
+    expect(retry.attemptCount, 1);
+  });
+
   test(
     'acknowledged mutation recovery closes the entity update crash window',
     () async {
@@ -386,6 +412,51 @@ void main() {
 
       expect(await database.select(database.tasks).get(), isEmpty);
       expect(await database.select(database.outboxMutations).get(), isEmpty);
+    },
+  );
+
+  test(
+    'server acknowledgement rebases only the next unsent mutation',
+    () async {
+      final database = AppDatabase(executor: NativeDatabase.memory());
+      addTearDown(database.close);
+      final store = OutboxStore(database);
+      final sent = await store.enqueue(
+        entityType: 'task',
+        entityId: 'task-rebase',
+        operation: 'update',
+        payloadJson: '{"title":"先发出的编辑"}',
+        baseVersion: 3,
+        entityRevision: 1,
+        mutationId: 'sent-mutation',
+      );
+      await store.markInFlight(sent.mutationId);
+      final next = await store.enqueue(
+        entityType: 'task',
+        entityId: 'task-rebase',
+        operation: 'update',
+        payloadJson: '{"title":"后发出的编辑"}',
+        baseVersion: 3,
+        entityRevision: 2,
+        mutationId: 'next-mutation',
+      );
+
+      await store.rebasePendingForEntity(
+        entityType: 'task',
+        entityId: 'task-rebase',
+        baseVersion: 4,
+      );
+
+      final restored = await (database.select(
+        database.outboxMutations,
+      )..where((row) => row.mutationId.equals(next.mutationId))).getSingle();
+      final sentAgain = await (database.select(
+        database.outboxMutations,
+      )..where((row) => row.mutationId.equals(sent.mutationId))).getSingle();
+      expect(restored.baseVersion, 4);
+      expect(restored.mutationId, 'next-mutation');
+      expect(sentAgain.baseVersion, 3);
+      expect(sentAgain.status, OutboxStatus.inFlight);
     },
   );
 }

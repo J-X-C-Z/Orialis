@@ -12,9 +12,11 @@
 7. 手机消息在服务端提交后进入 Agent 投递队列；Hermes 暂时离线或响应超时不会丢失，
    服务端按退避策略重试，收到回复并持久化后才移除队列记录。
 
-实体 `version`、用户同步 `cursor`、Agent 事件 `seq` 和旧 Fangcun 文档
-`revision` 是四个不同概念。V1 不做 CRDT 或自动合并；服务器返回 409 时，本地
-修改不能被静默覆盖。
+实体 `version`、本地 `localRevision`、写请求 `baseVersion`、用户同步 `cursor`、
+Agent 事件 `seq` 和旧 Fangcun 文档 `revision` 是六个不同概念。Task、Schedule
+和 Conversation 都遵循同一语义：`version` 只表示服务器实体版本，
+`localRevision` 只表示本地编辑代次，`baseVersion` 只表示本次写入所依据的服务端
+版本。V1 不做 CRDT 或自动合并；服务器返回 409 时，本地修改不能被静默覆盖。
 
 ## 当前 HTTP 增量事件
 
@@ -86,7 +88,8 @@ Authorization: Session <accessToken>
 - 附件上传对同一用户、会话和 Key 保留第一次上传响应；消息创建还支持用相同
   消息 `id` 重试并返回已存在消息。
 - HTTP `cursor` 只表示服务器事件流位置；实体 `version` 只用于 PATCH 的
-  `baseVersion`；两者都不能代替 Agent `message_id` 或未来事件 `event_id`。
+  `baseVersion`；Conversation rename/delete 也必须携带它。两者都不能代替 Agent
+  `message_id` 或未来事件 `event_id`。
 - 同一用户的 cursor 严格递增但不承诺实体事件连续相邻。客户端应处理同一实体
   的多个 upsert，并用 `entityVersion` 丢弃较旧事件。
 - Agent Gateway 当前用 `message_id` 去重，回复用 `reply_to` 指向原消息。结构化

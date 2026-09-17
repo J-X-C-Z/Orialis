@@ -37,6 +37,7 @@ class ChatRepository {
       type: const Value('normal'),
       createdAt: timestamp,
       updatedAt: timestamp,
+      localRevision: const Value(1),
       syncStatus: const Value('pendingCreate'),
     );
     await database.into(database.conversations).insert(conversation);
@@ -52,7 +53,7 @@ class ChatRepository {
       ConversationsCompanion(
         title: Value(title.trim()),
         updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
-        version: Value(conversation.version + 1),
+        localRevision: Value(conversation.localRevision + 1),
         syncStatus: Value(_statusAfterLocalEdit(conversation.syncStatus)),
       ),
     );
@@ -68,7 +69,7 @@ class ChatRepository {
       ConversationsCompanion(
         deletedAt: Value(DateTime.now().toUtc().toIso8601String()),
         updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
-        version: Value(conversation.version + 1),
+        localRevision: Value(conversation.localRevision + 1),
         syncStatus: const Value('pendingDelete'),
       ),
     );

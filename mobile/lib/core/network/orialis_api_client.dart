@@ -171,19 +171,25 @@ class OrialisApiClient {
   Future<Map<String, dynamic>> renameConversation(
     String id,
     String title,
+    int baseVersion,
     String mutationId,
   ) async {
     final response = await _dio.patch<Map<String, dynamic>>(
       '/api/v1/conversations/${Uri.encodeComponent(id)}',
-      data: {'title': title},
+      data: {'title': title, 'baseVersion': baseVersion},
       options: Options(headers: {'Idempotency-Key': mutationId}),
     );
     return response.data ?? <String, dynamic>{};
   }
 
-  Future<void> deleteConversation(String id, String mutationId) async {
+  Future<void> deleteConversation(
+    String id,
+    int baseVersion,
+    String mutationId,
+  ) async {
     await _dio.delete<void>(
       '/api/v1/conversations/${Uri.encodeComponent(id)}',
+      data: {'baseVersion': baseVersion},
       options: Options(headers: {'Idempotency-Key': mutationId}),
     );
   }
@@ -343,6 +349,29 @@ class OrialisApiClient {
       queryParameters: {'after': after},
     );
     return response.data ?? <String, dynamic>{};
+  }
+
+  /// Finds a server mutation when its HTTP response was lost. Start at zero
+  /// because the local sync cursor may already have advanced past the event.
+  Future<Map<String, dynamic>?> findAppliedMutation(String mutationId) async {
+    var cursor = 0;
+    while (true) {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/api/v1/sync/events',
+        queryParameters: {'after': cursor, 'limit': 500},
+      );
+      final events = response.data?['events'] as List<dynamic>? ?? const [];
+      for (final raw in events) {
+        final event = Map<String, dynamic>.from(raw as Map);
+        if (event['mutationId'] == mutationId ||
+            event['mutation_id'] == mutationId) {
+          return event;
+        }
+      }
+      final next = (response.data?['nextCursor'] as num?)?.toInt() ?? cursor;
+      if (events.isEmpty || next <= cursor) return null;
+      cursor = next;
+    }
   }
 
   Future<Map<String, dynamic>> syncSnapshot() async {

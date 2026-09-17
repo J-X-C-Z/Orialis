@@ -91,6 +91,20 @@ Cookie: orialis_session=<accessToken>
 | GET/POST/PATCH/DELETE | `/api/v1/conversations[/{id}]` | 是 | 已实现 | 会话列表、创建、重命名和删除 |
 | GET/POST | `/api/v1/conversations/{conversation_id}/messages` | 是 | 已实现 | 查询或保存聊天消息；GET 支持稳定游标分页 |
 | POST | `/api/v1/conversations/{conversation_id}/attachments` | Session/Agent Bearer | 已实现 | 上传聊天附件，单个文件最大 20 MB |
+
+Conversation 的 `version` 是服务端乐观并发版本。重命名请求体为：
+
+```json
+{
+  "title": "项目讨论",
+  "baseVersion": 3
+}
+```
+
+删除请求也必须携带同一个 `baseVersion`。成功写入后服务端版本递增；客户端的
+本地连续编辑使用独立的 `localRevision`，不能把本地编辑次数写入 `version`。
+网络响应丢失时可以复用原 `Idempotency-Key`；服务端已完成同一重命名时返回当前
+对象，避免把一次重试误判成新的编辑。
 | GET | `/api/v1/attachments/{id}/download` | Session/Agent Bearer/旧下载令牌 | 已实现 | 下载或预览聊天附件 |
 | GET | `/api/v1/sync/events` | 是 | 已实现 | 按游标读取增量事件 |
 | GET | `/api/v1/sync/snapshot` | 是 | 已实现 | 获取可替换本地数据的完整快照 |

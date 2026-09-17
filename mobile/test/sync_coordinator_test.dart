@@ -10,6 +10,12 @@ import 'package:orialis_mobile/core/sync/sync_engine.dart';
 import 'package:orialis_mobile/features/chat/data/chat_repository.dart';
 
 void main() {
+  test('recognizes the canonical sync.change_hint frame type', () {
+    expect(SyncCoordinator.isSyncTriggerType('sync.change_hint'), isTrue);
+    expect(SyncCoordinator.isSyncTriggerType('change_hint'), isTrue);
+    expect(SyncCoordinator.isSyncTriggerType('unrelated'), isFalse);
+  });
+
   test('coalesces sync requests while one run is in flight', () async {
     final gate = Completer<SyncState>();
     var runs = 0;

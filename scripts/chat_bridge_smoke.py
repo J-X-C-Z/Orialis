@@ -33,6 +33,21 @@ def post_message(http_url: str, device_id: str, conversation_id: str, message_id
         return json.loads(response.read().decode())
 
 
+def create_conversation(http_url: str, device_id: str, conversation_id: str) -> dict:
+    body = json.dumps({"id": conversation_id, "title": "Orialis bridge smoke"}).encode()
+    request = urllib.request.Request(
+        f"{http_url.rstrip('/')}/api/v1/conversations",
+        data=body,
+        headers={
+            "X-Orialis-Device-Id": device_id,
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode())
+
+
 def list_messages(http_url: str, device_id: str, conversation_id: str) -> list[dict]:
     request = urllib.request.Request(
         f"{http_url.rstrip('/')}/api/v1/conversations/{conversation_id}/messages",
@@ -54,6 +69,9 @@ async def run(args: argparse.Namespace) -> None:
             additional_headers={"X-Orialis-Device-Id": device_id},
         ) as mobile,
     ):
+        await asyncio.to_thread(
+            create_conversation, args.http_url, device_id, conversation_id
+        )
         await agent.send(json.dumps({
             "version": 1,
             "type": "hello",
@@ -118,6 +136,7 @@ async def run(args: argparse.Namespace) -> None:
             except asyncio.TimeoutError:
                 break
         assert "message" in realtime_types, realtime_types
+        assert "sync.change_hint" in realtime_types, realtime_types
 
     print(json.dumps({"ok": True, "assistant": "ORIALIS_BRIDGE_OK"}))
 

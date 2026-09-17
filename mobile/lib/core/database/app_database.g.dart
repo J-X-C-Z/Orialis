@@ -2530,6 +2530,18 @@ class $ConversationsTable extends Conversations
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _localRevisionMeta = const VerificationMeta(
+    'localRevision',
+  );
+  @override
+  late final GeneratedColumn<int> localRevision = GeneratedColumn<int>(
+    'local_revision',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   static const VerificationMeta _deletedAtMeta = const VerificationMeta(
     'deletedAt',
   );
@@ -2562,6 +2574,7 @@ class $ConversationsTable extends Conversations
     updatedAt,
     version,
     remoteVersion,
+    localRevision,
     deletedAt,
     syncStatus,
   ];
@@ -2627,6 +2640,15 @@ class $ConversationsTable extends Conversations
         ),
       );
     }
+    if (data.containsKey('local_revision')) {
+      context.handle(
+        _localRevisionMeta,
+        localRevision.isAcceptableOrUnknown(
+          data['local_revision']!,
+          _localRevisionMeta,
+        ),
+      );
+    }
     if (data.containsKey('deleted_at')) {
       context.handle(
         _deletedAtMeta,
@@ -2676,6 +2698,10 @@ class $ConversationsTable extends Conversations
         DriftSqlType.int,
         data['${effectivePrefix}remote_version'],
       )!,
+      localRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}local_revision'],
+      )!,
       deletedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}deleted_at'],
@@ -2701,6 +2727,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   final String updatedAt;
   final int version;
   final int remoteVersion;
+  final int localRevision;
   final String? deletedAt;
   final String syncStatus;
   const Conversation({
@@ -2711,6 +2738,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     required this.updatedAt,
     required this.version,
     required this.remoteVersion,
+    required this.localRevision,
     this.deletedAt,
     required this.syncStatus,
   });
@@ -2724,6 +2752,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     map['updated_at'] = Variable<String>(updatedAt);
     map['version'] = Variable<int>(version);
     map['remote_version'] = Variable<int>(remoteVersion);
+    map['local_revision'] = Variable<int>(localRevision);
     if (!nullToAbsent || deletedAt != null) {
       map['deleted_at'] = Variable<String>(deletedAt);
     }
@@ -2740,6 +2769,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       updatedAt: Value(updatedAt),
       version: Value(version),
       remoteVersion: Value(remoteVersion),
+      localRevision: Value(localRevision),
       deletedAt: deletedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(deletedAt),
@@ -2760,6 +2790,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       updatedAt: serializer.fromJson<String>(json['updatedAt']),
       version: serializer.fromJson<int>(json['version']),
       remoteVersion: serializer.fromJson<int>(json['remoteVersion']),
+      localRevision: serializer.fromJson<int>(json['localRevision']),
       deletedAt: serializer.fromJson<String?>(json['deletedAt']),
       syncStatus: serializer.fromJson<String>(json['syncStatus']),
     );
@@ -2775,6 +2806,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       'updatedAt': serializer.toJson<String>(updatedAt),
       'version': serializer.toJson<int>(version),
       'remoteVersion': serializer.toJson<int>(remoteVersion),
+      'localRevision': serializer.toJson<int>(localRevision),
       'deletedAt': serializer.toJson<String?>(deletedAt),
       'syncStatus': serializer.toJson<String>(syncStatus),
     };
@@ -2788,6 +2820,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     String? updatedAt,
     int? version,
     int? remoteVersion,
+    int? localRevision,
     Value<String?> deletedAt = const Value.absent(),
     String? syncStatus,
   }) => Conversation(
@@ -2798,6 +2831,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     updatedAt: updatedAt ?? this.updatedAt,
     version: version ?? this.version,
     remoteVersion: remoteVersion ?? this.remoteVersion,
+    localRevision: localRevision ?? this.localRevision,
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
     syncStatus: syncStatus ?? this.syncStatus,
   );
@@ -2812,6 +2846,9 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       remoteVersion: data.remoteVersion.present
           ? data.remoteVersion.value
           : this.remoteVersion,
+      localRevision: data.localRevision.present
+          ? data.localRevision.value
+          : this.localRevision,
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
       syncStatus: data.syncStatus.present
           ? data.syncStatus.value
@@ -2829,6 +2866,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           ..write('updatedAt: $updatedAt, ')
           ..write('version: $version, ')
           ..write('remoteVersion: $remoteVersion, ')
+          ..write('localRevision: $localRevision, ')
           ..write('deletedAt: $deletedAt, ')
           ..write('syncStatus: $syncStatus')
           ..write(')'))
@@ -2844,6 +2882,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     updatedAt,
     version,
     remoteVersion,
+    localRevision,
     deletedAt,
     syncStatus,
   );
@@ -2858,6 +2897,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           other.updatedAt == this.updatedAt &&
           other.version == this.version &&
           other.remoteVersion == this.remoteVersion &&
+          other.localRevision == this.localRevision &&
           other.deletedAt == this.deletedAt &&
           other.syncStatus == this.syncStatus);
 }
@@ -2870,6 +2910,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
   final Value<String> updatedAt;
   final Value<int> version;
   final Value<int> remoteVersion;
+  final Value<int> localRevision;
   final Value<String?> deletedAt;
   final Value<String> syncStatus;
   final Value<int> rowid;
@@ -2881,6 +2922,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     this.updatedAt = const Value.absent(),
     this.version = const Value.absent(),
     this.remoteVersion = const Value.absent(),
+    this.localRevision = const Value.absent(),
     this.deletedAt = const Value.absent(),
     this.syncStatus = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -2893,6 +2935,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     required String updatedAt,
     this.version = const Value.absent(),
     this.remoteVersion = const Value.absent(),
+    this.localRevision = const Value.absent(),
     this.deletedAt = const Value.absent(),
     this.syncStatus = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -2908,6 +2951,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Expression<String>? updatedAt,
     Expression<int>? version,
     Expression<int>? remoteVersion,
+    Expression<int>? localRevision,
     Expression<String>? deletedAt,
     Expression<String>? syncStatus,
     Expression<int>? rowid,
@@ -2920,6 +2964,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       if (updatedAt != null) 'updated_at': updatedAt,
       if (version != null) 'version': version,
       if (remoteVersion != null) 'remote_version': remoteVersion,
+      if (localRevision != null) 'local_revision': localRevision,
       if (deletedAt != null) 'deleted_at': deletedAt,
       if (syncStatus != null) 'sync_status': syncStatus,
       if (rowid != null) 'rowid': rowid,
@@ -2934,6 +2979,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Value<String>? updatedAt,
     Value<int>? version,
     Value<int>? remoteVersion,
+    Value<int>? localRevision,
     Value<String?>? deletedAt,
     Value<String>? syncStatus,
     Value<int>? rowid,
@@ -2946,6 +2992,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       updatedAt: updatedAt ?? this.updatedAt,
       version: version ?? this.version,
       remoteVersion: remoteVersion ?? this.remoteVersion,
+      localRevision: localRevision ?? this.localRevision,
       deletedAt: deletedAt ?? this.deletedAt,
       syncStatus: syncStatus ?? this.syncStatus,
       rowid: rowid ?? this.rowid,
@@ -2976,6 +3023,9 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     if (remoteVersion.present) {
       map['remote_version'] = Variable<int>(remoteVersion.value);
     }
+    if (localRevision.present) {
+      map['local_revision'] = Variable<int>(localRevision.value);
+    }
     if (deletedAt.present) {
       map['deleted_at'] = Variable<String>(deletedAt.value);
     }
@@ -2998,6 +3048,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
           ..write('updatedAt: $updatedAt, ')
           ..write('version: $version, ')
           ..write('remoteVersion: $remoteVersion, ')
+          ..write('localRevision: $localRevision, ')
           ..write('deletedAt: $deletedAt, ')
           ..write('syncStatus: $syncStatus, ')
           ..write('rowid: $rowid')
@@ -6860,6 +6911,7 @@ typedef $$ConversationsTableCreateCompanionBuilder =
       required String updatedAt,
       Value<int> version,
       Value<int> remoteVersion,
+      Value<int> localRevision,
       Value<String?> deletedAt,
       Value<String> syncStatus,
       Value<int> rowid,
@@ -6873,6 +6925,7 @@ typedef $$ConversationsTableUpdateCompanionBuilder =
       Value<String> updatedAt,
       Value<int> version,
       Value<int> remoteVersion,
+      Value<int> localRevision,
       Value<String?> deletedAt,
       Value<String> syncStatus,
       Value<int> rowid,
@@ -6919,6 +6972,11 @@ class $$ConversationsTableFilterComposer
 
   ColumnFilters<int> get remoteVersion => $composableBuilder(
     column: $table.remoteVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get localRevision => $composableBuilder(
+    column: $table.localRevision,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -6977,6 +7035,11 @@ class $$ConversationsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get localRevision => $composableBuilder(
+    column: $table.localRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get deletedAt => $composableBuilder(
     column: $table.deletedAt,
     builder: (column) => ColumnOrderings(column),
@@ -7017,6 +7080,11 @@ class $$ConversationsTableAnnotationComposer
 
   GeneratedColumn<int> get remoteVersion => $composableBuilder(
     column: $table.remoteVersion,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get localRevision => $composableBuilder(
+    column: $table.localRevision,
     builder: (column) => column,
   );
 
@@ -7067,6 +7135,7 @@ class $$ConversationsTableTableManager
                 Value<String> updatedAt = const Value.absent(),
                 Value<int> version = const Value.absent(),
                 Value<int> remoteVersion = const Value.absent(),
+                Value<int> localRevision = const Value.absent(),
                 Value<String?> deletedAt = const Value.absent(),
                 Value<String> syncStatus = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -7078,6 +7147,7 @@ class $$ConversationsTableTableManager
                 updatedAt: updatedAt,
                 version: version,
                 remoteVersion: remoteVersion,
+                localRevision: localRevision,
                 deletedAt: deletedAt,
                 syncStatus: syncStatus,
                 rowid: rowid,
@@ -7091,6 +7161,7 @@ class $$ConversationsTableTableManager
                 required String updatedAt,
                 Value<int> version = const Value.absent(),
                 Value<int> remoteVersion = const Value.absent(),
+                Value<int> localRevision = const Value.absent(),
                 Value<String?> deletedAt = const Value.absent(),
                 Value<String> syncStatus = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -7102,6 +7173,7 @@ class $$ConversationsTableTableManager
                 updatedAt: updatedAt,
                 version: version,
                 remoteVersion: remoteVersion,
+                localRevision: localRevision,
                 deletedAt: deletedAt,
                 syncStatus: syncStatus,
                 rowid: rowid,

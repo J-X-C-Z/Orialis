@@ -89,12 +89,48 @@ class OutboxStore {
         .getSingleOrNull();
   }
 
+  Future<void> rebasePendingForEntity({
+    required String entityType,
+    required String entityId,
+    required int baseVersion,
+  }) async {
+    await (database.update(database.outboxMutations)..where(
+          (row) =>
+              row.entityType.equals(entityType) &
+              row.entityId.equals(entityId) &
+              row.status.equals(OutboxStatus.pending),
+        ))
+        .write(
+          OutboxMutationsCompanion(
+            baseVersion: Value(baseVersion),
+            updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
+          ),
+        );
+  }
+
   Future<void> recoverInFlight() async {
     await (database.update(
       database.outboxMutations,
     )..where((row) => row.status.equals(OutboxStatus.inFlight))).write(
       const OutboxMutationsCompanion(status: Value(OutboxStatus.pending)),
     );
+  }
+
+  /// Returns a transport-failed mutation to the queue without changing its
+  /// id, payload snapshot, baseVersion, or attempt history.
+  Future<void> markRetryable(String mutationId, Object error) async {
+    await (database.update(database.outboxMutations)..where(
+          (row) =>
+              row.mutationId.equals(mutationId) &
+              row.status.equals(OutboxStatus.inFlight),
+        ))
+        .write(
+          OutboxMutationsCompanion(
+            status: const Value(OutboxStatus.pending),
+            lastError: Value(error.toString()),
+            updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
+          ),
+        );
   }
 
   Future<void> markInFlight(String mutationId) async {
@@ -135,9 +171,7 @@ class OutboxStore {
       database.tasks,
     )..where((row) => row.id.equals(entityId))).getSingleOrNull();
     var entityUpdated = false;
-    if (task != null &&
-        task.localRevision == entityRevision &&
-        task.syncStatus != 'synced') {
+    if (task != null && task.localRevision == entityRevision) {
       await (database.update(
         database.tasks,
       )..where((row) => row.id.equals(entityId))).write(
@@ -148,6 +182,10 @@ class OutboxStore {
         ),
       );
       entityUpdated = true;
+    } else if (task != null && task.syncStatus != 'synced') {
+      await (database.update(database.tasks)
+            ..where((row) => row.id.equals(entityId)))
+          .write(TasksCompanion(remoteVersion: Value(remoteVersion)));
     }
     await _setTerminal(mutationId, OutboxStatus.acknowledged);
     return entityUpdated;
@@ -165,9 +203,7 @@ class OutboxStore {
       database.calendarEvents,
     )..where((row) => row.id.equals(entityId))).getSingleOrNull();
     var entityUpdated = false;
-    if (event != null &&
-        event.localRevision == entityRevision &&
-        event.syncStatus != 'synced') {
+    if (event != null && event.localRevision == entityRevision) {
       await (database.update(
         database.calendarEvents,
       )..where((row) => row.id.equals(entityId))).write(
@@ -178,6 +214,10 @@ class OutboxStore {
         ),
       );
       entityUpdated = true;
+    } else if (event != null && event.syncStatus != 'synced') {
+      await (database.update(database.calendarEvents)
+            ..where((row) => row.id.equals(entityId)))
+          .write(CalendarEventsCompanion(remoteVersion: Value(remoteVersion)));
     }
     await _setTerminal(mutationId, OutboxStatus.acknowledged);
     return entityUpdated;
