@@ -3,9 +3,9 @@
 Status: `ACCEPTED — VERIFIED WITH EXPLICIT FOLLOW-UPS`
 
 This slice records an independent re-run of the A03 acceptance gates on
-2026-09-17, against the uncommitted A03 worktree on `orialis-refactor`
-(`fcb49a6` + uncommitted changes). It does not introduce new product scope and
-does not change any code.
+2026-09-17, against the A03 release candidate on `orialis-refactor`
+(`df3cce0`). It does not introduce new product scope and does not change any
+code.
 
 ## Gate results
 
@@ -82,8 +82,9 @@ Riverpod providers. The A03-08 boundary claim holds.
    sync entity requires a separate cross-end protocol decision.
 3. **Visual design system.** Deferred by design; the UI is functional
    placeholder quality and no design-system migration is part of A03.
-4. **Integration state.** All A03 changes are still uncommitted and unpushed at
-   this checkpoint. Nothing has been deployed to production.
+4. **Integration state.** The A03 release commit `df3cce0` is committed and
+   pushed to `origin/orialis-refactor`. Nothing has been deployed to
+   production.
 
 ## Findings from this pass
 

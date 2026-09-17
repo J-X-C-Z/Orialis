@@ -24,10 +24,11 @@ Status: `DONE — A03-10 ACCEPTED`
 - A03-08~09: page-to-domain boundaries are documented; EventRepository remains
   a compatibility facade. Server and Hermes audits found no additional
   product-required API or plugin protocol changes.
-- A03-10: final acceptance was re-run independently against the uncommitted
-  worktree. Mobile, Rust, contract, and Hermes-independent gates reproduce the
-  A03 snapshot; the contract validator environment gap is closed. Full evidence
-  and the per-capability READY / NOT READY matrix are in
+- A03-10: final acceptance was re-run independently against the release
+  candidate on `orialis-refactor`. Mobile, Rust, contract, and Hermes-
+  independent gates reproduce the A03 snapshot; the contract validator
+  environment gap is closed. Full evidence and the per-capability READY / NOT
+  READY matrix are in
   `A03-10-acceptance-verification.md`.
 
 ## A03-10 final acceptance
@@ -81,6 +82,6 @@ and the full Hermes validation was rerun successfully.
 
 ## Working state
 
-The A03 release commit is recorded as part of this closeout. No production
-deployment was performed; the production cross-end follow-up remains separate
-from the code release.
+The A03 release commit `df3cce0` is recorded and pushed to `origin/orialis-refactor`.
+No production deployment was performed; the production cross-end follow-up
+remains separate from the code release.
