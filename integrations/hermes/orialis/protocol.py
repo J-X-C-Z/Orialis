@@ -833,8 +833,12 @@ def agent_delta(*, conversation_id: str, run_id: str, delta: str, session_id: st
     return _event("agent.delta", event_id=event_id, seq=seq, session_id=session_id, conversation_id=conversation_id, run_id=run_id, delta=delta, stream_id=stream_id)
 
 
-def agent_complete(*, conversation_id: str, run_id: str, session_id: str = "session_default", seq: int = 1, event_id: Optional[str] = None, result: Any = None) -> dict[str, Any]:
-    return _event("agent.complete", event_id=event_id, seq=seq, session_id=session_id, conversation_id=conversation_id, run_id=run_id, result=result)
+def agent_complete(*, conversation_id: str, run_id: str, session_id: str = "session_default", seq: int = 1, event_id: Optional[str] = None, content: str = "", artifacts: Optional[Sequence[Mapping[str, Any]]] = None) -> dict[str, Any]:
+    return _event(
+        "agent.complete", event_id=event_id, seq=seq, session_id=session_id,
+        conversation_id=conversation_id, run_id=run_id, content=content,
+        artifacts=list(artifacts) if artifacts else None,
+    )
 
 
 def agent_error(*, conversation_id: str, run_id: str, code: str, message: str, session_id: str = "session_default", seq: int = 1, event_id: Optional[str] = None) -> dict[str, Any]:

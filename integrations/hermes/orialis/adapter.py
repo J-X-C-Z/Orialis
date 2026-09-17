@@ -853,7 +853,13 @@ class OrialisAdapter(BasePlatformAdapter):
             logger.debug("[%s] typing-stop notification failed", self.name, exc_info=True)
 
     def supports_native_streaming(self, chat_id=None, chat_type=None, metadata=None) -> bool:
-        return self.supports_feature("streaming") and self._ws is not None and self._running
+        # The current Orialis Server advertises agent event frames, but its
+        # mobile dispatch registry is resolved only by message.reply. Sending
+        # structured stream frames here makes Hermes suppress that required
+        # final reply and leaves the mobile request pending until timeout.
+        # Keep the baseline message.reply path authoritative until the server
+        # advertises an explicit stream-completion contract.
+        return False
 
     def _schedule_wire(self, message: Dict[str, Any]) -> None:
         """Schedule a frame from Hermes' synchronous stream formatter thread."""
@@ -888,6 +894,7 @@ class OrialisAdapter(BasePlatformAdapter):
             context = {
                 "stream_id": f"stream_{uuid.uuid4().hex[:16]}",
                 "conversation_id": conversation_id_for_chat_id(chat_id), "sequence": 0,
+                "content": "",
                 "reply_to": reply_to,
             }
             self._active_streams[turn_id] = context
@@ -907,10 +914,11 @@ class OrialisAdapter(BasePlatformAdapter):
                     session_id=self._session_id, seq=self._next_event_seq(), stream_id=context["stream_id"],
                 ))
                 context["sequence"] += 1
+                context["content"] += content
             if finalize:
                 await self._send_wire(protocol.agent_complete(
                     conversation_id=context["conversation_id"], run_id=turn_id,
-                    session_id=self._session_id, seq=self._next_event_seq(), result={"stream_id": context["stream_id"]},
+                    session_id=self._session_id, seq=self._next_event_seq(), content=context["content"],
                 ))
                 self._active_streams.pop(turn_id, None)
                 self._stream_context = {}
@@ -937,7 +945,7 @@ class OrialisAdapter(BasePlatformAdapter):
                     return False
                 frame = protocol.agent_complete(
                     conversation_id=conversation_id, run_id=run_id, session_id=self._session_id,
-                    seq=self._next_event_seq(), result={"message": message} if message else None,
+                    seq=self._next_event_seq(), content=message or "",
                 )
             elif state in {"error", "failed", "failure"}:
                 if not (self.supports_feature("agent.error") or (self._negotiated and "agent_state" in self._server_capabilities)):

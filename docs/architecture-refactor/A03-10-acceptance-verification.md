@@ -72,13 +72,14 @@ Riverpod providers. The A03-08 boundary claim holds.
 
 1. **Production cross-end evidence.** The ADB UI smoke gate passed on a Xiaomi
    Mi 10 / Android 13 (API 33), including the preserved-data database upgrade.
-   Production reachability is now verified from the host with
-   `GET /api/v1/health` returning 200 and from the selected device with DNS and
-   ICMP success. The configured Agent Gateway device `JXCZ_MBA_Hermes` also
-   completed an authenticated WSS `hello_ack` and `ping → pong` probe. A
-   device-side authenticated test send entered the retry state; authenticated
-   delivery, attachment upload, and realtime reconnect therefore remain
-   unproven. This is a release-stage follow-up, not an A03 acceptance blocker.
+   Production reachability is verified from the host and from a signed-in
+   Android 16 / API 36 device. After the production Agent Gateway token was
+   rotated and both systemd and launchd were reloaded, `JXCZ_MBA_Hermes`
+   reconnected and a real-device message completed
+   `agent message sent → agent reply received → persisted Hermes reply`; the
+   device displayed `已收到：A03_REAL_DEVICE_OK_20260917。连接与消息收发正常。`.
+   Attachment upload and realtime reconnect remain unproven. This is a
+   release-stage follow-up, not an A03 acceptance blocker.
 2. **Conversation sync stream.** Conversation CRUD remains on the Conversation
    API refresh path by explicit A03 scope decision; Message realtime and the
    existing sync contracts remain unchanged. A future unified Conversation
@@ -124,6 +125,11 @@ Riverpod providers. The A03-08 boundary claim holds.
   unlink pre-existing `.pyc` files, the script aborts after manifest validation
   even though the manifest checks passed. Setting `PYTHONPYCACHEPREFIX` to a
   writable directory lets the test phase complete.
+- **Production stream fallback is intentional.** The current server resolves a
+  mobile dispatch only after receiving `message.reply`; structured stream
+  events alone leave the request pending. The plugin keeps the baseline reply
+  path authoritative and emits `agent.complete` with the Rust contract's
+  `content` field for future negotiated stream support.
 - **Sandbox interference with the Rust and Flutter build trees.** `cargo test`
   and `flutter test` both need to unlink files under `target/`,
   `.dart_tool/hooks_runner/`, and `build/native_assets/`. Running them from an
@@ -138,7 +144,8 @@ Riverpod providers. The A03-08 boundary claim holds.
 ## Verdict
 
 A03-10 is `READY` and accepted for the roadmap-defined functional baseline.
-The physical-device UI smoke gate is complete. Production cross-end evidence,
-visual redesign, and commit/push/deploy remain explicit release-stage
-follow-ups. Conversation sync events are out of scope for A03 and require a
-separate protocol decision before implementation.
+The physical-device UI smoke gate and one production text-message roundtrip are
+complete. Attachment upload, realtime reconnect, visual redesign, and any
+production binary deployment remain explicit release-stage follow-ups.
+Conversation sync events are out of scope for A03 and require a separate
+protocol decision before implementation.
