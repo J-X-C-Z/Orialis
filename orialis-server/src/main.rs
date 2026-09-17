@@ -453,6 +453,27 @@ struct Message {
     attachments: Vec<Attachment>,
 }
 
+#[derive(Deserialize)]
+struct MessageListQuery {
+    after: Option<String>,
+    limit: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageListResponse {
+    items: Vec<Message>,
+    next_cursor: Option<String>,
+    has_more: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MessageCursor {
+    v: u8,
+    created_at: String,
+    id: String,
+}
+
 impl MessageRow {
     fn into_message(self) -> Message {
         Message {
@@ -1489,21 +1510,78 @@ async fn list_messages(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(conversation_id): Path<String>,
-) -> Result<Json<Vec<Message>>, AppError> {
+    Query(query): Query<MessageListQuery>,
+) -> Result<Json<Value>, AppError> {
     let user_id = authenticated_user(&headers, &state.pool).await?;
     ensure_conversation(&state.pool, &user_id, &conversation_id).await?;
-    let messages = sqlx::query_as::<_, MessageRow>(
+    let paginated = query.after.is_some() || query.limit.is_some();
+    let limit = query.limit.unwrap_or(100);
+    if !(1..=500).contains(&limit) {
+        return Err(AppError::BadRequest(
+            "limit must be between 1 and 500".into(),
+        ));
+    }
+    let cursor = query.after.map(decode_message_cursor).transpose()?;
+    let rows = sqlx::query_as::<_, MessageRow>(
         "SELECT id,conversation_id,role,content,created_at,version,attachments_json
          FROM messages WHERE user_id=? AND conversation_id=?
-         ORDER BY created_at,id",
+           AND (? IS NULL OR created_at > ? OR (created_at = ? AND id > ?))
+         ORDER BY created_at,id LIMIT ?",
     )
     .bind(&user_id)
-    .bind(conversation_id)
+    .bind(&conversation_id)
+    .bind(cursor.as_ref().map(|value| value.created_at.as_str()))
+    .bind(cursor.as_ref().map(|value| value.created_at.as_str()))
+    .bind(cursor.as_ref().map(|value| value.created_at.as_str()))
+    .bind(cursor.as_ref().map(|value| value.id.as_str()))
+    .bind(limit + 1)
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(
-        messages.into_iter().map(MessageRow::into_message).collect(),
-    ))
+    let mut messages: Vec<Message> = rows.into_iter().map(MessageRow::into_message).collect();
+    let has_more = messages.len() > limit as usize;
+    if has_more {
+        messages.truncate(limit as usize);
+    }
+    if paginated {
+        let next_cursor = has_more
+            .then(|| messages.last())
+            .flatten()
+            .map(|message| {
+                encode_message_cursor(&MessageCursor {
+                    v: 1,
+                    created_at: message.created_at.clone(),
+                    id: message.id.clone(),
+                })
+            })
+            .transpose()?;
+        return Ok(Json(
+            serde_json::to_value(MessageListResponse {
+                items: messages,
+                next_cursor,
+                has_more,
+            })
+            .unwrap_or(Value::Null),
+        ));
+    }
+    Ok(Json(serde_json::to_value(messages).unwrap_or(Value::Null)))
+}
+
+fn encode_message_cursor(cursor: &MessageCursor) -> Result<String, AppError> {
+    let payload = serde_json::to_vec(cursor)
+        .map_err(|_| AppError::BadRequest("invalid message cursor".into()))?;
+    Ok(URL_SAFE_NO_PAD.encode(payload))
+}
+
+fn decode_message_cursor(value: String) -> Result<MessageCursor, AppError> {
+    let payload = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| AppError::BadRequest("invalid message cursor".into()))?;
+    let cursor: MessageCursor = serde_json::from_slice(&payload)
+        .map_err(|_| AppError::BadRequest("invalid message cursor".into()))?;
+    if cursor.v != 1 || cursor.created_at.is_empty() || cursor.id.is_empty() {
+        return Err(AppError::BadRequest("invalid message cursor".into()));
+    }
+    Ok(cursor)
 }
 
 async fn create_message(
@@ -3404,5 +3482,27 @@ mod attachment_tests {
             until: "31-12-2026".into(),
         }))
         .is_err());
+    }
+
+    #[test]
+    fn message_pagination_cursor_round_trips_and_rejects_tampering() {
+        let original = MessageCursor {
+            v: 1,
+            created_at: "2026-09-17T12:00:00Z".into(),
+            id: "message-1".into(),
+        };
+        let encoded = encode_message_cursor(&original).unwrap();
+        assert_eq!(decode_message_cursor(encoded).unwrap().id, "message-1");
+        assert!(decode_message_cursor("not-a-cursor".into()).is_err());
+
+        let invalid = URL_SAFE_NO_PAD.encode(
+            serde_json::to_vec(&MessageCursor {
+                v: 2,
+                created_at: "2026-09-17T12:00:00Z".into(),
+                id: "message-1".into(),
+            })
+            .unwrap(),
+        );
+        assert!(decode_message_cursor(invalid).is_err());
     }
 }

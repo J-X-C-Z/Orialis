@@ -143,3 +143,14 @@ Session 也分两种：插件使用 WebSocket 握手中的设备 token；Orialis
 **消息重复或状态不确定**
 
 `message.ack` 只确认接收；断线重连期间应以 `message_id` 和 `reply_to` 关联消息。若收到 `error` 帧，先记录其 `code` 和 `message`（不要记录 token），再修正对应字段或协议版本。
+# Test layers
+
+The plugin checks are intentionally split into three layers:
+
+1. `validate-contracts.py` validates every shared contract fixture against its schema and checks cross-message semantics.
+2. Python byte-compilation catches import-time syntax errors without requiring Hermes.
+3. The public CI job runs the Hermes-independent protocol and tool tests. When the
+   Hermes runtime is present, it additionally runs `unittest discover` over every
+   `test_*.py` module under this plugin.
+
+Local Hermes-runtime validation is an optional fourth layer using `scripts/validate-hermes-plugin.sh`; it validates the manifest and repeats full discovery with the Hermes Python runtime.

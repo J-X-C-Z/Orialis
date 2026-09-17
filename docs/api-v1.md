@@ -89,7 +89,7 @@ Cookie: orialis_session=<accessToken>
 | GET/POST | `/api/v1/schedules` | 是 | 已实现 | `calendar-events` 的规范名称别名 |
 | PATCH/DELETE | `/api/v1/schedules/{id}` | 是 | 已实现 | Schedule 规范名称别名 |
 | GET/POST/PATCH/DELETE | `/api/v1/conversations[/{id}]` | 是 | 已实现 | 会话列表、创建、重命名和删除 |
-| GET/POST | `/api/v1/conversations/{conversation_id}/messages` | 是 | 已实现 | 查询或保存聊天消息 |
+| GET/POST | `/api/v1/conversations/{conversation_id}/messages` | 是 | 已实现 | 查询或保存聊天消息；GET 支持稳定游标分页 |
 | POST | `/api/v1/conversations/{conversation_id}/attachments` | Session/Agent Bearer | 已实现 | 上传聊天附件，单个文件最大 20 MB |
 | GET | `/api/v1/attachments/{id}/download` | Session/Agent Bearer/旧下载令牌 | 已实现 | 下载或预览聊天附件 |
 | GET | `/api/v1/sync/events` | 是 | 已实现 | 按游标读取增量事件 |
@@ -550,6 +550,12 @@ Authorization: Session <accessToken>
 附件内容先通过上传接口提交，消息接口只接受附件 ID，服务端按当前用户和会话重新解析规范元数据。
 `content` 可以为空，但至少要有一个附件；成功返回 `201 Created`，使用同一消息 ID 重试时返回已有消息。服务端会先保存用户消息，再将
 消息异步投递给当前选中的 Hermes 设备，并在收到回复后保存 Agent 消息。
+
+GET 默认保持旧客户端的数组响应。请求带 `limit` 或 `after` 时启用分页并返回
+`{"items": [...], "nextCursor": "...", "hasMore": true}`。`limit` 范围为 1–500；
+`after` 是不透明游标，服务端按 `created_at,id` 升序做 keyset 分页，两个字段共同保证
+同一时间戳下消息不会重复或遗漏。拿到 `hasMore=true` 时，将 `nextCursor` 原样用于下一页；
+没有更多数据时 `nextCursor` 为 `null`。
 
 上传使用 `multipart/form-data`，字段名为 `files`（Agent 插件也接受 `file`），总大小不超过
 48 MiB。附件消息会在手机端显示图片预览或文件卡片。新上传附件的下载 URL 不含令牌，

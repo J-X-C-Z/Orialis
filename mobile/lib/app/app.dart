@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/config/app_config.dart';
 import '../core/database/app_database.dart';
 import '../features/events/data/event_repository.dart';
+import '../features/events/data/task_repository.dart';
+import '../features/events/data/schedule_repository.dart';
 import '../features/chat/data/chat_repository.dart';
 import '../core/realtime/mobile_realtime_client.dart';
 import '../core/sync/sync_engine.dart';
@@ -27,6 +29,14 @@ final eventRepositoryProvider = Provider<EventRepository>((ref) {
     config: ref.watch(appConfigProvider),
   );
 });
+
+final taskRepositoryProvider = Provider<TaskRepository>(
+  (ref) => TaskRepository(delegate: ref.watch(eventRepositoryProvider)),
+);
+
+final scheduleRepositoryProvider = Provider<ScheduleRepository>(
+  (ref) => ScheduleRepository(delegate: ref.watch(eventRepositoryProvider)),
+);
 
 final syncEngineProvider = Provider<SyncEngine>((ref) {
   return SyncEngine(

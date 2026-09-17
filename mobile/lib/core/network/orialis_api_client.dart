@@ -34,6 +34,39 @@ class AttachmentUpload {
   final String mimeType;
 }
 
+class MessagePage {
+  const MessagePage({
+    required this.items,
+    this.nextCursor,
+    this.hasMore = false,
+  });
+
+  final List<Map<String, dynamic>> items;
+  final String? nextCursor;
+  final bool hasMore;
+
+  factory MessagePage.fromJson(dynamic data) {
+    if (data is List) {
+      return MessagePage(items: _items(data));
+    }
+    if (data is Map) {
+      return MessagePage(
+        items: _items(data['items']),
+        nextCursor:
+            data['nextCursor'] as String? ?? data['next_cursor'] as String?,
+        hasMore: data['hasMore'] as bool? ?? data['has_more'] as bool? ?? false,
+      );
+    }
+    return const MessagePage(items: []);
+  }
+
+  static List<Map<String, dynamic>> _items(dynamic data) =>
+      (data is List ? data : const <dynamic>[])
+          .whereType<Map>()
+          .map((value) => Map<String, dynamic>.from(value))
+          .toList();
+}
+
 class OrialisApiClient {
   OrialisApiClient({
     required this.baseUrl,
@@ -418,13 +451,37 @@ class OrialisApiClient {
     );
   }
 
-  Future<List<Map<String, dynamic>>> listMessages(String conversationId) async {
-    final response = await _dio.get<List<dynamic>>(
+  Future<MessagePage> listMessagesPage(
+    String conversationId, {
+    String? after,
+    int? limit,
+  }) async {
+    final response = await _dio.get<dynamic>(
       '/api/v1/conversations/${Uri.encodeComponent(conversationId)}/messages',
+      queryParameters: {'after': ?after, 'limit': ?limit},
     );
-    return (response.data ?? const [])
-        .map((value) => Map<String, dynamic>.from(value as Map))
-        .toList();
+    return MessagePage.fromJson(response.data);
+  }
+
+  /// Compatibility helper that returns all pages as one legacy-shaped list.
+  Future<List<Map<String, dynamic>>> listMessages(String conversationId) async {
+    final items = <Map<String, dynamic>>[];
+    String? cursor;
+    var hasMore = true;
+    while (hasMore) {
+      // Supplying a limit opts into the paginated response. Older servers
+      // ignore it and still return the legacy array, which MessagePage also
+      // accepts.
+      final page = await listMessagesPage(
+        conversationId,
+        after: cursor,
+        limit: 100,
+      );
+      items.addAll(page.items);
+      hasMore = page.hasMore && page.nextCursor != null;
+      cursor = page.nextCursor;
+    }
+    return items;
   }
 
   Future<List<Map<String, dynamic>>> uploadAttachments({
