@@ -45,7 +45,7 @@ physical-device test that the current environment cannot provide.
   Rust server using the Hermes runtime, covering Mobile WebSocket + HTTP →
   Server → Agent Gateway → Hermes-compatible peer → persisted reply → Mobile
   `message` and `sync.change_hint` frames.
-- Git: pending the final closeout commit and push.
+- Git: final closeout commit `90523d4` is pushed to `origin/orialis-refactor`; worktree is clean.
 
 ## Explicitly remaining
 
