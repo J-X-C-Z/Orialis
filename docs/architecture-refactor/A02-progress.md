@@ -1,5 +1,5 @@
 # A02 — Architecture Integration Progress
-Status: `IMPLEMENTED WITH RELEASE GATES`
+Status: `CODE COMPLETE WITH EXPLICIT ENVIRONMENT GATES`
 
 This document records the completed, verified A02 slices without claiming the
 remaining broad refactors are finished.
@@ -20,6 +20,12 @@ remaining broad refactors are finished.
   consumption.
 - A02.5 Repository boundary: TaskRepository and ScheduleRepository facades are
   available while EventRepository remains a compatibility facade.
+- A02.6 Server boundary: configuration/security loading and health/metadata/
+  capability handlers are extracted from `main.rs` without changing routes or
+  response compatibility.
+- A02.8 Reliability matrix: lifecycle resume, opaque multi-page message pull,
+  501-entry outbox recovery, continuous local edits, and Hermes runtime
+  discovery are covered by automated tests.
 - A02.7 Release gates: contract validation, public Hermes-independent tests,
   conditional full Hermes discovery when its runtime is installed, Rust
   formatting/tests, and visible-but-non-blocking clippy until the existing
@@ -27,22 +33,23 @@ remaining broad refactors are finished.
 
 ## Verification snapshot
 
-- Mobile: `flutter analyze --no-fatal-infos`; 54 tests passed.
+- Mobile: `flutter analyze --no-fatal-infos`; 56 tests passed.
 - Rust: `cargo fmt --all -- --check`; workspace tests passed (8 core, 42
   server, 25 protocol integration).
 - Contracts: 14 fixtures validated against 12 schemas; boundary fixture tests
-  10 passed; public Hermes-independent tests 21 passed.
-- Git: `orialis-refactor` is clean and pushed through commit `0659828`.
+  10 passed; public Hermes-independent tests 37 passed under the configured
+  Hermes runtime.
+- Git: `orialis-refactor` is clean and pushed after the A02 closeout commit.
 
 ## Explicitly remaining
 
-- A02.6 server `main.rs` modularization and deeper plugin/mobile physical
-  module moves remain intentionally deferred; the current changes preserve
-  public compatibility boundaries.
-- A02.8 still needs a Hermes-runtime-backed full suite and a fresh interactive
-  phone send while the device is unlocked. The production WSS handshake and
-  real Hermes reconnect have passed; the synthetic smoke device is not the
-  selected production delivery target, so its reply roundtrip was not claimed.
+- A fresh interactive phone send remains an environment gate: the latest
+  verification found no ADB device, so the UI send/reply roundtrip is not
+  claimed. The production WSS handshake and real Hermes reconnect have passed;
+  the synthetic smoke device is not the selected production delivery target.
+- A true end-to-end injected network timeout and attachment-upload failure
+  test still require a controllable gateway/device fixture; the client-side
+  recovery and outbox behavior are covered without overstating that proof.
 - Clippy is reported in CI with `continue-on-error` because the pre-existing
   server/test modules still emit warnings. It should become a hard gate after
   that baseline is cleaned.

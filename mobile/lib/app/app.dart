@@ -72,11 +72,26 @@ class OrialisApp extends ConsumerStatefulWidget {
   ConsumerState<OrialisApp> createState() => _OrialisAppState();
 }
 
-class _OrialisAppState extends ConsumerState<OrialisApp> {
+class _OrialisAppState extends ConsumerState<OrialisApp>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(ref.read(syncCoordinatorProvider).start());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(ref.read(syncCoordinatorProvider).requestSync());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   @override

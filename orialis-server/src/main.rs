@@ -1,4 +1,6 @@
 mod agent_gateway;
+mod config;
+mod health;
 mod mobile_realtime;
 
 use agent_gateway::AgentRegistry;
@@ -12,7 +14,8 @@ use axum::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, NaiveTime, Utc};
-use orialis_core::{metadata, ServiceMetadata, API_VERSION, SERVICE_NAME};
+use config::Config;
+use orialis_core::{metadata, ServiceMetadata, SERVICE_NAME};
 use scrypt::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Scrypt,
@@ -21,7 +24,7 @@ use serde::{de::DeserializeOwned, de::Error as DeError, Deserialize, Deserialize
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
-use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{env, path::PathBuf, sync::Arc};
 use tokio::io::AsyncWriteExt;
 use tracing::info;
 use uuid::Uuid;
@@ -30,7 +33,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone)]
 struct AppState {
-    metadata: ServiceMetadata,
+    pub(crate) metadata: ServiceMetadata,
     pool: SqlitePool,
     agent: AgentRegistry,
     mobile: mobile_realtime::MobileRegistry,
@@ -38,64 +41,6 @@ struct AppState {
     agent_user_id: Option<String>,
     public_url: String,
     upload_dir: PathBuf,
-}
-
-#[derive(Clone)]
-struct Config {
-    host: String,
-    port: u16,
-    environment: String,
-    public_url: String,
-    database_url: String,
-    agent_device_token: Option<String>,
-    agent_user_id: Option<String>,
-    upload_dir: PathBuf,
-}
-
-impl Config {
-    fn from_env() -> Result<Self, String> {
-        let environment = env::var("ORIALIS_ENV").unwrap_or_else(|_| "development".into());
-        validate_environment_security(&environment, development_device_auth_enabled())?;
-        let port = env::var("ORIALIS_PORT")
-            .unwrap_or_else(|_| "18443".into())
-            .parse::<u16>()
-            .map_err(|_| "ORIALIS_PORT must be a valid port number".to_string())?;
-        Ok(Self {
-            host: env::var("ORIALIS_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
-            port,
-            environment,
-            public_url: env::var("ORIALIS_PUBLIC_URL")
-                .unwrap_or_else(|_| "https://orialis.jxcz.top".into()),
-            database_url: env::var("ORIALIS_DATABASE_URL")
-                .unwrap_or_else(|_| "sqlite://./orialis.db?mode=rwc".into()),
-            agent_device_token: env::var("ORIALIS_AGENT_DEVICE_TOKEN")
-                .ok()
-                .filter(|token| !token.trim().is_empty()),
-            agent_user_id: env::var("ORIALIS_AGENT_USER_ID")
-                .ok()
-                .map(|user_id| user_id.trim().to_owned())
-                .filter(|user_id| !user_id.is_empty()),
-            upload_dir: env::var("ORIALIS_UPLOAD_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("./uploads")),
-        })
-    }
-
-    fn address(&self) -> Result<SocketAddr, String> {
-        format!("{}:{}", self.host, self.port)
-            .parse()
-            .map_err(|_| "ORIALIS_HOST and ORIALIS_PORT do not form a valid socket address".into())
-    }
-}
-
-fn validate_environment_security(
-    environment: &str,
-    development_device_auth: bool,
-) -> Result<(), String> {
-    if environment.eq_ignore_ascii_case("production") && development_device_auth {
-        return Err("ORIALIS_DEV_DEVICE_AUTH must be disabled in production".to_string());
-    }
-    Ok(())
 }
 
 #[derive(Debug)]
@@ -151,22 +96,6 @@ impl IntoResponse for AppError {
         )
             .into_response()
     }
-}
-
-#[derive(Serialize)]
-struct HealthResponse {
-    ok: bool,
-    service: &'static str,
-    version: &'static str,
-    environment: String,
-}
-
-#[derive(Serialize)]
-struct CapabilitiesResponse {
-    service: &'static str,
-    api_version: &'static str,
-    web: bool,
-    capabilities: Vec<&'static str>,
 }
 
 #[derive(Deserialize)]
@@ -831,10 +760,10 @@ async fn main() {
         }
     });
     let app = Router::new()
-        .route("/api/health", get(health))
-        .route("/api/v1/health", get(health))
-        .route("/api/v1/meta", get(meta))
-        .route("/api/v1/capabilities", get(capabilities))
+        .route("/api/health", get(health::health))
+        .route("/api/v1/health", get(health::health))
+        .route("/api/v1/meta", get(health::meta))
+        .route("/api/v1/capabilities", get(health::capabilities))
         .route("/api/v1/auth/register", post(register))
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/logout", post(logout))
@@ -915,42 +844,6 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .expect("Orialis server failed");
-}
-
-async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
-    Json(HealthResponse {
-        ok: true,
-        service: SERVICE_NAME,
-        version: VERSION,
-        environment: state.metadata.environment.clone(),
-    })
-}
-
-async fn meta(State(state): State<Arc<AppState>>) -> Json<ServiceMetadata> {
-    Json(state.metadata.clone())
-}
-
-async fn capabilities() -> Json<CapabilitiesResponse> {
-    Json(CapabilitiesResponse {
-        service: SERVICE_NAME,
-        api_version: API_VERSION,
-        web: false,
-        capabilities: vec![
-            "health",
-            "metadata",
-            "auth",
-            "tasks",
-            "projects",
-            "calendar-events",
-            "schedules",
-            "incremental-sync",
-            "messages",
-            "conversations",
-            "attachments",
-            "agent-devices",
-            "websocket",
-        ],
-    })
 }
 
 fn now() -> String {
@@ -1052,7 +945,7 @@ async fn authenticated_user(headers: &HeaderMap, pool: &SqlitePool) -> Result<St
         .await?
         .ok_or(AppError::Unauthorized);
     }
-    if !development_device_auth_enabled() {
+    if !config::development_device_auth_enabled() {
         return Err(AppError::Unauthorized);
     }
     let device_id = headers
@@ -1128,23 +1021,6 @@ async fn authenticated_user_or_agent(
         Ok(users[0].clone())
     } else {
         Err(AppError::Unauthorized)
-    }
-}
-
-fn development_device_auth_enabled() -> bool {
-    matches!(
-        std::env::var("ORIALIS_DEV_DEVICE_AUTH").as_deref(),
-        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
-    )
-}
-
-#[cfg(test)]
-mod config_security_tests {
-    #[test]
-    fn production_rejects_development_device_auth() {
-        assert!(super::validate_environment_security("production", true).is_err());
-        assert!(super::validate_environment_security("production", false).is_ok());
-        assert!(super::validate_environment_security("development", true).is_ok());
     }
 }
 

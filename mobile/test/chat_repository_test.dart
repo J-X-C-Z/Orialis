@@ -1,4 +1,5 @@
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:orialis_mobile/core/database/app_database.dart';
@@ -80,6 +81,36 @@ void main() {
     expect(message.attachmentsJson, contains('photo.jpg'));
     expect(message.syncStatus, 'pendingCreate');
   });
+
+  test(
+    'continuous local edits keep the latest message and pending state',
+    () async {
+      final database = AppDatabase(executor: NativeDatabase.memory());
+      addTearDown(database.close);
+      final repository = ChatRepository(database: database);
+      final message = await repository.sendMessage(
+        conversationId: 'default',
+        content: 'edit 0',
+      );
+
+      for (var index = 1; index <= 100; index++) {
+        await (database.update(
+          database.messages,
+        )..where((row) => row.id.equals(message.id))).write(
+          MessagesCompanion(
+            content: Value('edit $index'),
+            syncStatus: const Value('pendingCreate'),
+          ),
+        );
+      }
+
+      final stored = await (database.select(
+        database.messages,
+      )..where((row) => row.id.equals(message.id))).getSingle();
+      expect(stored.content, 'edit 100');
+      expect(stored.syncStatus, 'pendingCreate');
+    },
+  );
 
   test(
     'applyRemoteMessage does not overwrite a queued local mutation',

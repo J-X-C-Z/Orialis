@@ -1,6 +1,6 @@
 # A02 — Repository Boundaries and Cleanup Order
 
-Status: `IN_PROGRESS`
+Status: `CODE COMPLETE WITH EXPLICIT ENVIRONMENT GATES`
 
 This document defines the order for repository cleanup after A01. It does not
 authorize deleting compatibility code or moving files before the cross-end
@@ -64,8 +64,9 @@ share one Drift transaction, with failure-window coverage.
   distinct even when their product names match.
 - Rename only with a fixture-backed compatibility test and an explicit owner.
 
-Status: `PLANNED`. The current batch records ownership boundaries without
-performing a risky cross-layer rename.
+Status: `IMPLEMENTED`. The contract registry, DTO fixtures, repository
+facades, and compatibility tests establish the boundary without a risky
+cross-layer rename.
 
 ### A02.4 — Documentation index
 
@@ -75,12 +76,14 @@ performing a risky cross-layer rename.
 - Convert overlapping documents into links or migration notes before deleting
   any content.
 
-Status: `IN_PROGRESS`. The contract registry now documents its validator and
-the compatibility mapping remains explicit; the broader documentation index
-is still a follow-up.
+Status: `IMPLEMENTED`. The contract registry, API behavior, sync behavior,
+Agent Gateway protocol, and this boundary document are now linked by the A02
+progress record; overlapping legacy names remain documented as compatibility
+notes.
 
 ## Release gate
 
-A01 remains open until the first-write outbox window, real v5-to-v6 migration,
-cross-end fixtures, JSON Schema validation, and Hermes runtime loading have
-reproducible evidence. A02.3 and A02.4 must not be used to hide those gaps.
+A01 is closed. A02 code is complete, with real-device UI delivery and
+controllable network-failure injection remaining explicit environment gates.
+Clippy remains visible but non-blocking until the pre-existing warning
+baseline is removed.

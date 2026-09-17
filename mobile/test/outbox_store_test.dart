@@ -172,6 +172,41 @@ void main() {
   });
 
   test(
+    '500+ pending mutations remain ordered and recover after interruption',
+    () async {
+      final database = AppDatabase(executor: NativeDatabase.memory());
+      addTearDown(database.close);
+      final store = OutboxStore(database);
+      final ids = <String>[];
+      for (var index = 0; index < 501; index++) {
+        final mutation = await store.enqueue(
+          entityType: 'task',
+          entityId: 'task-$index',
+          operation: 'update',
+          payloadJson: '{"index":$index}',
+          baseVersion: 1,
+          entityRevision: 1,
+          mutationId: 'backlog-$index',
+        );
+        ids.add(mutation.mutationId);
+        await store.markInFlight(mutation.mutationId);
+      }
+
+      expect(
+        await (database.select(database.outboxMutations)).get(),
+        hasLength(501),
+      );
+      await store.recoverInFlight();
+      final recovered = await (database.select(
+        database.outboxMutations,
+      )..where((row) => row.status.equals(OutboxStatus.pending))).get();
+      expect(recovered, hasLength(501));
+      expect(recovered.map((row) => row.mutationId).toSet(), ids.toSet());
+      expect(recovered.every((row) => row.attemptCount == 1), isTrue);
+    },
+  );
+
+  test(
     'pending mutations merge, but an in-flight mutation is immutable',
     () async {
       final database = AppDatabase(executor: NativeDatabase.memory());
