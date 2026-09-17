@@ -55,6 +55,8 @@ class SyncEngine {
       await _pushMessages(api);
       await _pullMessages(api);
       await _pull(api);
+      await _pushProjects(api);
+      await _pushProjectMilestones(api);
       return SyncState.idle;
     } on _RemoteMutationConflict {
       return SyncState.conflict;
@@ -132,6 +134,147 @@ class SyncEngine {
           ),
         ),
       );
+    }
+  }
+
+  Future<void> _pushProjects(OrialisApiClient api) async {
+    final rows = await (database.select(
+      database.projects,
+    )..where((row) => row.syncStatus.isNotIn(const ['synced']))).get();
+    final outbox = OutboxStore(database);
+    for (final project in rows) {
+      final mutation =
+          await outbox.findPendingForEntity('project', project.id) ??
+          await outbox.enqueue(
+            entityType: 'project',
+            entityId: project.id,
+            operation: _operationFor(project.syncStatus),
+            payloadJson: jsonEncode({
+              'id': project.id,
+              'name': project.name,
+              'goal': project.goal,
+              'description': project.description,
+              'color': project.color,
+              'status': project.status,
+              'startDate': project.startDate,
+              'due': project.due,
+              'nextActionTaskId': project.nextActionTaskId,
+              'version': project.version,
+              'createdAt': project.createdAt,
+              'updatedAt': project.updatedAt,
+              'deletedAt': project.deletedAt,
+            }),
+            baseVersion:
+                project.syncStatus == 'pendingUpdate' ||
+                    project.syncStatus == 'pendingDelete'
+                ? project.remoteVersion
+                : null,
+            entityRevision: project.localRevision,
+          );
+      await outbox.markInFlight(mutation.mutationId);
+      try {
+        final payload =
+            jsonDecode(mutation.payloadJson) as Map<String, dynamic>;
+        if (mutation.operation == 'create') {
+          await api.createProject(payload, mutation.mutationId);
+        } else if (mutation.operation == 'delete') {
+          await api.deleteProject(project.id, mutation.mutationId);
+        } else {
+          await api.updateProject(project.id, {
+            ...payload,
+            'baseVersion': mutation.baseVersion,
+          }, mutation.mutationId);
+        }
+        await outbox.acknowledge(mutation.mutationId);
+        await (database.update(database.projects)
+              ..where((row) => row.id.equals(project.id)))
+            .write(const ProjectsCompanion(syncStatus: Value('synced')));
+      } on DioException catch (error) {
+        if (error.response?.statusCode == 409) {
+          await outbox.markConflict(mutation.mutationId, error);
+        } else if (_isRetryableTransportError(error)) {
+          await outbox.markRetryable(mutation.mutationId, error);
+        } else {
+          await outbox.markFailed(mutation.mutationId, error);
+        }
+        rethrow;
+      }
+    }
+  }
+
+  Future<void> _pushProjectMilestones(OrialisApiClient api) async {
+    final rows = await (database.select(
+      database.projectMilestones,
+    )..where((row) => row.syncStatus.isNotIn(const ['synced']))).get();
+    final outbox = OutboxStore(database);
+    for (final milestone in rows) {
+      final mutation =
+          await outbox.findPendingForEntity(
+            'project_milestone',
+            milestone.id,
+          ) ??
+          await outbox.enqueue(
+            entityType: 'project_milestone',
+            entityId: milestone.id,
+            operation: _operationFor(milestone.syncStatus),
+            payloadJson: jsonEncode({
+              'id': milestone.id,
+              'projectId': milestone.projectId,
+              'title': milestone.title,
+              'due': milestone.due,
+              'completed': milestone.completed,
+              'completedAt': milestone.completedAt,
+              'position': milestone.position,
+              'version': milestone.version,
+              'createdAt': milestone.createdAt,
+              'updatedAt': milestone.updatedAt,
+              'deletedAt': milestone.deletedAt,
+            }),
+            baseVersion:
+                milestone.syncStatus == 'pendingUpdate' ||
+                    milestone.syncStatus == 'pendingDelete'
+                ? milestone.remoteVersion
+                : null,
+            entityRevision: milestone.localRevision,
+          );
+      await outbox.markInFlight(mutation.mutationId);
+      try {
+        final payload =
+            jsonDecode(mutation.payloadJson) as Map<String, dynamic>;
+        if (mutation.operation == 'create') {
+          await api.createProjectMilestone(
+            milestone.projectId,
+            payload,
+            mutation.mutationId,
+          );
+        } else if (mutation.operation == 'delete') {
+          await api.deleteProjectMilestone(
+            milestone.projectId,
+            milestone.id,
+            mutation.mutationId,
+          );
+        } else {
+          await api.updateProjectMilestone(milestone.projectId, milestone.id, {
+            ...payload,
+            'baseVersion': mutation.baseVersion,
+          }, mutation.mutationId);
+        }
+        await outbox.acknowledge(mutation.mutationId);
+        await (database.update(
+          database.projectMilestones,
+        )..where((row) => row.id.equals(milestone.id))).write(
+          const ProjectMilestonesCompanion(syncStatus: Value('synced')),
+        );
+      } on DioException catch (error) {
+        if (error.response?.statusCode == 409) {
+          await outbox.markConflict(mutation.mutationId, error);
+        } else if (_isRetryableTransportError(error)) {
+          await outbox.markRetryable(mutation.mutationId, error);
+        } else {
+          await outbox.markFailed(mutation.mutationId, error);
+        }
+        rethrow;
+      }
     }
   }
 

@@ -7,6 +7,7 @@ from unittest.mock import patch
 from gateway.config import Platform
 from gateway.platforms.base import SendResult
 
+from .. import adapter as adapter_module
 from .. import protocol
 from ..adapter import OrialisAdapter
 
@@ -187,7 +188,7 @@ class RoadmapAdapterTests(unittest.TestCase):
             return "text/plain"
 
         async def scenario():
-            with patch("integrations.hermes.orialis.adapter._download_attachment", fake_download):
+            with patch.object(adapter_module, "_download_attachment", fake_download):
                 await self.adapter._dispatch_message(message)
             await self.adapter._dispatch_delivery(delivery)
 

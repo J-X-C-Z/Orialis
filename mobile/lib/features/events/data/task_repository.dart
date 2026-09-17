@@ -36,6 +36,7 @@ class TaskRepository {
     bool? urgent,
     int? reminderMinutes,
     TaskRecurrence? recurrence,
+    String? projectId,
   }) => _delegate.createTask(
     title: title,
     notes: notes,
@@ -45,5 +46,44 @@ class TaskRepository {
     urgent: urgent,
     reminderMinutes: reminderMinutes,
     recurrence: recurrence,
+    projectId: projectId,
   );
+
+  Future<void> complete(Task task, bool completed) =>
+      _delegate.completeTask(task, completed);
+
+  Future<void> update(Task task, {required String title}) =>
+      _delegate.updateTask(task, title: title);
+
+  Future<void> updateDetails(
+    Task task, {
+    required String title,
+    String? notes,
+    String? due,
+    String? dueTime,
+    bool? important,
+    bool? urgent,
+    int? reminderMinutes,
+    TaskRecurrence? recurrence,
+    String? projectId,
+    bool reminderMinutesProvided = false,
+    bool recurrenceProvided = false,
+    bool projectIdProvided = false,
+  }) => _delegate.updateTaskDetails(
+    task,
+    title: title,
+    notes: notes,
+    due: due,
+    dueTime: dueTime,
+    important: important,
+    urgent: urgent,
+    reminderMinutes: reminderMinutes,
+    recurrence: recurrence,
+    projectId: projectId,
+    reminderMinutesProvided: reminderMinutesProvided,
+    recurrenceProvided: recurrenceProvided,
+    projectIdProvided: projectIdProvided,
+  );
+
+  Future<void> delete(Task task) => _delegate.deleteTask(task);
 }

@@ -22,7 +22,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
 
   @override
   Widget build(BuildContext context) {
-    final repository = ref.watch(eventRepositoryProvider);
+    final repository = ref.watch(scheduleRepositoryProvider);
     return OrialisPageScaffold(
       title: '${_date.year}/${_date.month}/${_date.day}',
       subtitle: '日程 · 只显示已安排的时间段',
@@ -50,7 +50,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         label: const Text('新增日程'),
       ),
       body: StreamBuilder<List<Schedule>>(
-        stream: repository.watchCalendarEventsForDate(_date),
+        stream: repository.watchForDate(_date),
         builder: (context, snapshot) {
           final events = snapshot.data ?? const [];
           if (events.isEmpty) {
@@ -80,12 +80,14 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                   trailing: PopupMenuButton<String>(
                     onSelected: (action) {
                       if (action == 'delete') {
-                        ref
-                            .read(eventRepositoryProvider)
-                            .deleteCalendarEvent(event);
+                        ref.read(scheduleRepositoryProvider).delete(event);
+                      }
+                      if (action == 'edit') {
+                        _editEvent(context, event);
                       }
                     },
                     itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'edit', child: Text('编辑')),
                       PopupMenuItem(value: 'delete', child: Text('删除')),
                     ],
                   ),
@@ -99,37 +101,160 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   }
 
   Future<void> _createEvent(BuildContext context) async {
-    var draft = '';
-    final title = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('新增日程'),
-        content: TextField(
-          autofocus: true,
-          onChanged: (value) => draft = value,
-          decoration: const InputDecoration(labelText: '标题'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, draft),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-    if (title == null || title.trim().isEmpty) return;
-    final start = DateTime(_date.year, _date.month, _date.day, 9);
+    final draft = await _showScheduleEditor(context, date: _date);
+    if (draft == null) return;
     await ref
-        .read(eventRepositoryProvider)
-        .createCalendarEvent(
-          title: title,
-          startAt: start,
-          endAt: start.add(const Duration(hours: 1)),
+        .read(scheduleRepositoryProvider)
+        .create(
+          title: draft.title,
+          startAt: draft.startAt,
+          endAt: draft.endAt,
+          allDay: draft.allDay,
+          location: draft.location,
+          description: draft.description,
+          reminderMinutes: draft.reminderMinutes,
         );
+  }
+
+  Future<void> _editEvent(BuildContext context, Schedule event) async {
+    final draft = await _showScheduleEditor(
+      context,
+      event: event,
+      date: DateTime.parse(event.startAt),
+    );
+    if (draft == null) return;
+    await ref
+        .read(scheduleRepositoryProvider)
+        .update(
+          event,
+          title: draft.title,
+          startAt: draft.startAt,
+          endAt: draft.endAt,
+          allDay: draft.allDay,
+          location: draft.location,
+          description: draft.description,
+          reminderMinutes: draft.reminderMinutes,
+        );
+  }
+
+  Future<_ScheduleDraft?> _showScheduleEditor(
+    BuildContext context, {
+    Schedule? event,
+    required DateTime date,
+  }) async {
+    final title = TextEditingController(text: event?.title ?? '');
+    final location = TextEditingController(text: event?.location ?? '');
+    final description = TextEditingController(text: event?.description ?? '');
+    final reminder = TextEditingController(
+      text: event?.reminderMinutes?.toString() ?? '',
+    );
+    final start = TextEditingController(
+      text:
+          event?.startAt ??
+          DateTime(date.year, date.month, date.day, 9).toIso8601String(),
+    );
+    final end = TextEditingController(
+      text:
+          event?.endAt ??
+          DateTime(date.year, date.month, date.day, 10).toIso8601String(),
+    );
+    var allDay = event?.allDay ?? false;
+    try {
+      return await showDialog<_ScheduleDraft>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            title: Text(event == null ? '新增日程' : '编辑日程'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: title,
+                    autofocus: event == null,
+                    decoration: const InputDecoration(labelText: '标题'),
+                  ),
+                  TextField(
+                    controller: start,
+                    decoration: const InputDecoration(
+                      labelText: '开始时间 ISO-8601',
+                    ),
+                  ),
+                  TextField(
+                    controller: end,
+                    decoration: const InputDecoration(
+                      labelText: '结束时间 ISO-8601',
+                    ),
+                  ),
+                  TextField(
+                    controller: location,
+                    decoration: const InputDecoration(labelText: '地点'),
+                  ),
+                  TextField(
+                    controller: description,
+                    decoration: const InputDecoration(labelText: '描述'),
+                  ),
+                  TextField(
+                    controller: reminder,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: '提醒分钟'),
+                  ),
+                  SwitchListTile(
+                    title: const Text('全天'),
+                    value: allDay,
+                    onChanged: (value) => setState(() => allDay = value),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final startAt = DateTime.tryParse(start.text.trim());
+                  final endAt = DateTime.tryParse(end.text.trim());
+                  final minutes = int.tryParse(reminder.text.trim());
+                  if (title.text.trim().isEmpty ||
+                      startAt == null ||
+                      endAt == null ||
+                      !startAt.isBefore(endAt) ||
+                      (minutes != null && minutes < 0)) {
+                    return;
+                  }
+                  Navigator.pop(
+                    dialogContext,
+                    _ScheduleDraft(
+                      title: title.text.trim(),
+                      startAt: startAt,
+                      endAt: endAt,
+                      allDay: allDay,
+                      location: location.text.trim().isEmpty
+                          ? null
+                          : location.text.trim(),
+                      description: description.text.trim().isEmpty
+                          ? null
+                          : description.text.trim(),
+                      reminderMinutes: minutes,
+                    ),
+                  );
+                },
+                child: const Text('保存'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      title.dispose();
+      start.dispose();
+      end.dispose();
+      location.dispose();
+      description.dispose();
+      reminder.dispose();
+    }
   }
 
   String _time(String value) {
@@ -138,4 +263,23 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     final local = parsed.toLocal();
     return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
   }
+}
+
+class _ScheduleDraft {
+  const _ScheduleDraft({
+    required this.title,
+    required this.startAt,
+    required this.endAt,
+    required this.allDay,
+    this.location,
+    this.description,
+    this.reminderMinutes,
+  });
+  final String title;
+  final DateTime startAt;
+  final DateTime endAt;
+  final bool allDay;
+  final String? location;
+  final String? description;
+  final int? reminderMinutes;
 }

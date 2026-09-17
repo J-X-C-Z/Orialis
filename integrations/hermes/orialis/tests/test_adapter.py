@@ -7,6 +7,7 @@ from unittest.mock import patch
 from gateway.config import Platform
 import websockets
 
+from .. import adapter as adapter_module
 from ..adapter import OrialisAdapter
 from ..config import OrialisConfig
 from ..conversation import chat_id_for_conversation, conversation_id_for_chat_id
@@ -168,7 +169,7 @@ class AdapterTests(unittest.TestCase):
             destination.write_bytes(b"test")
             return "text/plain"
 
-        with patch("integrations.hermes.orialis.adapter._download_attachment", fake_download):
+        with patch.object(adapter_module, "_download_attachment", fake_download):
             asyncio.run(adapter._dispatch_message(message))
         self.assertEqual(observed[0][1], "text/plain")
         self.assertFalse(Path(observed[0][0]).exists())

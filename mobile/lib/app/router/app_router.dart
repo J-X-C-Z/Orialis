@@ -9,6 +9,7 @@ import '../../pages/events/events_page.dart';
 import '../../pages/profile/profile_page.dart';
 import '../../pages/shell/orialis_shell.dart';
 import '../../pages/today/today_page.dart';
+import '../../pages/projects/projects_page.dart';
 
 GoRouter buildRouter() {
   return GoRouter(
@@ -51,6 +52,10 @@ GoRouter buildRouter() {
           StatefulShellBranch(
             routes: [
               GoRoute(path: '/profile', builder: (_, _) => const ProfilePage()),
+              GoRoute(
+                path: '/projects',
+                builder: (_, _) => const ProjectsPage(),
+              ),
             ],
           ),
         ],

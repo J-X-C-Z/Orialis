@@ -121,6 +121,7 @@ class EventRepository {
     bool? urgent,
     int? reminderMinutes,
     TaskRecurrence? recurrence,
+    String? projectId,
   }) async {
     _validateDueTime(due, dueTime);
     final timestamp = DateTime.now().toUtc().toIso8601String();
@@ -141,6 +142,7 @@ class EventRepository {
               urgent: Value(urgent),
               reminderMinutes: Value(reminderMinutes),
               recurrence: Value(recurrence?.encode()),
+              projectId: Value(projectId),
               createdAt: timestamp,
               updatedAt: timestamp,
               syncStatus: const Value('pendingCreate'),
@@ -159,6 +161,7 @@ class EventRepository {
     bool allDay = false,
     int? reminderMinutes,
   }) async {
+    _validateSchedule(startAt, endAt, reminderMinutes);
     final timestamp = DateTime.now().toUtc().toIso8601String();
     final id = const Uuid().v7();
     await database.transaction(() async {
@@ -234,8 +237,10 @@ class EventRepository {
     bool? urgent,
     int? reminderMinutes,
     TaskRecurrence? recurrence,
+    String? projectId,
     bool reminderMinutesProvided = false,
     bool recurrenceProvided = false,
+    bool projectIdProvided = false,
   }) async {
     _validateDueTime(due, dueTime);
     await database.transaction(() async {
@@ -254,6 +259,9 @@ class EventRepository {
               : const Value.absent(),
           recurrence: recurrenceProvided
               ? Value(recurrence?.encode())
+              : const Value.absent(),
+          projectId: projectIdProvided
+              ? Value(projectId)
               : const Value.absent(),
           updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
           localRevision: Value(task.localRevision + 1),
@@ -276,6 +284,7 @@ class EventRepository {
     int? reminderMinutes,
     bool reminderMinutesProvided = false,
   }) async {
+    _validateSchedule(startAt, endAt, reminderMinutes);
     await database.transaction(() async {
       await (database.update(
         database.calendarEvents,
@@ -350,6 +359,19 @@ class EventRepository {
   void _validateDueTime(String? due, String? dueTime) {
     if (due == null && dueTime != null) {
       throw ArgumentError('dueTime requires due');
+    }
+  }
+
+  void _validateSchedule(
+    DateTime startAt,
+    DateTime endAt,
+    int? reminderMinutes,
+  ) {
+    if (!startAt.isBefore(endAt)) {
+      throw ArgumentError('schedule startAt must be before endAt');
+    }
+    if (reminderMinutes != null && reminderMinutes < 0) {
+      throw ArgumentError('reminderMinutes cannot be negative');
     }
   }
 

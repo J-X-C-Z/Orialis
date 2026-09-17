@@ -5,6 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from .. import tools
 from ..tools import (
     CAPABILITY_SCHEMA,
     DOMAIN_CONTRACTS,
@@ -62,14 +63,15 @@ class CapabilityToolTests(unittest.TestCase):
             os.environ,
             {"ORIALIS_SERVER_URL": "wss://orialis.example.test/api/v1/agent/ws"},
             clear=False,
-        ), patch(
-            "integrations.hermes.orialis.tools._fetch_server_capabilities",
+        ), patch.object(
+            tools,
+            "_fetch_server_capabilities",
             return_value={
                 "ok": True,
                 "payload": {"api_version": "v1", "capabilities": ["tasks", "messages"]},
             },
         ):
-            result = json.loads(asyncio.run(handle_capabilities({})))
+            result = json.loads(asyncio.run(tools.handle_capabilities({})))
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["server"]["api_version"], "v1")
@@ -85,11 +87,12 @@ class CapabilityToolTests(unittest.TestCase):
             os.environ,
             {"ORIALIS_SERVER_URL": "wss://orialis.example.test/api/v1/agent/ws"},
             clear=False,
-        ), patch(
-            "integrations.hermes.orialis.tools._fetch_server_capabilities",
+        ), patch.object(
+            tools,
+            "_fetch_server_capabilities",
             return_value={"ok": False, "error": "offline"},
         ):
-            result = json.loads(asyncio.run(handle_capabilities({})))
+            result = json.loads(asyncio.run(tools.handle_capabilities({})))
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["server"]["discovery"], {"ok": False, "error": "offline"})

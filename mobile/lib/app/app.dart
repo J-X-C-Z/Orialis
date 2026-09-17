@@ -8,6 +8,7 @@ import '../core/database/app_database.dart';
 import '../features/events/data/event_repository.dart';
 import '../features/events/data/task_repository.dart';
 import '../features/events/data/schedule_repository.dart';
+import '../features/projects/data/project_repository.dart';
 import '../features/chat/data/chat_repository.dart';
 import '../core/realtime/mobile_realtime_client.dart';
 import '../core/sync/sync_engine.dart';
@@ -36,6 +37,10 @@ final taskRepositoryProvider = Provider<TaskRepository>(
 
 final scheduleRepositoryProvider = Provider<ScheduleRepository>(
   (ref) => ScheduleRepository(delegate: ref.watch(eventRepositoryProvider)),
+);
+
+final projectRepositoryProvider = Provider<ProjectRepository>(
+  (ref) => ProjectRepository(ref.watch(databaseProvider)),
 );
 
 final syncEngineProvider = Provider<SyncEngine>((ref) {

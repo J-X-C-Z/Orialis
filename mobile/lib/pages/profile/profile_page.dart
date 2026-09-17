@@ -255,6 +255,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         : null,
                   ),
                 ),
+                ListTile(
+                  title: const Text('项目'),
+                  subtitle: const Text('项目、里程碑与关联任务'),
+                  leading: const Icon(Icons.work_outline),
+                  onTap: () => context.push('/projects'),
+                ),
                 if (_syncState == SyncState.conflict)
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 0, 16, 12),

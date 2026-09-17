@@ -31,4 +31,28 @@ class ScheduleRepository {
     allDay: allDay,
     reminderMinutes: reminderMinutes,
   );
+
+  Future<void> update(
+    CalendarEvent schedule, {
+    required String title,
+    required DateTime startAt,
+    required DateTime endAt,
+    String? description,
+    String? location,
+    bool? allDay,
+    int? reminderMinutes,
+  }) => _delegate.updateSchedule(
+    schedule,
+    title: title,
+    startAt: startAt,
+    endAt: endAt,
+    description: description,
+    location: location,
+    allDay: allDay,
+    reminderMinutes: reminderMinutes,
+    reminderMinutesProvided: true,
+  );
+
+  Future<void> delete(CalendarEvent schedule) =>
+      _delegate.deleteCalendarEvent(schedule);
 }

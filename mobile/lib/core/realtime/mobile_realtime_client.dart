@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -56,6 +57,18 @@ class MobileRealtimeClient {
   bool get capabilitiesNegotiated => _capabilitiesNegotiated;
   Set<String> get capabilities => _capabilities;
 
+  @visibleForTesting
+  bool get reconnectScheduled => _reconnectTimer != null;
+
+  @visibleForTesting
+  void ingestForTest(String value) => _receive(value);
+
+  @visibleForTesting
+  void simulateDisconnectForTest() {
+    _channel = null;
+    _scheduleReconnect();
+  }
+
   static const clientCapabilities = <String>{
     'agent.typing',
     'markdown.safe',
@@ -101,6 +114,11 @@ class MobileRealtimeClient {
       },
       connectTimeout: const Duration(seconds: 4),
     );
+    // IOWebSocketChannel reports handshake/DNS failures through both the
+    // channel stream and its ready future. The stream listener below handles
+    // reconnect state; consume ready as well so offline startup cannot surface
+    // an unhandled async exception in Flutter.
+    unawaited(channel.ready.catchError((_) {}));
     _channel = channel;
     _capabilities = const {};
     _capabilitiesNegotiated = false;

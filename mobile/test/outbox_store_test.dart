@@ -85,8 +85,11 @@ void main() {
 
     await repository.createTask(
       title: '未分类任务',
+      notes: '保留备注',
       due: '2026-09-20',
       dueTime: '23:59',
+      reminderMinutes: 15,
+      projectId: 'project-1',
       recurrence: const TaskRecurrence(
         rule: 'FREQ=WEEKLY;BYDAY=MO',
         until: '2026-12-31',
@@ -96,6 +99,9 @@ void main() {
     final task = await database.select(database.tasks).getSingle();
     expect(task.important, isNull);
     expect(task.urgent, isNull);
+    expect(task.notes, '保留备注');
+    expect(task.reminderMinutes, 15);
+    expect(task.projectId, 'project-1');
     expect(jsonDecode(task.recurrence!), {
       'rule': 'FREQ=WEEKLY;BYDAY=MO',
       'until': '2026-12-31',

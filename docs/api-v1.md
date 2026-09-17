@@ -251,15 +251,15 @@ Authorization: Session <accessToken>
 | `id` | string | 服务端生成的实体 ID |
 | `title` | string | 非空标题 |
 | `notes` | string/null | 备注 |
-| `important` | boolean | 重要性，创建时默认为 `false` |
-| `urgent` | boolean | 紧急性，创建时默认为 `false` |
+| `important` | boolean/null | 重要性；`null` 表示未分类 |
+| `urgent` | boolean/null | 紧急性；`null` 表示未分类 |
 | `completed` | boolean | 是否完成，创建时默认为 `false` |
 | `completedAt` | string/null | 完成时间；完成任务时为 RFC 3339 时间，未完成时为 `null` |
 | `due` | string/null | 截止日期 |
 | `dueTime` | string/null | 截止时间；没有 `due` 时必须为空 |
 | `reminderMinutes` | integer/null | 提前提醒分钟数 |
 | `projectId` | string/null | 所属项目 ID |
-| `recurrence` | string/null | 当前实现将请求中的 JSON 值转为字符串保存 |
+| `recurrence` | object/null | `{"rule":"<RFC 5545 RRULE>","until":"YYYY-MM-DD"}`，或 `null` |
 | `createdAt` | string | 创建时间 |
 | `updatedAt` | string | 最近更新时间 |
 | `version` | integer | 乐观并发版本 |

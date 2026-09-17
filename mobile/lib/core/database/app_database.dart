@@ -172,18 +172,59 @@ class AppDatabase extends _$AppDatabase {
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) => m.createAll(),
     onUpgrade: (m, from, to) async {
+      Future<bool> hasColumn(String tableName, String columnName) async {
+        final columns = await customSelect(
+          'PRAGMA table_info("$tableName")',
+        ).get();
+        return columns.any((row) => row.data['name'] == columnName);
+      }
+
+      Future<bool> hasSchemaObject(String type, String name) async {
+        final objects = await customSelect(
+          'SELECT name FROM sqlite_master WHERE type = ? AND name = ?',
+          variables: [Variable.withString(type), Variable.withString(name)],
+        ).get();
+        return objects.isNotEmpty;
+      }
+
+      Future<void> addColumnIfMissing(
+        String tableName,
+        String columnName,
+        Future<void> Function() addColumn,
+      ) async {
+        if (!await hasColumn(tableName, columnName)) {
+          await addColumn();
+        }
+      }
+
       if (from < 2) {
-        await m.addColumn(tasks, tasks.remoteVersion);
-        await m.addColumn(calendarEvents, calendarEvents.remoteVersion);
+        await addColumnIfMissing(
+          'tasks',
+          'remote_version',
+          () => m.addColumn(tasks, tasks.remoteVersion),
+        );
+        await addColumnIfMissing(
+          'calendar_events',
+          'remote_version',
+          () => m.addColumn(calendarEvents, calendarEvents.remoteVersion),
+        );
       }
       if (from < 3) {
-        await m.createTable(messages);
+        if (!await hasSchemaObject('table', 'messages')) {
+          await m.createTable(messages);
+        }
       }
       if (from < 4) {
-        await m.addColumn(messages, messages.attachmentsJson);
+        await addColumnIfMissing(
+          'messages',
+          'attachments_json',
+          () => m.addColumn(messages, messages.attachmentsJson),
+        );
       }
       if (from < 5) {
-        await m.createTable(conversations);
+        if (!await hasSchemaObject('table', 'conversations')) {
+          await m.createTable(conversations);
+        }
       }
       if (from < 6) {
         await customStatement('ALTER TABLE tasks RENAME TO tasks_v5');
@@ -231,17 +272,45 @@ class AppDatabase extends _$AppDatabase {
           FROM tasks_v5
         ''');
         await customStatement('DROP TABLE tasks_v5');
-        await m.addColumn(calendarEvents, calendarEvents.reminderMinutes);
-        await m.addColumn(calendarEvents, calendarEvents.localRevision);
-        await m.createTable(outboxMutations);
+        await addColumnIfMissing(
+          'calendar_events',
+          'reminder_minutes',
+          () => m.addColumn(calendarEvents, calendarEvents.reminderMinutes),
+        );
+        await addColumnIfMissing(
+          'calendar_events',
+          'local_revision',
+          () => m.addColumn(calendarEvents, calendarEvents.localRevision),
+        );
+        if (!await hasSchemaObject('table', 'outbox_mutations')) {
+          await m.createTable(outboxMutations);
+        }
       }
       if (from < 7) {
-        await m.createTable(projects);
-        await m.createTable(projectMilestones);
-        await m.createIndex(idxProjectMilestonesProjectPosition);
+        if (!await hasSchemaObject('table', 'projects')) {
+          await m.createTable(projects);
+        }
+        if (!await hasSchemaObject('table', 'project_milestones')) {
+          await m.createTable(projectMilestones);
+        }
+        // SQLite supports IF NOT EXISTS for indexes; use it here because a
+        // pre-release database may have the index without matching Drift's
+        // recorded schema version.
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS '
+          'idx_project_milestones_project_position '
+          'ON project_milestones (project_id, deleted_at, position, id)',
+        );
       }
       if (from < 8) {
-        await m.addColumn(conversations, conversations.localRevision);
+        // Some pre-release A03 builds shipped columns while still reporting
+        // an older schema version. Keep upgrades idempotent for those
+        // devices instead of failing on duplicate-column errors.
+        await addColumnIfMissing(
+          'conversations',
+          'local_revision',
+          () => m.addColumn(conversations, conversations.localRevision),
+        );
       }
     },
   );

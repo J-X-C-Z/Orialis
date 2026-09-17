@@ -9,6 +9,7 @@ import 'package:orialis_mobile/core/database/app_database.dart';
 import 'package:orialis_mobile/core/network/orialis_api_client.dart';
 import 'package:orialis_mobile/core/sync/outbox_store.dart';
 import 'package:orialis_mobile/core/sync/sync_engine.dart';
+import 'package:orialis_mobile/features/projects/data/project_repository.dart';
 
 const timestamp = '2026-09-17T00:00:00Z';
 const deletedAt = '2026-09-18T00:00:00Z';
@@ -120,6 +121,81 @@ class FakeApi extends OrialisApiClient {
   int snapshotCalls = 0;
   final afterCursors = <int>[];
   bool expireNextCursor = false;
+  final calls = <String, Map<String, dynamic>>{};
+  bool failProjectUpdate = false;
+  bool failMilestoneCreate = false;
+  bool failMilestoneUpdate = false;
+
+  @override
+  Future<Map<String, dynamic>> createProject(
+    Map<String, dynamic> payload,
+    String mutationId,
+  ) async {
+    calls['project.create'] = {'payload': payload, 'mutationId': mutationId};
+    return payload;
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateProject(
+    String id,
+    Map<String, dynamic> payload,
+    String mutationId,
+  ) async {
+    calls['project.update'] = {
+      'id': id,
+      'payload': payload,
+      'mutationId': mutationId,
+    };
+    if (failProjectUpdate) {
+      throw DioException(
+        requestOptions: RequestOptions(path: '/projects/$id'),
+        type: DioExceptionType.connectionError,
+      );
+    }
+    return payload;
+  }
+
+  @override
+  Future<Map<String, dynamic>> createProjectMilestone(
+    String projectId,
+    Map<String, dynamic> payload,
+    String mutationId,
+  ) async {
+    calls['milestone.create'] = {
+      'projectId': projectId,
+      'payload': payload,
+      'mutationId': mutationId,
+    };
+    if (failMilestoneCreate) {
+      throw DioException(
+        requestOptions: RequestOptions(path: '/milestones'),
+        type: DioExceptionType.connectionError,
+      );
+    }
+    return payload;
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateProjectMilestone(
+    String projectId,
+    String id,
+    Map<String, dynamic> payload,
+    String mutationId,
+  ) async {
+    calls['milestone.update'] = {
+      'projectId': projectId,
+      'id': id,
+      'payload': payload,
+      'mutationId': mutationId,
+    };
+    if (failMilestoneUpdate) {
+      throw DioException(
+        requestOptions: RequestOptions(path: '/milestones/$id'),
+        type: DioExceptionType.connectionError,
+      );
+    }
+    return payload;
+  }
 
   @override
   Future<List<Map<String, dynamic>>> listConversations() async => [];
@@ -207,6 +283,78 @@ void main() {
         await database.select(database.projectMilestones).get(),
         hasLength(2),
       );
+    },
+  );
+
+  test(
+    'milestone outbox uploads and retry preserves the pending mutation',
+    () async {
+      final repository = ProjectRepository(database);
+      final milestone = await repository.createMilestone(
+        projectId: 'p1',
+        title: 'Beta',
+        due: '2026-09-25',
+      );
+      final mutation = (await (database.select(
+        database.outboxMutations,
+      )..where((row) => row.entityId.equals(milestone.id))).get()).first;
+      expect(await engine.syncOnce(), SyncState.idle);
+      expect(api.calls['milestone.create']?['projectId'], 'p1');
+      expect(api.calls['milestone.create']?['mutationId'], mutation.mutationId);
+      expect(
+        (await (database.select(
+          database.projectMilestones,
+        )..where((row) => row.id.equals(milestone.id))).getSingle()).syncStatus,
+        'synced',
+      );
+
+      final edited = await (database.select(
+        database.projectMilestones,
+      )..where((row) => row.id.equals(milestone.id))).getSingle();
+      await repository.updateMilestone(edited, title: 'Beta 2');
+      api.failMilestoneUpdate = true;
+      expect(await engine.syncOnce(), SyncState.offline);
+      final retry = (await (database.select(
+        database.outboxMutations,
+      )..where((row) => row.entityId.equals(milestone.id))).get()).last;
+      expect(retry.status, OutboxStatus.pending);
+      expect(retry.mutationId, isNot(mutation.mutationId));
+      expect(retry.payloadJson, contains('Beta 2'));
+    },
+  );
+
+  test(
+    'repository outbox is uploaded by sync engine and failure is recoverable',
+    () async {
+      final repository = ProjectRepository(database);
+      final local = await repository.createProject(name: 'Local', goal: 'Goal');
+      final mutation = (await (database.select(
+        database.outboxMutations,
+      )..where((row) => row.entityId.equals(local.id))).get()).first;
+      expect(await engine.syncOnce(), SyncState.idle);
+      expect(api.calls['project.create']?['mutationId'], mutation.mutationId);
+      expect(
+        (await (database.select(
+          database.projects,
+        )..where((row) => row.id.equals(local.id))).getSingle()).syncStatus,
+        'synced',
+      );
+
+      final edited = (await (database.select(
+        database.projects,
+      )..where((row) => row.id.equals(local.id))).get()).single;
+      await repository.updateProject(edited, name: 'Edited', goal: null);
+      final retry = (await (database.select(
+        database.outboxMutations,
+      )..where((row) => row.entityId.equals(local.id))).get()).last;
+      api.failProjectUpdate = true;
+      expect(await engine.syncOnce(), SyncState.offline);
+      final retained = (await (database.select(
+        database.outboxMutations,
+      )..where((row) => row.entityId.equals(local.id))).get()).last;
+      expect(retained.mutationId, retry.mutationId);
+      expect(retained.payloadJson, retry.payloadJson);
+      expect(local.id, edited.id);
     },
   );
 

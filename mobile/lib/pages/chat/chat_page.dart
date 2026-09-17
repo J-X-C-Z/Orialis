@@ -15,6 +15,7 @@ import '../../core/database/app_database.dart';
 import '../../core/attachments/attachment_bridge.dart';
 import '../../core/realtime/mobile_realtime_client.dart';
 import '../../features/chat/data/chat_repository.dart';
+import '../../features/chat/application/chat_controller.dart';
 import '../../features/chat/domain/agent_event_state.dart';
 import '../../features/chat/presentation/agent_event_cards.dart';
 import '../../features/chat/presentation/safe_markdown.dart';
@@ -42,6 +43,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   final _agentEvents = AgentEventStore();
   late final StreamSubscription<MobileEnvelope> _realtimeSubscription;
   late String _conversationId;
+  late final ChatController _chatController;
   bool _sending = false;
   bool _deliveryEnabled = false;
 
@@ -49,6 +51,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   void initState() {
     super.initState();
     _conversationId = widget.conversationId;
+    _chatController = ChatController(
+      repository: widget.repository,
+      flush: () => ref.read(syncCoordinatorProvider).requestSync(),
+    );
     final realtime = ref.read(realtimeClientProvider);
     _realtimeSubscription = realtime.events.listen((event) {
       if (event.type == 'message') return;
@@ -339,16 +345,13 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     setState(() => _attachments.clear());
     setState(() => _sending = true);
     try {
-      await widget.repository.sendMessage(
+      await _chatController.send(
         conversationId: _conversationId,
         content: content.trim(),
         attachmentsJson: jsonEncode(
           attachments.map((attachment) => attachment.toJson()).toList(),
         ),
       );
-      // Keep local-first semantics, but flush the queued message immediately
-      // so the chat send action reaches Hermes without a separate sync step.
-      await ref.read(syncCoordinatorProvider).requestSync();
       if (mounted) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_scrollController.hasClients) {
@@ -362,6 +365,18 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       }
     } finally {
       if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _retryMessage(String messageId) async {
+    try {
+      await _chatController.retry(messageId);
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('重试失败：$error')));
+      }
     }
   }
 
@@ -471,7 +486,12 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                           onAction: _sendAgentAction,
                         ),
                         for (final message in items)
-                          _MessageBubble(message: message),
+                          _MessageBubble(
+                            message: message,
+                            onRetry: message.syncStatus == 'pendingCreate'
+                                ? () => _retryMessage(message.id)
+                                : null,
+                          ),
                       ],
                     ),
             ),
@@ -580,8 +600,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 }
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message});
+  const _MessageBubble({required this.message, this.onRetry});
   final Message message;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -611,7 +632,10 @@ class _MessageBubble extends StatelessWidget {
               ),
               if (isUser) ...[
                 const SizedBox(width: 4),
-                const Icon(Icons.done_all, size: 13, color: AppColors.accent),
+                if (message.syncStatus == 'pendingCreate')
+                  TextButton(onPressed: onRetry, child: const Text('重试'))
+                else
+                  const Icon(Icons.done_all, size: 13, color: AppColors.accent),
               ],
             ],
           ),

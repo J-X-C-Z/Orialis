@@ -11,16 +11,30 @@ class TodayPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final repository = ref.watch(eventRepositoryProvider);
+    final taskRepository = ref.watch(taskRepositoryProvider);
+    final scheduleRepository = ref.watch(scheduleRepositoryProvider);
     final today = DateTime.now();
+    final todayKey =
+        '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
     return OrialisPageScaffold(
       title: 'Orialis',
       subtitle: _dateLabel(today),
       padding: EdgeInsets.zero,
       body: StreamBuilder(
-        stream: repository.watchTodayTasks(today),
+        stream: taskRepository.watchTasks(),
         builder: (context, snapshot) {
-          final tasks = snapshot.data ?? const [];
+          final allTasks = snapshot.data ?? const [];
+          final tasks = allTasks
+              .where((task) => task.due == todayKey && !task.completed)
+              .toList();
+          final overdue = allTasks
+              .where(
+                (task) =>
+                    !task.completed &&
+                    task.due != null &&
+                    task.due!.compareTo(todayKey) < 0,
+              )
+              .toList();
           return ListView(
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.page,
@@ -37,6 +51,8 @@ class TodayPage extends ConsumerWidget {
                   context,
                 ).textTheme.bodyMedium?.copyWith(color: AppColors.muted),
               ),
+              const SizedBox(height: 8),
+              Text('未完成 ${tasks.length + overdue.length} 项 · 日程见下方'),
               const SizedBox(height: AppSpacing.section),
               _TodaySection(
                 title: '到期事项',
@@ -49,9 +65,21 @@ class TodayPage extends ConsumerWidget {
                         ],
                       ),
               ),
+              if (overdue.isNotEmpty) ...[
+                const SizedBox(height: AppSpacing.section),
+                _TodaySection(
+                  title: '逾期未完成',
+                  description: '这些任务不会被静默归入今天，但仍需要处理。',
+                  child: Column(
+                    children: [
+                      for (final task in overdue) _TaskTile(task: task),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: AppSpacing.section),
               StreamBuilder(
-                stream: repository.watchCalendarEventsForDate(today),
+                stream: scheduleRepository.watchForDate(today),
                 builder: (context, eventSnapshot) {
                   final events = eventSnapshot.data ?? const [];
                   return _TodaySection(
@@ -129,7 +157,7 @@ class _TaskTile extends ConsumerWidget {
     child: CheckboxListTile(
       value: task.completed,
       onChanged: (value) =>
-          ref.read(eventRepositoryProvider).completeTask(task, value ?? false),
+          ref.read(taskRepositoryProvider).complete(task, value ?? false),
       title: Text(task.title),
       subtitle: task.dueTime == null ? null : Text(task.dueTime!),
       controlAffinity: ListTileControlAffinity.leading,

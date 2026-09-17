@@ -5,13 +5,15 @@ import '../../app/app.dart';
 import '../../app/design/design_components.dart';
 import '../../app/design/design_tokens.dart';
 import '../../core/database/app_database.dart';
+import '../../features/events/presentation/task_editor.dart';
+import '../../features/events/presentation/task_quadrant.dart';
 
 class EventsPage extends ConsumerWidget {
   const EventsPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final repository = ref.watch(eventRepositoryProvider);
+    final repository = ref.watch(taskRepositoryProvider);
     return OrialisPageScaffold(
       title: '事件',
       subtitle: '任务清单 · 只管理要完成的事',
@@ -46,12 +48,10 @@ class EventsPage extends ConsumerWidget {
                 child: CheckboxListTile(
                   value: task.completed,
                   onChanged: (value) =>
-                      repository.completeTask(task, value ?? false),
+                      repository.complete(task, value ?? false),
                   title: Text(task.title),
                   subtitle: Text(
-                    task.due == null
-                        ? '无截止日期'
-                        : '${task.due}${task.dueTime == null ? '' : ' ${task.dueTime}'}',
+                    '${quadrantLabel(quadrantOf(task))} · ${task.due == null ? '无截止日期' : '${task.due}${task.dueTime == null ? '' : ' ${task.dueTime}'}'}',
                   ),
                   controlAffinity: ListTileControlAffinity.leading,
                   secondary: PopupMenuButton<String>(
@@ -60,7 +60,7 @@ class EventsPage extends ConsumerWidget {
                         await _editTask(context, ref, task);
                       }
                       if (action == 'delete') {
-                        await repository.deleteTask(task);
+                        await repository.delete(task);
                       }
                     },
                     itemBuilder: (_) => const [
@@ -78,58 +78,45 @@ class EventsPage extends ConsumerWidget {
   }
 
   Future<void> _createTask(BuildContext context, WidgetRef ref) async {
-    var draft = '';
-    final title = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('新增事件'),
-        content: TextField(
-          autofocus: true,
-          onChanged: (value) => draft = value,
-          decoration: const InputDecoration(labelText: '标题'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
+    await showTaskEditor(
+      context,
+      onSave: (draft) => ref
+          .read(taskRepositoryProvider)
+          .create(
+            title: draft.title,
+            notes: draft.notes,
+            due: draft.due,
+            dueTime: draft.dueTime,
+            important: draft.important,
+            urgent: draft.urgent,
+            reminderMinutes: draft.reminderMinutes,
+            recurrence: draft.recurrence,
+            projectId: draft.projectId,
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, draft),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
     );
-    if (title != null && title.trim().isNotEmpty) {
-      await ref.read(eventRepositoryProvider).createTask(title: title);
-    }
   }
 
   Future<void> _editTask(BuildContext context, WidgetRef ref, Task task) async {
-    var draft = task.title;
-    final title = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('编辑事件'),
-        content: TextField(
-          autofocus: true,
-          onChanged: (value) => draft = value,
-          decoration: InputDecoration(labelText: '标题', hintText: task.title),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
+    await showTaskEditor(
+      context,
+      task: task,
+      onSave: (draft) => ref
+          .read(taskRepositoryProvider)
+          .updateDetails(
+            task,
+            title: draft.title,
+            notes: draft.notes,
+            due: draft.due,
+            dueTime: draft.dueTime,
+            important: draft.important,
+            urgent: draft.urgent,
+            reminderMinutes: draft.reminderMinutes,
+            recurrence: draft.recurrence,
+            projectId: draft.projectId,
+            reminderMinutesProvided: true,
+            recurrenceProvided: true,
+            projectIdProvided: true,
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, draft),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
     );
-    if (title != null && title.trim().isNotEmpty) {
-      await ref.read(eventRepositoryProvider).updateTask(task, title: title);
-    }
   }
 }
