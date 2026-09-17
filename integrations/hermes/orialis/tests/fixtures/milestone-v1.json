@@ -1,0 +1,14 @@
+{
+  "id": "milestone-1",
+  "userId": "user-1",
+  "projectId": "project-1",
+  "title": "完成开题",
+  "due": "2026-10-01",
+  "completed": false,
+  "completedAt": null,
+  "position": 1,
+  "createdAt": "2026-09-01T00:00:00Z",
+  "updatedAt": "2026-09-16T08:00:00Z",
+  "version": 1,
+  "deletedAt": null
+}

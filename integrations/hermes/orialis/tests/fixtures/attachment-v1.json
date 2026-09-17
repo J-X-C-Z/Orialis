@@ -1,0 +1,7 @@
+{
+  "id": "attachment-1",
+  "name": "notes.txt",
+  "mimeType": "text/plain",
+  "size": 12,
+  "downloadUrl": "https://orialis.example/api/v1/attachments/attachment-1"
+}

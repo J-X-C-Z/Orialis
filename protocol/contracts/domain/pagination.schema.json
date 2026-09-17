@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/domain/pagination-v1.schema.json",
+  "title": "Orialis paginated response v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["items", "nextCursor", "hasMore"],
+  "properties": {
+    "items": {"type": "array"},
+    "nextCursor": {"$ref": "./common.schema.json#/$defs/nullableString"},
+    "hasMore": {"type": "boolean"}
+  }
+}

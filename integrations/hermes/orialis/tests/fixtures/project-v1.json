@@ -1,0 +1,14 @@
+{
+  "id": "project-1",
+  "name": "毕业设计",
+  "goal": "按期完成并答辩",
+  "description": null,
+  "color": "#4F46E5",
+  "status": "active",
+  "startDate": "2026-09-01",
+  "due": "2026-12-01",
+  "nextActionTaskId": "task-1",
+  "createdAt": "2026-09-01T00:00:00Z",
+  "updatedAt": "2026-09-16T08:00:00Z",
+  "version": 3
+}

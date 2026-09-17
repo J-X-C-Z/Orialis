@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/domain/snapshot-v1.schema.json",
+  "title": "Orialis sync snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cursor", "tasks", "projects", "calendarEvents", "milestones"],
+  "properties": {
+    "cursor": {"type": "integer", "minimum": 0},
+    "tasks": {"type": "array"},
+    "projects": {"type": "array", "items": {"$ref": "project.schema.json"}},
+    "calendarEvents": {"type": "array"},
+    "milestones": {"type": "array", "items": {"$ref": "milestone.schema.json"}}
+  }
+}

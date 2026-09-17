@@ -110,7 +110,7 @@ void main() {
       'rule': 'FREQ=WEEKLY;BYDAY=MO',
       'until': '2026-12-31',
     });
-    expect(database.schemaVersion, 6);
+    expect(database.schemaVersion, 7);
   });
 
   test(
@@ -132,7 +132,7 @@ void main() {
       final schedule = await (database.select(
         database.calendarEvents,
       )..where((row) => row.id.equals('legacy-schedule'))).getSingle();
-      expect(database.schemaVersion, 6);
+      expect(database.schemaVersion, 7);
       expect(task.important, isNull);
       expect(task.urgent, true);
       expect(task.recurrence, contains('FREQ=DAILY'));

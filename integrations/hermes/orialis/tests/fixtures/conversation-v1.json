@@ -1,0 +1,9 @@
+{
+  "id": "default",
+  "title": "默认会话",
+  "isDefault": true,
+  "type": "default",
+  "createdAt": "2026-09-01T00:00:00Z",
+  "updatedAt": "2026-09-16T08:00:00Z",
+  "version": 1
+}

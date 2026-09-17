@@ -50,6 +50,52 @@ class CalendarEvents extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+class Projects extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get goal => text().nullable()();
+  TextColumn get description => text().nullable()();
+  TextColumn get color => text().nullable()();
+  TextColumn get status => text().withDefault(const Constant('active'))();
+  TextColumn get startDate => text().nullable()();
+  TextColumn get due => text().nullable()();
+  TextColumn get nextActionTaskId => text().nullable()();
+  IntColumn get version => integer().withDefault(const Constant(1))();
+  IntColumn get remoteVersion => integer().withDefault(const Constant(0))();
+  IntColumn get localRevision => integer().withDefault(const Constant(0))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+  TextColumn get deletedAt => text().nullable()();
+  TextColumn get syncStatus => text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+@TableIndex(
+  name: 'idx_project_milestones_project_position',
+  columns: {#projectId, #deletedAt, #position, #id},
+)
+class ProjectMilestones extends Table {
+  TextColumn get id => text()();
+  TextColumn get projectId => text()();
+  TextColumn get title => text()();
+  TextColumn get due => text().nullable()();
+  BoolColumn get completed => boolean().withDefault(const Constant(false))();
+  TextColumn get completedAt => text().nullable()();
+  IntColumn get position => integer().withDefault(const Constant(0))();
+  IntColumn get version => integer().withDefault(const Constant(1))();
+  IntColumn get remoteVersion => integer().withDefault(const Constant(0))();
+  IntColumn get localRevision => integer().withDefault(const Constant(0))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+  TextColumn get deletedAt => text().nullable()();
+  TextColumn get syncStatus => text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
 class Messages extends Table {
   TextColumn get conversationId => text()();
   TextColumn get id => text()();
@@ -111,13 +157,15 @@ class OutboxMutations extends Table {
     Conversations,
     SyncMetadata,
     OutboxMutations,
+    Projects,
+    ProjectMilestones,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase({QueryExecutor? executor}) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -186,6 +234,11 @@ class AppDatabase extends _$AppDatabase {
         await m.addColumn(calendarEvents, calendarEvents.localRevision);
         await m.createTable(outboxMutations);
       }
+      if (from < 7) {
+        await m.createTable(projects);
+        await m.createTable(projectMilestones);
+        await m.createIndex(idxProjectMilestonesProjectPosition);
+      }
     },
   );
 
@@ -193,6 +246,30 @@ class AppDatabase extends _$AppDatabase {
     return (select(tasks)
           ..where((row) => row.deletedAt.isNull())
           ..orderBy([(row) => OrderingTerm(expression: row.due)]))
+        .watch();
+  }
+
+  Stream<List<Project>> watchActiveProjects() {
+    return (select(projects)
+          ..where((row) => row.deletedAt.isNull())
+          ..orderBy([
+            (row) => OrderingTerm(expression: row.createdAt),
+            (row) => OrderingTerm(expression: row.id),
+          ]))
+        .watch();
+  }
+
+  Stream<List<ProjectMilestone>> watchActiveProjectMilestones(
+    String projectId,
+  ) {
+    return (select(projectMilestones)
+          ..where(
+            (row) => row.projectId.equals(projectId) & row.deletedAt.isNull(),
+          )
+          ..orderBy([
+            (row) => OrderingTerm(expression: row.position),
+            (row) => OrderingTerm(expression: row.id),
+          ]))
         .watch();
   }
 

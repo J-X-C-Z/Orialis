@@ -312,6 +312,112 @@ class OrialisApiClient {
     return response.data ?? <String, dynamic>{};
   }
 
+  Future<Map<String, dynamic>> syncSnapshot() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/sync/snapshot',
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  // Keep pagination metadata: list cursors are opaque strings, not sync cursors.
+  Future<Map<String, dynamic>> listProjects({
+    String? after,
+    int? limit,
+    String? status,
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/projects',
+      queryParameters: {'after': ?after, 'limit': ?limit, 'status': ?status},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> createProject(
+    Map<String, dynamic> payload,
+    String mutationId,
+  ) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/projects',
+      data: payload,
+      options: Options(headers: {'Idempotency-Key': mutationId}),
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> updateProject(
+    String id,
+    Map<String, dynamic> payload,
+    String mutationId,
+  ) async {
+    final response = await _dio.patch<Map<String, dynamic>>(
+      '/api/v1/projects/${Uri.encodeComponent(id)}',
+      data: payload,
+      options: Options(headers: {'Idempotency-Key': mutationId}),
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  // Unlike Task/Schedule DELETE, the current server accepts no version body.
+  Future<void> deleteProject(String id, String mutationId) async {
+    await _dio.delete<void>(
+      '/api/v1/projects/${Uri.encodeComponent(id)}',
+      options: Options(headers: {'Idempotency-Key': mutationId}),
+    );
+  }
+
+  String _milestonesPath(String projectId) =>
+      '/api/v1/projects/${Uri.encodeComponent(projectId)}/milestones';
+
+  Future<Map<String, dynamic>> listProjectMilestones(
+    String projectId, {
+    String? after,
+    int? limit,
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      _milestonesPath(projectId),
+      queryParameters: {'after': ?after, 'limit': ?limit},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> createProjectMilestone(
+    String projectId,
+    Map<String, dynamic> payload,
+    String mutationId,
+  ) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      _milestonesPath(projectId),
+      data: payload,
+      options: Options(headers: {'Idempotency-Key': mutationId}),
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> updateProjectMilestone(
+    String projectId,
+    String id,
+    Map<String, dynamic> payload,
+    String mutationId,
+  ) async {
+    final response = await _dio.patch<Map<String, dynamic>>(
+      '${_milestonesPath(projectId)}/${Uri.encodeComponent(id)}',
+      data: payload,
+      options: Options(headers: {'Idempotency-Key': mutationId}),
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<void> deleteProjectMilestone(
+    String projectId,
+    String id,
+    String mutationId,
+  ) async {
+    await _dio.delete<void>(
+      '${_milestonesPath(projectId)}/${Uri.encodeComponent(id)}',
+      options: Options(headers: {'Idempotency-Key': mutationId}),
+    );
+  }
+
   Future<List<Map<String, dynamic>>> listMessages(String conversationId) async {
     final response = await _dio.get<List<dynamic>>(
       '/api/v1/conversations/${Uri.encodeComponent(conversationId)}/messages',

@@ -1,0 +1,9 @@
+{
+  "id": "message-1",
+  "conversationId": "default",
+  "role": "user",
+  "content": "你好",
+  "createdAt": "2026-09-16T08:00:00Z",
+  "version": 1,
+  "attachments": []
+}

@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "type": "sync.change_hint",
+  "payload": {"cursor": 124, "entity": "message"}
+}

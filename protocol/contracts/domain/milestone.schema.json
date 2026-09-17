@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/domain/milestone-v1.schema.json",
+  "title": "Orialis Milestone v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "userId", "projectId", "title", "due", "completed", "completedAt", "position", "createdAt", "updatedAt", "version", "deletedAt"],
+  "properties": {
+    "id": {"$ref": "./common.schema.json#/$defs/entityId"},
+    "userId": {"$ref": "./common.schema.json#/$defs/entityId"},
+    "projectId": {"$ref": "./common.schema.json#/$defs/entityId"},
+    "title": {"type": "string", "minLength": 1},
+    "due": {"$ref": "./common.schema.json#/$defs/nullableDate"},
+    "completed": {"type": "boolean"},
+    "completedAt": {"$ref": "./common.schema.json#/$defs/nullableTimestamp"},
+    "position": {"type": "integer"},
+    "createdAt": {"$ref": "./common.schema.json#/$defs/timestamp"},
+    "updatedAt": {"$ref": "./common.schema.json#/$defs/timestamp"},
+    "version": {"type": "integer", "minimum": 1},
+    "deletedAt": {"$ref": "./common.schema.json#/$defs/nullableTimestamp"}
+  }
+}

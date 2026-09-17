@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/domain/project-v1.schema.json",
+  "title": "Orialis Project v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "goal", "description", "color", "status", "startDate", "due", "nextActionTaskId", "createdAt", "updatedAt", "version"],
+  "properties": {
+    "id": {"$ref": "./common.schema.json#/$defs/entityId"},
+    "name": {"type": "string", "minLength": 1},
+    "goal": {"$ref": "./common.schema.json#/$defs/nullableString"},
+    "description": {"$ref": "./common.schema.json#/$defs/nullableString"},
+    "color": {"$ref": "./common.schema.json#/$defs/nullableString"},
+    "status": {"type": "string", "minLength": 1},
+    "startDate": {"$ref": "./common.schema.json#/$defs/nullableDate"},
+    "due": {"$ref": "./common.schema.json#/$defs/nullableDate"},
+    "nextActionTaskId": {"$ref": "./common.schema.json#/$defs/nullableEntityId"},
+    "createdAt": {"$ref": "./common.schema.json#/$defs/timestamp"},
+    "updatedAt": {"$ref": "./common.schema.json#/$defs/timestamp"},
+    "version": {"type": "integer", "minimum": 1}
+  }
+}

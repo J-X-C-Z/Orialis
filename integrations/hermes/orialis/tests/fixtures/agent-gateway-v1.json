@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "type": "hello",
+  "device_id": "JXCZ_MBA_Hermes",
+  "client": "orialis-hermes-plugin",
+  "plugin_version": "1.0.0",
+  "platform": "macos"
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/realtime/mobile-v1.schema.json",
+  "title": "Orialis mobile realtime envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "type", "payload"],
+  "properties": {
+    "version": {"const": 1},
+    "type": {"enum": ["hello", "hello.ack", "ping", "pong", "event", "message", "sync.change_hint", "error"]},
+    "requestId": {"type": ["string", "null"]},
+    "payload": {"type": "object"}
+  }
+}

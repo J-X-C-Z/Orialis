@@ -21,12 +21,23 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "protocol" / "contracts"
 SCHEMAS = CONTRACTS / "domain"
 FIXTURES = CONTRACTS / "fixtures"
+HERMES_FIXTURES = ROOT / "integrations" / "hermes" / "orialis" / "tests" / "fixtures"
 
 FIXTURE_SCHEMAS = {
     "task-unclassified.json": "task.schema.json",
     "schedule-v1.json": "schedule.schema.json",
     "mutation-request-v1.json": "mutation-request.schema.json",
     "sync-event-tombstone-v1.json": "sync-event.schema.json",
+    "project-v1.json": "project.schema.json",
+    "milestone-v1.json": "milestone.schema.json",
+    "conversation-v1.json": "conversation.schema.json",
+    "message-v1.json": "message.schema.json",
+    "attachment-v1.json": "attachment.schema.json",
+    "pagination-v1.json": "pagination.schema.json",
+    "snapshot-v1.json": "snapshot.schema.json",
+    "http-error-v1.json": "http/error.schema.json",
+    "mobile-realtime-v1.json": "realtime/mobile.schema.json",
+    "agent-gateway-v1.json": "agent-gateway/schema-v1.schema.json",
 }
 
 
@@ -69,6 +80,11 @@ def validate_semantics() -> None:
         raise SystemExit("mutation and sync fixtures must preserve tombstone semantics")
 
 
+def fixture_path(fixture_name: str) -> Path:
+    path = FIXTURES / fixture_name
+    return path if path.exists() else HERMES_FIXTURES / fixture_name
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT, help="repository root (default: detected root)")
@@ -77,7 +93,8 @@ def main() -> int:
         raise SystemExit("--root is reserved for future multi-repository use")
 
     for fixture_name, schema_name in FIXTURE_SCHEMAS.items():
-        validate_fixture(FIXTURES / fixture_name, SCHEMAS / schema_name)
+        schema_path = CONTRACTS / schema_name if "/" in schema_name else SCHEMAS / schema_name
+        validate_fixture(fixture_path(fixture_name), schema_path)
     validate_semantics()
     print(f"validated {len(FIXTURE_SCHEMAS)} contract fixtures against {len(list(SCHEMAS.glob('*.schema.json')))} schemas")
     return 0

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/domain/conversation-v1.schema.json",
+  "title": "Orialis Conversation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "isDefault", "type", "createdAt", "updatedAt", "version"],
+  "properties": {
+    "id": {"$ref": "./common.schema.json#/$defs/entityId"},
+    "title": {"type": "string", "minLength": 1},
+    "isDefault": {"type": "boolean"},
+    "type": {"type": "string", "minLength": 1},
+    "createdAt": {"$ref": "./common.schema.json#/$defs/timestamp"},
+    "updatedAt": {"$ref": "./common.schema.json#/$defs/timestamp"},
+    "version": {"type": "integer", "minimum": 1}
+  }
+}

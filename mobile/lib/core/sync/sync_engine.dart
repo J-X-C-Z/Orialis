@@ -32,15 +32,18 @@ extension SyncStatePresentation on SyncState {
 }
 
 class SyncEngine {
-  SyncEngine({required this.database, required this.config});
+  SyncEngine({required this.database, required this.config, this.apiClient});
 
   final AppDatabase database;
   final AppConfig config;
+  final OrialisApiClient? apiClient;
 
   Future<SyncState> syncOnce() async {
     final baseUrl = await config.serverUrl();
     final deviceId = await config.deviceId();
-    final api = OrialisApiClient(baseUrl: baseUrl, deviceId: deviceId);
+    final api =
+        apiClient ??
+        OrialisApiClient(baseUrl: baseUrl, deviceId: deviceId, config: config);
     final outbox = OutboxStore(database);
     try {
       await outbox.recoverInFlight();
@@ -53,6 +56,8 @@ class SyncEngine {
       await _pullMessages(api);
       await _pull(api);
       return SyncState.idle;
+    } on _RemoteMutationConflict {
+      return SyncState.conflict;
     } on DioException catch (error) {
       if (error.response?.statusCode == 401) return SyncState.authRequired;
       if (error.response?.statusCode == 409) return SyncState.conflict;
@@ -220,143 +225,432 @@ class SyncEngine {
     }
   }
 
+  static const _snapshotKey = 'projectMilestoneSnapshotVersion';
+
   Future<void> _pull(OrialisApiClient api) async {
-    final cursor = await _readCursor();
-    final response = await api.syncEvents(after: cursor);
-    final events = (response['events'] as List<dynamic>? ?? const []);
-    for (final raw in events) {
-      final event = Map<String, dynamic>.from(raw as Map);
-      final payload = event['payloadJson'] as String?;
-      final entityType = event['entityType'];
-      final operation = event['operation'];
-      final entityId = event['entityId'] as String?;
-      final entityVersion = (event['entityVersion'] as num?)?.toInt() ?? 1;
-      if (operation == 'delete' && entityId != null && entityType == 'task') {
-        final existing = await (database.select(
-          database.tasks,
-        )..where((row) => row.id.equals(entityId))).getSingleOrNull();
-        if (!shouldApplyRemote(
-          existing?.syncStatus,
-          existing?.remoteVersion,
-          entityVersion,
-        )) {
-          continue;
-        }
-        await (database.update(
-          database.tasks,
-        )..where((row) => row.id.equals(entityId))).write(
-          TasksCompanion(
-            deletedAt: Value(DateTime.now().toUtc().toIso8601String()),
-            version: Value(entityVersion),
-            remoteVersion: Value(entityVersion),
-            syncStatus: const Value('synced'),
-          ),
-        );
-      } else if (operation == 'delete' &&
-          entityId != null &&
-          entityType == 'calendar_event') {
-        final existing = await (database.select(
-          database.calendarEvents,
-        )..where((row) => row.id.equals(entityId))).getSingleOrNull();
-        if (!shouldApplyRemote(
-          existing?.syncStatus,
-          existing?.remoteVersion,
-          entityVersion,
-        )) {
-          continue;
-        }
-        await (database.update(
-          database.calendarEvents,
-        )..where((row) => row.id.equals(entityId))).write(
-          CalendarEventsCompanion(
-            deletedAt: Value(DateTime.now().toUtc().toIso8601String()),
-            version: Value(entityVersion),
-            remoteVersion: Value(entityVersion),
-            syncStatus: const Value('synced'),
-          ),
-        );
-      } else if (entityType == 'task' &&
-          operation == 'upsert' &&
-          payload != null) {
-        final value = jsonDecode(payload) as Map<String, dynamic>;
-        final id = value['id'] as String;
-        final existing = await (database.select(
-          database.tasks,
-        )..where((row) => row.id.equals(id))).getSingleOrNull();
-        if (!shouldApplyRemote(
-          existing?.syncStatus,
-          existing?.remoteVersion,
-          entityVersion,
-        )) {
-          continue;
-        }
-        await database
-            .into(database.tasks)
-            .insertOnConflictUpdate(
-              TasksCompanion.insert(
-                id: id,
-                title: value['title'] as String,
-                notes: Value(value['notes'] as String?),
-                due: Value(value['due'] as String?),
-                dueTime: Value(value['dueTime'] as String?),
-                completedAt: Value(value['completedAt'] as String?),
-                reminderMinutes: Value(
-                  (value['reminderMinutes'] as num?)?.toInt(),
-                ),
-                projectId: Value(value['projectId'] as String?),
-                recurrence: Value(_recurrenceJson(value['recurrence'])),
-                important: Value(value['important'] as bool?),
-                urgent: Value(value['urgent'] as bool?),
-                completed: Value(value['completed'] as bool? ?? false),
-                version: Value((value['version'] as num?)?.toInt() ?? 1),
-                remoteVersion: Value((value['version'] as num?)?.toInt() ?? 1),
-                deletedAt: Value(value['deletedAt'] as String?),
-                createdAt: value['createdAt'] as String,
-                updatedAt: value['updatedAt'] as String,
-                syncStatus: const Value('synced'),
-              ),
-            );
-      } else if (entityType == 'calendar_event' &&
-          operation == 'upsert' &&
-          payload != null) {
-        final value = jsonDecode(payload) as Map<String, dynamic>;
-        final id = value['id'] as String;
-        final existing = await (database.select(
-          database.calendarEvents,
-        )..where((row) => row.id.equals(id))).getSingleOrNull();
-        if (!shouldApplyRemote(
-          existing?.syncStatus,
-          existing?.remoteVersion,
-          entityVersion,
-        )) {
-          continue;
-        }
-        await database
-            .into(database.calendarEvents)
-            .insertOnConflictUpdate(
-              CalendarEventsCompanion.insert(
-                id: id,
-                title: value['title'] as String,
-                description: Value(value['description'] as String?),
-                location: Value(value['location'] as String?),
-                startAt: value['startAt'] as String,
-                endAt: value['endAt'] as String,
-                allDay: Value(value['allDay'] as bool? ?? false),
-                reminderMinutes: Value(
-                  (value['reminderMinutes'] as num?)?.toInt(),
-                ),
-                version: Value((value['version'] as num?)?.toInt() ?? 1),
-                remoteVersion: Value((value['version'] as num?)?.toInt() ?? 1),
-                deletedAt: Value(value['deletedAt'] as String?),
-                createdAt: value['createdAt'] as String,
-                updatedAt: value['updatedAt'] as String,
-                syncStatus: const Value('synced'),
-              ),
-            );
-      }
+    final initialized = await (database.select(
+      database.syncMetadata,
+    )..where((row) => row.key.equals(_snapshotKey))).getSingleOrNull();
+    final savedCursor = await (database.select(
+      database.syncMetadata,
+    )..where((row) => row.key.equals('serverCursor'))).getSingleOrNull();
+    final savedCursorValue = int.tryParse(savedCursor?.value ?? '');
+    // v6 clients may already have skipped Project/Milestone events. A separate
+    // bootstrap marker repairs those databases even when their cursor is nonzero.
+    if (initialized?.value != '1' ||
+        savedCursorValue == null ||
+        savedCursorValue < 0) {
+      await applySnapshot(await api.syncSnapshot());
     }
-    final next = (response['nextCursor'] as num?)?.toInt() ?? cursor;
-    await _writeCursor(next);
+    var cursor = await _readCursor();
+    var recoveredExpiredCursor = false;
+    while (true) {
+      late final Map<String, dynamic> response;
+      try {
+        response = await api.syncEvents(after: cursor);
+      } on DioException catch (error) {
+        if (error.response?.statusCode != 410 || recoveredExpiredCursor) {
+          rethrow;
+        }
+        await applySnapshot(await api.syncSnapshot());
+        cursor = await _readCursor();
+        recoveredExpiredCursor = true;
+        continue;
+      }
+      await applySyncEvents(response);
+      final events = response['events'] as List<dynamic>;
+      final nextCursor = _nonNegativeInt(response['nextCursor'], 'next cursor');
+      if (events.isEmpty || nextCursor == cursor) break;
+      cursor = nextCursor;
+    }
+  }
+
+  /// Reconcile all snapshot collections atomically without queuing local writes.
+  /// Pending rows and local revisions survive; missing synced rows become local
+  /// tombstones. Fetching is outside the transaction, applying and cursor are not.
+  Future<void> applySnapshot(Map<String, dynamic> snapshot) async {
+    final cursor = _nonNegativeInt(snapshot['cursor'], 'snapshot cursor');
+    final collections = <String, List<Map<String, dynamic>>>{
+      for (final entry in {
+        'project': 'projects',
+        'project_milestone': 'milestones',
+        'task': 'tasks',
+        'calendar_event': 'calendarEvents',
+      }.entries)
+        entry.key: (snapshot[entry.value] as List<dynamic>)
+            .map((raw) => Map<String, dynamic>.from(raw as Map))
+            .toList(),
+    };
+    await database.transaction(() async {
+      if (cursor < await _readCursor()) {
+        throw const FormatException('snapshot cursor moved backwards');
+      }
+      for (final entry in collections.entries) {
+        final ids = <String>{};
+        for (final value in entry.value) {
+          if (!ids.add(value['id'] as String)) {
+            throw const FormatException('duplicate snapshot entity');
+          }
+          await _applyRemoteEvent({
+            'entityType': entry.key,
+            'entityId': value['id'],
+            'entityVersion': value['version'],
+            'operation': 'upsert',
+            'tombstone': false,
+            'payloadJson': jsonEncode(value),
+          });
+        }
+        await _removeMissingSnapshotRows(entry.key, ids);
+      }
+      await _writeCursor(cursor);
+      await database
+          .into(database.syncMetadata)
+          .insertOnConflictUpdate(
+            SyncMetadataCompanion.insert(key: _snapshotKey, value: '1'),
+          );
+    });
+  }
+
+  Future<void> _removeMissingSnapshotRows(
+    String entityType,
+    Set<String> ids,
+  ) async {
+    // Table names come only from this closed mapping, never from server input.
+    final TableInfo<Table, Object?> table = switch (entityType) {
+      'project' => database.projects,
+      'project_milestone' => database.projectMilestones,
+      'task' => database.tasks,
+      'calendar_event' => database.calendarEvents,
+      _ => throw FormatException('unknown snapshot entity: $entityType'),
+    };
+    final rows = await database
+        .customSelect(
+          'SELECT id, sync_status, remote_version FROM ${table.actualTableName} WHERE deleted_at IS NULL',
+          readsFrom: {table},
+        )
+        .get();
+    for (final row in rows) {
+      final id = row.read<String>('id');
+      if (ids.contains(id)) continue;
+      if (row.read<String>('sync_status') != 'synced') {
+        if (row.read<int>('remote_version') > 0) {
+          throw const _RemoteMutationConflict();
+        }
+        continue;
+      }
+      await database.customUpdate(
+        'UPDATE ${table.actualTableName} SET deleted_at = ? WHERE id = ?',
+        variables: [
+          Variable<String>(DateTime.now().toUtc().toIso8601String()),
+          Variable<String>(id),
+        ],
+        updates: {table},
+      );
+    }
+  }
+
+  /// A page is one transaction. Unsupported or malformed events roll back both
+  /// entity changes and cursor, so retry cannot permanently skip any event.
+  Future<void> applySyncEvents(Map<String, dynamic> response) async {
+    final events = response['events'] as List<dynamic>;
+    final next = _nonNegativeInt(response['nextCursor'], 'next cursor');
+    await database.transaction(() async {
+      final cursor = await _readCursor();
+      var last = -1;
+      for (final raw in events) {
+        final event = Map<String, dynamic>.from(raw as Map);
+        final eventCursor = _nonNegativeInt(event['cursor'], 'event cursor');
+        if (eventCursor <= last || eventCursor > next) {
+          throw const FormatException('invalid event cursor order');
+        }
+        last = eventCursor;
+        if (eventCursor <= cursor) continue;
+        await _applyRemoteEvent(event);
+      }
+      if ((events.isEmpty && next != cursor) ||
+          (events.isNotEmpty && last != next)) {
+        throw const FormatException(
+          'cursor does not match complete event page',
+        );
+      }
+      if (next > cursor) await _writeCursor(next);
+    });
+  }
+
+  int _nonNegativeInt(Object? value, String field) {
+    if (value is! int || value < 0) throw FormatException('invalid $field');
+    return value;
+  }
+
+  Future<void> _applyRemoteEvent(Map<String, dynamic> event) async {
+    final entityType = event['entityType'];
+    if (!const {
+      'task',
+      'calendar_event',
+      'project',
+      'project_milestone',
+    }.contains(entityType)) {
+      throw FormatException('unsupported sync entity: $entityType');
+    }
+    final entityId = event['entityId'] as String;
+    final entityVersion = _nonNegativeInt(
+      event['entityVersion'],
+      'entity version',
+    );
+    final operation = event['operation'];
+    final payload = event['payloadJson'] as String?;
+    if (entityId.isEmpty ||
+        entityVersion == 0 ||
+        (operation != 'upsert' && operation != 'delete') ||
+        event['tombstone'] != (operation == 'delete')) {
+      throw const FormatException('invalid sync event');
+    }
+    if (operation == 'upsert') {
+      final value = jsonDecode(payload!) as Map<String, dynamic>;
+      if (value['id'] != entityId || value['version'] != entityVersion) {
+        throw const FormatException('sync payload identity/version mismatch');
+      }
+    } else if (event['createdAt'] is! String || payload != null) {
+      throw const FormatException('invalid tombstone');
+    }
+    if (entityType == 'project' || entityType == 'project_milestone') {
+      await _applyProjectEvent(event);
+      return;
+    }
+    if (operation == 'delete' && entityType == 'task') {
+      final existing = await (database.select(
+        database.tasks,
+      )..where((row) => row.id.equals(entityId))).getSingleOrNull();
+      if (!shouldApplyRemote(
+        existing?.syncStatus,
+        existing?.remoteVersion,
+        entityVersion,
+      )) {
+        return;
+      }
+      await (database.update(
+        database.tasks,
+      )..where((row) => row.id.equals(entityId))).write(
+        TasksCompanion(
+          deletedAt: Value(event['createdAt'] as String),
+          updatedAt: Value(event['createdAt'] as String),
+          version: Value(entityVersion),
+          remoteVersion: Value(entityVersion),
+          syncStatus: const Value('synced'),
+        ),
+      );
+    } else if (operation == 'delete' && entityType == 'calendar_event') {
+      final existing = await (database.select(
+        database.calendarEvents,
+      )..where((row) => row.id.equals(entityId))).getSingleOrNull();
+      if (!shouldApplyRemote(
+        existing?.syncStatus,
+        existing?.remoteVersion,
+        entityVersion,
+      )) {
+        return;
+      }
+      await (database.update(
+        database.calendarEvents,
+      )..where((row) => row.id.equals(entityId))).write(
+        CalendarEventsCompanion(
+          deletedAt: Value(event['createdAt'] as String),
+          updatedAt: Value(event['createdAt'] as String),
+          version: Value(entityVersion),
+          remoteVersion: Value(entityVersion),
+          syncStatus: const Value('synced'),
+        ),
+      );
+    } else if (entityType == 'task' &&
+        operation == 'upsert' &&
+        payload != null) {
+      final value = jsonDecode(payload) as Map<String, dynamic>;
+      final id = value['id'] as String;
+      final existing = await (database.select(
+        database.tasks,
+      )..where((row) => row.id.equals(id))).getSingleOrNull();
+      if (!shouldApplyRemote(
+        existing?.syncStatus,
+        existing?.remoteVersion,
+        entityVersion,
+      )) {
+        return;
+      }
+      await database
+          .into(database.tasks)
+          .insertOnConflictUpdate(
+            TasksCompanion.insert(
+              id: id,
+              title: value['title'] as String,
+              notes: Value(value['notes'] as String?),
+              due: Value(value['due'] as String?),
+              dueTime: Value(value['dueTime'] as String?),
+              completedAt: Value(value['completedAt'] as String?),
+              reminderMinutes: Value(
+                (value['reminderMinutes'] as num?)?.toInt(),
+              ),
+              projectId: Value(value['projectId'] as String?),
+              recurrence: Value(_recurrenceJson(value['recurrence'])),
+              important: Value(value['important'] as bool?),
+              urgent: Value(value['urgent'] as bool?),
+              completed: Value(value['completed'] as bool? ?? false),
+              version: Value((value['version'] as num?)?.toInt() ?? 1),
+              remoteVersion: Value((value['version'] as num?)?.toInt() ?? 1),
+              deletedAt: Value(value['deletedAt'] as String?),
+              createdAt: value['createdAt'] as String,
+              updatedAt: value['updatedAt'] as String,
+              syncStatus: const Value('synced'),
+            ),
+          );
+    } else if (entityType == 'calendar_event' &&
+        operation == 'upsert' &&
+        payload != null) {
+      final value = jsonDecode(payload) as Map<String, dynamic>;
+      final id = value['id'] as String;
+      final existing = await (database.select(
+        database.calendarEvents,
+      )..where((row) => row.id.equals(id))).getSingleOrNull();
+      if (!shouldApplyRemote(
+        existing?.syncStatus,
+        existing?.remoteVersion,
+        entityVersion,
+      )) {
+        return;
+      }
+      await database
+          .into(database.calendarEvents)
+          .insertOnConflictUpdate(
+            CalendarEventsCompanion.insert(
+              id: id,
+              title: value['title'] as String,
+              description: Value(value['description'] as String?),
+              location: Value(value['location'] as String?),
+              startAt: value['startAt'] as String,
+              endAt: value['endAt'] as String,
+              allDay: Value(value['allDay'] as bool? ?? false),
+              reminderMinutes: Value(
+                (value['reminderMinutes'] as num?)?.toInt(),
+              ),
+              version: Value((value['version'] as num?)?.toInt() ?? 1),
+              remoteVersion: Value((value['version'] as num?)?.toInt() ?? 1),
+              deletedAt: Value(value['deletedAt'] as String?),
+              createdAt: value['createdAt'] as String,
+              updatedAt: value['updatedAt'] as String,
+              syncStatus: const Value('synced'),
+            ),
+          );
+    }
+  }
+
+  Future<void> _applyProjectEvent(Map<String, dynamic> event) async {
+    final isProject = event['entityType'] == 'project';
+    final TableInfo<Table, Object?> table = isProject
+        ? database.projects
+        : database.projectMilestones;
+    final id = event['entityId'] as String;
+    final version = event['entityVersion'] as int;
+    final existing = await database
+        .customSelect(
+          'SELECT remote_version, sync_status FROM ${table.actualTableName} WHERE id = ?',
+          variables: [Variable<String>(id)],
+          readsFrom: {table},
+        )
+        .getSingleOrNull();
+    // A tombstone can arrive before this client ever saw the entity. Its payload
+    // has no name/title/projectId, so retain its version separately instead of
+    // inventing a partial domain row that could later be resurrected by replay.
+    final tombstoneKey = 'remoteTombstone:${event['entityType']}:$id';
+    final tombstone = await (database.select(
+      database.syncMetadata,
+    )..where((row) => row.key.equals(tombstoneKey))).getSingleOrNull();
+    final deletedVersion = int.tryParse(tombstone?.value ?? '') ?? 0;
+    if (version <= deletedVersion ||
+        version <= (existing?.read<int>('remote_version') ?? 0)) {
+      return;
+    }
+    if (existing != null && existing.read<String>('sync_status') != 'synced') {
+      throw const _RemoteMutationConflict();
+    }
+    if (event['operation'] == 'delete') {
+      final deletedAt = event['createdAt'] as String;
+      await database.customUpdate(
+        'UPDATE ${table.actualTableName} SET deleted_at = ?, updated_at = ?, '
+        'version = ?, remote_version = ?, sync_status = ? WHERE id = ?',
+        variables: [
+          Variable<String>(deletedAt),
+          Variable<String>(deletedAt),
+          Variable<int>(version),
+          Variable<int>(version),
+          const Variable<String>('synced'),
+          Variable<String>(id),
+        ],
+        updates: {table},
+      );
+      await database
+          .into(database.syncMetadata)
+          .insertOnConflictUpdate(
+            SyncMetadataCompanion.insert(key: tombstoneKey, value: '$version'),
+          );
+      return;
+    }
+    final value =
+        jsonDecode(event['payloadJson'] as String) as Map<String, dynamic>;
+    if (isProject) {
+      final status = value['status'] as String;
+      if (!const {'active', 'completed', 'archived'}.contains(status)) {
+        throw const FormatException('invalid project status');
+      }
+      await database
+          .into(database.projects)
+          .insertOnConflictUpdate(
+            ProjectsCompanion.insert(
+              id: id,
+              name: value['name'] as String,
+              goal: Value(value['goal'] as String?),
+              description: Value(value['description'] as String?),
+              color: Value(value['color'] as String?),
+              status: Value(status),
+              startDate: Value(value['startDate'] as String?),
+              due: Value(value['due'] as String?),
+              nextActionTaskId: Value(value['nextActionTaskId'] as String?),
+              createdAt: value['createdAt'] as String,
+              updatedAt: value['updatedAt'] as String,
+              version: Value(version),
+              remoteVersion: Value(version),
+              deletedAt: const Value(null),
+              syncStatus: const Value('synced'),
+            ),
+          );
+    } else {
+      final projectId = value['projectId'] as String;
+      final previous = await (database.select(
+        database.projectMilestones,
+      )..where((row) => row.id.equals(id))).getSingleOrNull();
+      if (previous != null && previous.projectId != projectId) {
+        throw const FormatException('milestone projectId is immutable');
+      }
+      await database
+          .into(database.projectMilestones)
+          .insertOnConflictUpdate(
+            ProjectMilestonesCompanion.insert(
+              id: id,
+              projectId: projectId,
+              title: value['title'] as String,
+              due: Value(value['due'] as String?),
+              completed: Value(value['completed'] as bool),
+              completedAt: Value(value['completedAt'] as String?),
+              position: Value(
+                _nonNegativeInt(value['position'], 'milestone position'),
+              ),
+              createdAt: value['createdAt'] as String,
+              updatedAt: value['updatedAt'] as String,
+              version: Value(version),
+              remoteVersion: Value(version),
+              deletedAt: Value(value['deletedAt'] as String?),
+              syncStatus: const Value('synced'),
+            ),
+          );
+    }
   }
 
   Future<void> _pushMessages(OrialisApiClient api) async {
@@ -732,4 +1026,8 @@ class SyncEngine {
           SyncMetadataCompanion.insert(key: 'serverCursor', value: '$value'),
         );
   }
+}
+
+class _RemoteMutationConflict implements Exception {
+  const _RemoteMutationConflict();
 }

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/domain/attachment-v1.schema.json",
+  "title": "Orialis Attachment v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "mimeType", "size", "downloadUrl"],
+  "properties": {
+    "id": {"$ref": "./common.schema.json#/$defs/entityId"},
+    "name": {"type": "string", "minLength": 1},
+    "mimeType": {"type": "string", "minLength": 1},
+    "size": {"type": "integer", "minimum": 0},
+    "downloadUrl": {"type": "string", "format": "uri"}
+  }
+}
