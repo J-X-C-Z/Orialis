@@ -1,6 +1,6 @@
 # A01 — Task / Schedule Contract Alignment
 
-Status: `VERIFYING`
+Status: `DONE`
 
 ## Task board
 
@@ -11,7 +11,7 @@ Status: `VERIFYING`
 | A01-M01 | 手机端_开发 | Align local Task/Schedule model and add persisted outbox | A01-INV | Mobile DB / Sync | IMPLEMENTED | Drift migration, durable mutation ID, retry and restart tests |
 | A01-P01 | 插件_开发 | Audit and test Task/Schedule interpretation without inventing tools | A01-INV | Plugin validation | IMPLEMENTED | Python tests preserve null and Schedule naming |
 | A01-X01 | 总控 | Cross-end fixture and compatibility verification | S01/M01/P01 | All three ends | IMPLEMENTED | Shared fixtures validate and no field is silently dropped |
-| A01-R01 | 总控 | Independent acceptance and risk report | A01-X01 | Release gate | VERIFYING | Diff, tests, migration, compatibility, and docs reviewed |
+| A01-R01 | 总控 | Independent acceptance and risk report | A01-X01 | Release gate | DONE | Diff, tests, migration, compatibility, and docs reviewed |
 
 ## Parallelism
 
@@ -21,8 +21,10 @@ Contract change. `A01-X01` is serial after the three implementation reports.
 
 The current X01 evidence is the repository contract validator, Rust fixture
 tests, Hermes fixture tests, Flutter migration/outbox tests, and the full local
-language test gates. R01 remains open only for the real v5 database migration
-and live runtime/production revalidation.
+language test gates. R01 is closed. Production revalidation used a
+compatibility build because the deployed historical 0001 migration contains a
+different comment byte sequence; the repository migration and
+`_sqlx_migrations` table were not modified.
 
 ## Coordination rule
 

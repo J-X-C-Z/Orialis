@@ -1,6 +1,6 @@
 # A01 Contract Inventory
 
-Status: `VERIFYING`
+Status: `DONE`
 
 This inventory compares the current `orialis-refactor` HEAD with the A01
 Task/Schedule v1 target. It intentionally excludes the existing uncommitted
