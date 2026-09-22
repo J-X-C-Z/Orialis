@@ -1,11 +1,11 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app.dart';
 import '../../app/design/design_components.dart';
-import '../../app/design/design_tokens.dart';
+import '../shared/page_parts.dart';
 import '../../core/config/app_config.dart';
 import '../../core/network/orialis_api_client.dart';
 import '../../core/sync/sync_engine.dart';
@@ -117,23 +117,22 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   Future<void> _editServerUrl() async {
     final controller = TextEditingController(text: _serverUrl);
-    final value = await showDialog<String>(
+    final value = await showLuminaDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('服务器地址'),
-        content: TextField(
+      builder: (context) => LuminaDialog(
+        title: '服务器地址',
+        content: LuminaTextField(
           controller: controller,
           keyboardType: TextInputType.url,
-          decoration: const InputDecoration(
-            hintText: 'https://orialis.jxcz.top',
-          ),
+          hint: 'https://orialis.jxcz.top',
         ),
         actions: [
-          TextButton(
+          LuminaButton(
+            primary: false,
             onPressed: () => Navigator.pop(context),
             child: const Text('取消'),
           ),
-          FilledButton(
+          LuminaButton(
             onPressed: () {
               final candidate = controller.text.trim();
               final uri = Uri.tryParse(candidate);
@@ -164,145 +163,96 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return OrialisPageScaffold(
-      title: '我的',
-      subtitle: '账户、设备与同步',
-      padding: EdgeInsets.zero,
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.page),
-        children: [
-          Text('Orialis', style: Theme.of(context).textTheme.headlineMedium),
-          const SizedBox(height: 6),
-          const Text(
-            'V1 · Local-first',
-            style: TextStyle(color: AppColors.muted),
-          ),
-          const SizedBox(height: AppSpacing.section),
-          if (_loadingSession)
-            const Card(
-              child: ListTile(
-                leading: SizedBox.square(
-                  dimension: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                title: Text('正在检查登录状态…'),
-              ),
-            )
-          else if (_username == null)
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.account_circle_outlined),
-                title: const Text('未登录'),
-                subtitle: const Text('登录后可在不同设备间同步你的数据'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: _openAuth,
-              ),
-            )
-          else
-            Card(
-              child: Column(
+  Widget build(BuildContext context) => OrialisPageScaffold(
+    title: '我的',
+    body: ListView(
+      children: [
+        ContentStack(
+          gap: 24,
+          children: [
+            LuminaSurface(
+              child: ContentStack(
                 children: [
-                  ListTile(
-                    leading: const CircleAvatar(
-                      child: Icon(Icons.person_outline),
-                    ),
-                    title: Text(_username!),
-                    subtitle: const Text('已登录'),
+                  Text(
+                    'Orialis',
+                    style: LuminaTheme.of(context).textTheme.headlineMedium,
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _logout,
-                        icon: const Icon(Icons.logout),
-                        label: const Text('退出登录'),
-                      ),
+                  const QuietLabel('留住想法，安排生活。'),
+                  OrialisListRow(
+                    title: _loadingSession ? '正在检查账户…' : _username ?? '未登录',
+                    subtitle: _username == null ? '本地可用，登录后可跨设备同步' : '已登录',
+                    leading: const LuminaIcon(LuminaIcons.person),
+                    onTap: _loadingSession
+                        ? null
+                        : _username == null
+                        ? _openAuth
+                        : null,
+                  ),
+                  if (_username != null)
+                    LuminaButton(
+                      primary: false,
+                      onPressed: _logout,
+                      child: const Text('退出登录'),
+                    ),
+                ],
+              ),
+            ),
+            OrialisSection(
+              title: '连接与同步',
+              child: ContentStack(
+                children: [
+                  OrialisListRow(
+                    title: '服务器',
+                    subtitle: '$_serverUrl · $_serverState',
+                    leading: const LuminaIcon(LuminaIcons.server),
+                    trailing: const LuminaIcon(LuminaIcons.chevronRight),
+                    onTap: _editServerUrl,
+                  ),
+                  OrialisListRow(
+                    title: _syncState.label,
+                    subtitle: _syncState.message,
+                    leading: const LuminaIcon(LuminaIcons.sync),
+                  ),
+                  if (_syncState == SyncState.conflict)
+                    const Text('本设备的修改仍保存在本地，请检查冲突后再同步。'),
+                  LuminaButton(
+                    onPressed: _syncState == SyncState.syncing
+                        ? null
+                        : () async {
+                            setState(() => _syncState = SyncState.syncing);
+                            final result = await ref
+                                .read(syncCoordinatorProvider)
+                                .requestSync();
+                            if (mounted) {
+                              setState(() {
+                                _syncState = result;
+                                _serverState = result == SyncState.offline
+                                    ? '无法连接'
+                                    : '已检查';
+                              });
+                            }
+                          },
+                    child: Text(
+                      _syncState == SyncState.syncing ? '同步中…' : '检查并同步',
                     ),
                   ),
                 ],
               ),
             ),
-          const SizedBox(height: AppSpacing.section),
-          Card(
-            child: Column(
-              children: [
-                FutureBuilder(
-                  future: _deviceId,
-                  builder: (_, snapshot) => ListTile(
-                    title: const Text('设备 ID'),
-                    subtitle: Text(snapshot.data ?? '生成中…'),
-                    leading: const Icon(Icons.devices_outlined),
-                  ),
-                ),
-                ListTile(
-                  title: const Text('服务器'),
-                  subtitle: Text('$_serverUrl · $_serverState'),
-                  leading: const Icon(Icons.cloud_outlined),
-                  trailing: Chip(label: Text(_syncState.label)),
-                  onTap: _editServerUrl,
-                ),
-                ListTile(
-                  title: const Text('同步状态'),
-                  subtitle: Text(_syncState.message),
-                  leading: Icon(
-                    _syncState == SyncState.conflict
-                        ? Icons.shield_outlined
-                        : Icons.sync,
-                    color: _syncState == SyncState.conflict
-                        ? AppColors.danger
-                        : null,
-                  ),
-                ),
-                ListTile(
-                  title: const Text('项目'),
-                  subtitle: const Text('项目、里程碑与关联任务'),
-                  leading: const Icon(Icons.work_outline),
-                  onTap: () => context.push('/projects'),
-                ),
-                if (_syncState == SyncState.conflict)
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: Text(
-                      '你在本设备上的编辑仍在本地。再次同步前不会丢失这些修改。',
-                      style: TextStyle(color: AppColors.danger),
-                    ),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: FilledButton.tonalIcon(
-                    onPressed: () async {
-                      setState(() => _syncState = SyncState.syncing);
-                      final result = await ref
-                          .read(syncCoordinatorProvider)
-                          .requestSync();
-                      if (mounted) {
-                        setState(() {
-                          _syncState = result;
-                          _serverState = result == SyncState.offline
-                              ? '无法连接'
-                              : '在线';
-                        });
-                      }
-                    },
-                    icon: Icon(
-                      _syncState == SyncState.syncing
-                          ? Icons.hourglass_top
-                          : Icons.sync,
-                    ),
-                    label: Text(
-                      _syncState == SyncState.syncing ? '同步中…' : '检查并同步',
-                    ),
-                  ),
-                ),
-              ],
+            FutureBuilder<String>(
+              future: _deviceId,
+              builder: (_, s) => OrialisListRow(
+                title: '当前设备',
+                subtitle: s.data ?? '正在初始化…',
+                leading: const LuminaIcon(LuminaIcons.devices),
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
+            const QuietLabel('外观跟随系统 · Lumina 光构'),
+          ],
+        ),
+      ],
+    ),
+  );
 }
 
 class AuthPage extends ConsumerStatefulWidget {
@@ -353,64 +303,76 @@ class _AuthPageState extends ConsumerState<AuthPage> {
       if (mounted) context.pop(true);
     } on DioException catch (error) {
       final status = error.response?.statusCode;
-      setState(() => _error = status == 409 ? '用户名已存在' : '登录信息不正确或服务器暂不可用');
+      if (mounted) {
+        setState(() => _error = status == 409 ? '用户名已存在' : '登录信息不正确或服务器暂不可用');
+      }
     } catch (_) {
-      setState(() => _error = '操作失败，请稍后重试');
+      if (mounted) setState(() => _error = '操作失败，请稍后重试');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(_register ? '注册 Orialis' : '登录 Orialis')),
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.page),
-        children: [
-          const SizedBox(height: 32),
-          Text(
-            _register ? '创建你的 Orialis 账户' : '欢迎回来',
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            '账户用于安全地同步你的任务、日程和消息。',
-            style: TextStyle(color: AppColors.muted),
-          ),
-          const SizedBox(height: 28),
-          TextField(
-            controller: _usernameController,
-            textInputAction: TextInputAction.next,
-            decoration: const InputDecoration(labelText: '用户名'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _passwordController,
-            obscureText: true,
-            onSubmitted: (_) => _submit(),
-            decoration: const InputDecoration(labelText: '密码'),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: AppColors.danger)),
+  Widget build(BuildContext context) => OrialisPageScaffold(
+    title: _register ? '注册账户' : '登录账户',
+    leading: LuminaIconButton(
+      tooltip: '返回',
+      icon: const LuminaIcon(LuminaIcons.back),
+      onPressed: () => context.pop(),
+    ),
+    body: ListView(
+      children: [
+        ContentStack(
+          gap: 20,
+          children: [
+            const SizedBox(height: 20),
+            Text(
+              _register ? '从这里开始' : '欢迎回来',
+              style: LuminaTheme.of(context).textTheme.headlineMedium,
+            ),
+            const QuietLabel('同步你的任务、日程和消息，本地内容始终保留。'),
+            LuminaTextField(
+              controller: _usernameController,
+              label: '用户名',
+              textInputAction: TextInputAction.next,
+            ),
+            LuminaTextField(
+              controller: _passwordController,
+              label: '密码',
+              obscureText: true,
+              onSubmitted: (_) {
+                if (!_submitting) _submit();
+              },
+            ),
+            if (_error != null)
+              Text(
+                _error!,
+                style: TextStyle(color: LuminaTheme.of(context).colors.danger),
+              ),
+            LuminaButton(
+              onPressed: _submitting ? null : _submit,
+              child: Text(
+                _submitting
+                    ? '处理中…'
+                    : _register
+                    ? '注册并登录'
+                    : '登录',
+              ),
+            ),
+            LuminaButton(
+              primary: false,
+              onPressed: _submitting
+                  ? null
+                  : () => setState(() {
+                      _register = !_register;
+                      _error = null;
+                    }),
+              child: Text(_register ? '已有账户？去登录' : '还没有账户？去注册'),
+            ),
           ],
-          const SizedBox(height: 20),
-          FilledButton(
-            onPressed: _submitting ? null : _submit,
-            child: Text(_submitting ? '处理中…' : (_register ? '注册并登录' : '登录')),
-          ),
-          TextButton(
-            onPressed: _submitting
-                ? null
-                : () => setState(() {
-                    _register = !_register;
-                    _error = null;
-                  }),
-            child: Text(_register ? '已有账户？去登录' : '还没有账户？去注册'),
-          ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
 }

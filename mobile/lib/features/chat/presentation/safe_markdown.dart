@@ -1,6 +1,4 @@
-import 'package:flutter/material.dart';
-
-import '../../../app/design/design_tokens.dart';
+import '../../../app/design/design_components.dart';
 
 enum MarkdownBlockType { heading, paragraph, code, bullets, ordered, table }
 
@@ -60,8 +58,8 @@ class MarkdownBlock {
         continue;
       }
       if (_isTableStart(lines, index)) {
-        final table = <String>[lines[index], lines[index + 2]];
-        index += 3;
+        final table = <String>[lines[index]];
+        index += 2;
         while (index < lines.length &&
             lines[index].contains('|') &&
             lines[index].trim().isNotEmpty) {
@@ -144,7 +142,7 @@ class SafeMarkdownView extends StatelessWidget {
     final blocks = fallback
         ? const <MarkdownBlock>[]
         : MarkdownBlock.parse(source);
-    if (fallback || blocks.isEmpty) return SelectableText(source);
+    if (fallback || blocks.isEmpty) return LuminaSelectableText(source);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [for (final block in blocks) _BlockView(block: block)],
@@ -161,15 +159,15 @@ class _BlockView extends StatelessWidget {
     switch (block.type) {
       case MarkdownBlockType.heading:
         final style = switch (block.level) {
-          1 => Theme.of(context).textTheme.headlineSmall,
-          2 => Theme.of(context).textTheme.titleLarge,
-          _ => Theme.of(context).textTheme.titleMedium,
+          1 => LuminaTheme.of(context).textTheme.headlineSmall,
+          2 => LuminaTheme.of(context).textTheme.titleLarge,
+          _ => LuminaTheme.of(context).textTheme.titleMedium,
         };
         return Padding(
           padding: const EdgeInsets.only(top: AppSpacing.compact, bottom: 4),
           child: _InlineText(
             text: block.lines.single,
-            style: style?.copyWith(fontWeight: FontWeight.w700),
+            style: style.copyWith(fontWeight: FontWeight.w700),
           ),
         );
       case MarkdownBlockType.code:
@@ -178,10 +176,10 @@ class _BlockView extends StatelessWidget {
           margin: const EdgeInsets.symmetric(vertical: 4),
           padding: const EdgeInsets.all(AppSpacing.item),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: LuminaTheme.of(context).colors.accentSoft,
             borderRadius: BorderRadius.circular(AppRadius.attachment),
           ),
-          child: SelectableText(
+          child: LuminaSelectableText(
             block.lines.join('\n'),
             style: const TextStyle(
               fontFamily: 'monospace',
@@ -222,22 +220,40 @@ class _BlockView extends StatelessWidget {
         final rows = block.lines.map(_tableCells).toList();
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          child: DataTable(
-            columns: [
-              for (final cell in rows.first)
-                DataColumn(
-                  label: _InlineText(
-                    text: cell,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-            ],
-            rows: [
-              for (final row in rows.skip(1))
-                DataRow(
-                  cells: [
-                    for (var i = 0; i < rows.first.length; i++)
-                      DataCell(_InlineText(text: i < row.length ? row[i] : '')),
+          child: Table(
+            defaultColumnWidth: const IntrinsicColumnWidth(),
+            border: TableBorder(
+              horizontalInside: BorderSide(
+                color: LuminaTheme.of(context).colors.outline,
+              ),
+            ),
+            children: [
+              for (var rowIndex = 0; rowIndex < rows.length; rowIndex++)
+                TableRow(
+                  decoration: rowIndex == 0
+                      ? BoxDecoration(
+                          color: LuminaTheme.of(context).colors.accentSoft,
+                        )
+                      : null,
+                  children: [
+                    for (var column = 0; column < rows.first.length; column++)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 240),
+                          child: _InlineText(
+                            text: column < rows[rowIndex].length
+                                ? rows[rowIndex][column]
+                                : '',
+                            style: rowIndex == 0
+                                ? const TextStyle(fontWeight: FontWeight.w600)
+                                : null,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
             ],

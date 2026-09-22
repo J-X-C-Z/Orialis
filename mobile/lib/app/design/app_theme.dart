@@ -1,73 +1,66 @@
-import 'package:flutter/material.dart';
-
+import 'package:flutter/widgets.dart';
 import 'design_tokens.dart';
 
-ThemeData buildOrialisTheme() {
-  final scheme = ColorScheme.fromSeed(
-    seedColor: AppColors.accent,
-    brightness: Brightness.light,
-    surface: AppColors.surface,
+class LuminaColors {
+  const LuminaColors({this.dark = false});
+  final bool dark;
+  Color get ink => dark ? const Color(0xFFECF1F4) : AppColors.ink;
+  Color get paper => dark ? const Color(0xFF121B23) : AppColors.paper;
+  Color get canvas => paper;
+  Color get surface => dark ? const Color(0xFF202C36) : AppColors.surface;
+  Color get accent => dark ? const Color(0xFF9EC4D5) : AppColors.accent;
+  Color get accentSoft => dark ? const Color(0xFF314B59) : AppColors.accentSoft;
+  Color get muted => dark ? const Color(0xFFA6B6C2) : AppColors.muted;
+  Color get danger => dark ? const Color(0xFFFFA6A1) : AppColors.danger;
+  Color get outline => dark ? const Color(0xFF42515F) : AppColors.outline;
+}
+
+class LuminaTextTheme {
+  const LuminaTextTheme([this.colors = const LuminaColors()]);
+  final LuminaColors colors;
+  TextStyle get bodySmall =>
+      TextStyle(fontSize: 12, height: 1.5, color: colors.muted);
+  TextStyle get bodyMedium =>
+      TextStyle(fontSize: 14, height: 1.5, color: colors.ink);
+  TextStyle get bodyLarge =>
+      TextStyle(fontSize: 16, height: 1.5, color: colors.ink);
+  TextStyle get titleSmall => bodyMedium.copyWith(fontWeight: FontWeight.w600);
+  TextStyle get titleMedium => bodyLarge.copyWith(fontWeight: FontWeight.w600);
+  TextStyle get titleLarge => TextStyle(
+    fontSize: 23,
+    height: 1.25,
+    fontWeight: FontWeight.w600,
+    color: colors.ink,
+    letterSpacing: -.6,
   );
-  return ThemeData(
-    useMaterial3: true,
-    colorScheme: scheme.copyWith(primary: AppColors.accent),
-    scaffoldBackgroundColor: AppColors.paper,
-    appBarTheme: const AppBarTheme(
-      backgroundColor: AppColors.paper,
-      foregroundColor: AppColors.ink,
-      elevation: 0,
-      centerTitle: false,
-    ),
-    cardTheme: CardThemeData(
-      color: AppColors.surface,
-      elevation: 0,
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-    ),
-    inputDecorationTheme: InputDecorationTheme(
-      filled: true,
-      fillColor: AppColors.surface,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(AppRadius.control),
-        borderSide: BorderSide.none,
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(AppRadius.control),
-        borderSide: const BorderSide(color: AppColors.outline),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(AppRadius.control),
-        borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
-      ),
-    ),
-    navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: AppColors.paper,
-      indicatorColor: AppColors.accentSoft,
-      labelTextStyle: WidgetStatePropertyAll(
-        ThemeData.light().textTheme.labelMedium?.copyWith(
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    ),
-    floatingActionButtonTheme: const FloatingActionButtonThemeData(
-      backgroundColor: AppColors.accent,
-      foregroundColor: Colors.white,
-    ),
-    dialogTheme: DialogThemeData(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-    ),
-    bottomSheetTheme: const BottomSheetThemeData(
-      backgroundColor: AppColors.surface,
-      showDragHandle: true,
-    ),
-    chipTheme: ChipThemeData(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.control),
-      ),
-    ),
-  );
+  TextStyle get headlineSmall => titleLarge.copyWith(fontSize: 28);
+  TextStyle get headlineMedium => titleLarge.copyWith(fontSize: 32);
+  TextStyle get headlineLarge => titleLarge.copyWith(fontSize: 40);
+  TextStyle get labelSmall => bodySmall.copyWith(fontWeight: FontWeight.w600);
+  TextStyle get labelMedium => bodyMedium.copyWith(fontWeight: FontWeight.w600);
+  TextStyle get labelLarge => bodyLarge.copyWith(fontWeight: FontWeight.w600);
+}
+
+class LuminaTheme extends InheritedWidget {
+  const LuminaTheme({
+    required super.child,
+    this.reduceTransparency = false,
+    this.brightness = Brightness.light,
+    super.key,
+  });
+  final bool reduceTransparency;
+  final Brightness brightness;
+  LuminaColors get colors => LuminaColors(dark: brightness == Brightness.dark);
+  LuminaTextTheme get textTheme => LuminaTextTheme(colors);
+  static LuminaTheme of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<LuminaTheme>() ??
+      LuminaTheme(
+        brightness:
+            MediaQuery.maybeOf(context)?.platformBrightness ?? Brightness.light,
+        child: const SizedBox(),
+      );
+  @override
+  bool updateShouldNotify(LuminaTheme oldWidget) =>
+      reduceTransparency != oldWidget.reduceTransparency ||
+      brightness != oldWidget.brightness;
 }

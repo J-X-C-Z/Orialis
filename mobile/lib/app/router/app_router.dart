@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import '../design/design_components.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -46,6 +46,17 @@ GoRouter buildRouter() {
               GoRoute(
                 path: '/calendar',
                 builder: (_, _) => const CalendarPage(),
+                routes: [
+                  GoRoute(
+                    path: 'schedule/:id',
+                    builder: (_, state) => CalendarPage(
+                      initialScheduleId: state.pathParameters['id'],
+                      initialDate: DateTime.tryParse(
+                        state.uri.queryParameters['date'] ?? '',
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -71,8 +82,8 @@ class PlaceholderPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
+    return OrialisPageScaffold(
+      title: title,
       body: const Center(child: Text('聊天将在下一阶段接入。')),
     );
   }

@@ -1,16 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/services.dart';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/app.dart';
 import '../../app/design/design_components.dart';
-import '../../app/design/design_tokens.dart';
 import '../../core/database/app_database.dart';
 import '../../core/attachments/attachment_bridge.dart';
 import '../../core/realtime/mobile_realtime_client.dart';
@@ -40,12 +39,17 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   final _imagePicker = ImagePicker();
   final _attachmentBridge = AttachmentBridge();
   final List<AttachmentRecord> _attachments = [];
-  final _agentEvents = AgentEventStore();
+  final Map<String, AgentEventStore> _conversationEvents = {};
+  AgentEventStore get _agentEvents =>
+      _conversationEvents.putIfAbsent(_conversationId, AgentEventStore.new);
   late final StreamSubscription<MobileEnvelope> _realtimeSubscription;
   late String _conversationId;
   late final ChatController _chatController;
   bool _sending = false;
   bool _deliveryEnabled = false;
+  bool _showingConversation = false;
+  String _conversationTitle = '主会话';
+  bool _approvalSheetOpen = false;
 
   @override
   void initState() {
@@ -59,7 +63,31 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     _realtimeSubscription = realtime.events.listen((event) {
       if (event.type == 'message') return;
       if (!mounted) return;
-      setState(() => _agentEvents.apply(event));
+      final nested = event.payload['data'];
+      final eventConversation =
+          event.payload['conversationId'] ??
+          (nested is Map ? nested['conversationId'] : null);
+      final target = eventConversation is String
+          ? eventConversation
+          : _conversationId;
+      setState(() {
+        final store = _conversationEvents.putIfAbsent(
+          target,
+          AgentEventStore.new,
+        );
+        store.apply(event);
+        final kind = event.payload['kind'] ?? event.payload['event'];
+        if (const {
+          'stream.complete',
+          'agent.complete',
+          'stream.error',
+          'agent.error',
+        }.contains(kind)) {
+          store.typing = false;
+          store.agentStatus = 'completed';
+        }
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _presentApproval());
     });
   }
 
@@ -71,126 +99,190 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     super.dispose();
   }
 
-  Future<void> _showConversations() async {
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) => SafeArea(
-        child: StreamBuilder<List<Conversation>>(
-          stream: widget.repository.watchConversations(),
-          builder: (context, snapshot) {
-            final conversations = snapshot.data ?? const <Conversation>[];
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-              child: Column(
+  Future<void> _openConversation(Conversation conversation) async {
+    setState(() {
+      _conversationId = conversation.id;
+      _conversationTitle = conversation.title;
+      _showingConversation = true;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _presentApproval());
+  }
+
+  Future<void> _createConversation() async {
+    final conversation = await widget.repository.createConversation();
+    if (mounted) await _openConversation(conversation);
+  }
+
+  Widget _conversationList() => OrialisPageScaffold(
+    title: '聊天',
+    subtitle: '想法在这里，慢慢成形。',
+    actions: [
+      LuminaIconButton(
+        onPressed: _createConversation,
+        icon: const LuminaIcon(LuminaIcons.add),
+        tooltip: '新建会话',
+      ),
+    ],
+    body: StreamBuilder<List<Conversation>>(
+      stream: widget.repository.watchConversations(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const OrialisEmptyState(text: '会话暂时无法加载，请稍后再试。');
+        }
+        if (!snapshot.hasData) return const Center(child: LuminaProgress());
+        final conversations = snapshot.data!;
+        if (conversations.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const OrialisEmptyState(
+                  text: '从一个想法开始。\n新建会话，与 Orialis 一起整理。',
+                  card: false,
+                ),
+                LuminaButton(
+                  onPressed: _createConversation,
+                  child: const Text('新建会话'),
+                ),
+              ],
+            ),
+          );
+        }
+        return ListView.separated(
+          itemCount: conversations.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            final conversation = conversations[index];
+            final history = ref
+                .watch(
+                  chatMessagesProvider((
+                    repository: widget.repository,
+                    conversationId: conversation.id,
+                  )),
+                )
+                .value;
+            final latest = history?.lastOrNull;
+            final preview = latest?.content.replaceAll('\n', ' ').trim();
+            return OrialisListRow(
+              title: conversation.title,
+              subtitle: preview != null && preview.isNotEmpty
+                  ? (preview.length > 48
+                        ? '${preview.substring(0, 48)}…'
+                        : preview)
+                  : conversation.type == 'main'
+                  ? '主会话 · 随时开始新的想法'
+                  : '轻触继续对话',
+              leading: Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: LuminaTheme.of(context).colors.accentSoft,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: LuminaIcon(
+                  conversation.type == 'main'
+                      ? LuminaIcons.sparkles
+                      : LuminaIcons.chat,
+                  color: LuminaTheme.of(context).colors.accent,
+                ),
+              ),
+              onTap: () => _openConversation(conversation),
+              trailing: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          '会话',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: '新建会话',
-                        icon: const Icon(Icons.add),
-                        onPressed: () async {
-                          final conversation = await widget.repository
-                              .createConversation();
-                          if (sheetContext.mounted) {
-                            Navigator.pop(sheetContext, conversation.id);
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  if (conversations.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text('正在同步会话…'),
-                    )
-                  else
-                    ...conversations.map(
-                      (conversation) => ListTile(
-                        selected: conversation.id == _conversationId,
-                        leading: Icon(
-                          conversation.type == 'main'
-                              ? Icons.home_outlined
-                              : Icons.chat_bubble_outline,
-                        ),
-                        title: Text(conversation.title),
-                        subtitle: Text(
-                          conversation.type == 'main' ? '主会话' : '普通会话',
-                        ),
-                        onTap: () =>
-                            Navigator.pop(sheetContext, conversation.id),
-                        trailing: conversation.type == 'main'
-                            ? null
-                            : PopupMenuButton<String>(
-                                onSelected: (action) async {
-                                  if (action == 'rename') {
-                                    await _renameConversation(conversation);
-                                  } else if (action == 'delete') {
-                                    await widget.repository.deleteConversation(
-                                      conversation,
-                                    );
-                                    if (sheetContext.mounted) {
-                                      Navigator.pop(sheetContext);
-                                    }
-                                  }
-                                },
-                                itemBuilder: (context) => const [
-                                  PopupMenuItem(
-                                    value: 'rename',
-                                    child: Text('重命名'),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text('删除'),
-                                  ),
-                                ],
-                              ),
-                      ),
+                  if (latest != null)
+                    Text(
+                      _formatMessageTime(latest.createdAt),
+                      style: LuminaTheme.of(context).textTheme.labelSmall,
                     ),
+                  conversation.type == 'main'
+                      ? const LuminaIcon(LuminaIcons.chevronRight)
+                      : LuminaIconButton(
+                          tooltip: '会话选项',
+                          icon: const LuminaIcon(LuminaIcons.more),
+                          onPressed: () => _conversationOptions(conversation),
+                        ),
                 ],
               ),
             );
           },
-        ),
+        );
+      },
+    ),
+  );
+
+  Future<void> _conversationOptions(Conversation conversation) async {
+    final action = await showLuminaSheet<String>(
+      context: context,
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          OrialisListRow(
+            title: '重命名',
+            onTap: () => Navigator.pop(context, 'rename'),
+          ),
+          const SizedBox(height: 8),
+          OrialisListRow(
+            title: '删除会话',
+            subtitle: '仅删除此普通会话',
+            onTap: () => Navigator.pop(context, 'delete'),
+          ),
+        ],
       ),
     );
-    if (selected != null && mounted && selected != _conversationId) {
-      setState(() => _conversationId = selected);
+    if (action == 'rename' && mounted) await _renameConversation(conversation);
+    if (action == 'delete' && mounted) {
+      final confirmed = await showLuminaDialog<bool>(
+        context: context,
+        title: '删除会话？',
+        content: Text('“${conversation.title}”将被删除。'),
+        actions: [
+          LuminaButton(
+            onPressed: () => Navigator.pop(context, false),
+            primary: false,
+            child: const Text('取消'),
+          ),
+          LuminaButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      );
+      if (confirmed == true) {
+        await widget.repository.deleteConversation(conversation);
+      }
     }
   }
 
   Future<void> _renameConversation(Conversation conversation) async {
     final controller = TextEditingController(text: conversation.title);
-    final title = await showDialog<String>(
+    final title = await showLuminaDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('重命名会话'),
-        content: TextField(controller: controller, autofocus: true),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('保存'),
-          ),
-        ],
+      title: '重命名会话',
+      content: LuminaTextField(
+        controller: controller,
+        autofocus: true,
+        hintText: '会话名称',
       ),
+      actions: [
+        LuminaButton(
+          primary: false,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        LuminaButton(
+          onPressed: () => Navigator.pop(context, controller.text),
+          child: const Text('保存'),
+        ),
+      ],
     );
     controller.dispose();
     if (title != null && title.trim().isNotEmpty) {
       await widget.repository.renameConversation(conversation, title);
+      if (mounted && conversation.id == _conversationId) {
+        setState(() => _conversationTitle = title.trim());
+      }
     }
   }
 
@@ -211,9 +303,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     } catch (error) {
       if (mounted) {
         _agentEvents.actions.release(requestId);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('操作暂时无法发送：$error')));
+        showLuminaToast(context, '操作暂时无法发送：$error');
       }
       rethrow;
     }
@@ -222,9 +312,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   String _requestId() => const Uuid().v7();
 
   Future<void> _showHermesCommand() async {
-    await showModalBottomSheet<void>(
+    await showLuminaSheet<void>(
       context: context,
-      isScrollControlled: true,
       builder: (context) => _CommandComposer(
         onSend: (command) async {
           await _sendAgentAction('hermes.command', _requestId(), {
@@ -237,32 +326,53 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
 
   Future<void> _showDeliveryControls() async {
-    await showModalBottomSheet<void>(
+    await showLuminaSheet<void>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => SafeArea(
-          child: SwitchListTile(
-            secondary: const Icon(Icons.notifications_active_outlined),
-            title: const Text('主动投递'),
-            subtitle: const Text('允许 Agent 将重要结果推送到此设备'),
-            value: _deliveryEnabled,
-            onChanged: (enabled) async {
-              setSheetState(() => _deliveryEnabled = enabled);
-              setState(() => _deliveryEnabled = enabled);
-              await _sendAgentAction('delivery.notification', _requestId(), {
-                'enabled': enabled,
-              });
-            },
-          ),
+        builder: (context, setSheetState) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '主动投递',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _deliveryEnabled
+                  ? '已允许 Agent 将重要结果推送到此设备'
+                  : '允许 Agent 将重要结果推送到此设备',
+            ),
+            const SizedBox(height: 16),
+            LuminaButton(
+              onPressed: () async {
+                final previous = _deliveryEnabled;
+                final enabled = !previous;
+                setSheetState(() => _deliveryEnabled = enabled);
+                setState(() => _deliveryEnabled = enabled);
+                try {
+                  await _sendAgentAction(
+                    'delivery.notification',
+                    _requestId(),
+                    {'enabled': enabled},
+                  );
+                } catch (_) {
+                  if (mounted) setState(() => _deliveryEnabled = previous);
+                  if (context.mounted) {
+                    setSheetState(() => _deliveryEnabled = previous);
+                  }
+                }
+              },
+              child: Text(_deliveryEnabled ? '关闭投递' : '允许投递'),
+            ),
+          ],
         ),
       ),
     );
   }
 
   Future<void> _showSessionControls() async {
-    await showModalBottomSheet<void>(
+    await showLuminaSheet<void>(
       context: context,
-      isScrollControlled: true,
       builder: (context) => _SessionControls(
         onAction: (type, payload) => _sendAgentAction(type, _requestId(), {
           'sessionId': _conversationId,
@@ -273,25 +383,25 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
 
   Future<void> _chooseAttachment() async {
-    final action = await showModalBottomSheet<String>(
+    final action = await showLuminaSheet<String>(
       context: context,
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('拍照'),
+            OrialisListRow(
+              leading: const LuminaIcon(LuminaIcons.camera),
+              title: '拍照',
               onTap: () => Navigator.pop(context, 'camera'),
             ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('选择照片'),
+            OrialisListRow(
+              leading: const LuminaIcon(LuminaIcons.image),
+              title: '选择照片',
               onTap: () => Navigator.pop(context, 'photos'),
             ),
-            ListTile(
-              leading: const Icon(Icons.attach_file),
-              title: const Text('选择文件'),
+            OrialisListRow(
+              leading: const LuminaIcon(LuminaIcons.attachment),
+              title: '选择文件',
               onTap: () => Navigator.pop(context, 'files'),
             ),
           ],
@@ -299,18 +409,55 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       ),
     );
     if (!mounted) return;
-    if (action == 'camera') {
-      final photo = await _imagePicker.pickImage(source: ImageSource.camera);
-      if (photo != null) await _addPaths([photo.path]);
-    } else if (action == 'photos') {
-      final photos = await _imagePicker.pickMultiImage(imageQuality: 90);
-      await _addPaths(photos.map((photo) => photo.path));
-    } else if (action == 'files') {
-      // file_picker 13's pickFiles API is multi-select by definition.
-      final result = await FilePicker.pickFiles();
-      if (result.isNotEmpty) {
-        await _addPaths(result.map((file) => file.path).whereType<String>());
+    if (action == 'camera' || action == 'photos') {
+      final allowed = await showLuminaSheet<bool>(
+        context: context,
+        builder: (context) => Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              action == 'camera' ? '允许访问相机？' : '选择要分享的照片',
+              style: LuminaTheme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              action == 'camera'
+                  ? '用于拍摄并发送照片。继续后由系统确认访问权限。'
+                  : '仅将你选择的照片加入当前消息。',
+            ),
+            const SizedBox(height: 20),
+            LuminaButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('继续'),
+            ),
+            const SizedBox(height: 12),
+            LuminaButton(
+              primary: false,
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('暂不允许'),
+            ),
+          ],
+        ),
+      );
+      if (allowed != true || !mounted) return;
+    }
+    try {
+      if (action == 'camera') {
+        final photo = await _imagePicker.pickImage(source: ImageSource.camera);
+        if (photo != null) await _addPaths([photo.path]);
+      } else if (action == 'photos') {
+        final photos = await _imagePicker.pickMultiImage(imageQuality: 90);
+        await _addPaths(photos.map((photo) => photo.path));
+      } else if (action == 'files') {
+        // file_picker 13's pickFiles API is multi-select by definition.
+        final result = await FilePicker.pickFiles();
+        if (result.isNotEmpty) {
+          await _addPaths(result.map((file) => file.path).whereType<String>());
+        }
       }
+    } catch (_) {
+      if (mounted) showLuminaToast(context, '未能添加附件。请检查访问权限后重试。');
     }
   }
 
@@ -322,9 +469,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       final size = await file.length();
       if (size == 0 || size > 20 * 1024 * 1024) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('${path.split('/').last} 超过 20 MB 或为空')),
-          );
+          showLuminaToast(context, '${path.split('/').last} 超过 20 MB 或为空');
         }
         continue;
       }
@@ -341,6 +486,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     }
     final content = _controller.text;
     final attachments = List<AttachmentRecord>.from(_attachments);
+    final previousMessageId = _chatController.lastMessageId;
     _controller.clear();
     setState(() => _attachments.clear());
     setState(() => _sending = true);
@@ -363,6 +509,16 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           }
         });
       }
+    } catch (_) {
+      if (mounted) {
+        if (_chatController.lastMessageId == previousMessageId) {
+          _controller.text = content;
+          setState(() => _attachments.addAll(attachments));
+          showLuminaToast(context, '消息未能保存，内容已保留，请重试。');
+        } else {
+          showLuminaToast(context, '消息已保存在设备，联网后可重试发送。');
+        }
+      }
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -373,227 +529,274 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       await _chatController.retry(messageId);
     } on Object catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('重试失败：$error')));
+        showLuminaToast(context, '重试失败：$error');
       }
     }
   }
 
+  String? get _currentAction {
+    final runningTools = _agentEvents.tools.values.where(
+      (item) => item.status == 'running',
+    );
+    if (runningTools.isNotEmpty) {
+      return runningTools.last.detail ?? '正在${runningTools.last.name}';
+    }
+    if (_agentEvents.agentStatus != null &&
+        !const {
+          'completed',
+          'idle',
+          'done',
+          'error',
+          'stopped',
+        }.contains(_agentEvents.agentStatus)) {
+      return _agentEvents.agentStatusDetail ?? '正在整理你的请求';
+    }
+    if (_agentEvents.typing ||
+        _agentEvents.streams.values.any((stream) => !stream.complete)) {
+      return '正在组织回复';
+    }
+    return null;
+  }
+
+  Future<void> _showChatOptions() async {
+    final action = await showLuminaSheet<String>(
+      context: context,
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          OrialisListRow(
+            title: 'Hermes 命令',
+            leading: const LuminaIcon(LuminaIcons.terminal),
+            onTap: () => Navigator.pop(context, 'command'),
+          ),
+          const SizedBox(height: 8),
+          OrialisListRow(
+            title: '主动投递',
+            leading: const LuminaIcon(LuminaIcons.notification),
+            onTap: () => Navigator.pop(context, 'delivery'),
+          ),
+          const SizedBox(height: 8),
+          OrialisListRow(
+            title: '会话控制',
+            leading: const LuminaIcon(LuminaIcons.settings),
+            onTap: () => Navigator.pop(context, 'session'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'command') await _showHermesCommand();
+    if (action == 'delivery') await _showDeliveryControls();
+    if (action == 'session') await _showSessionControls();
+  }
+
+  Future<void> _presentApproval() async {
+    if (!mounted || _approvalSheetOpen || !_showingConversation) return;
+    final pending = _agentEvents.approvals.values
+        .where((item) => !_agentEvents.actions.contains(item.id))
+        .toList();
+    if (pending.isEmpty) return;
+    _approvalSheetOpen = true;
+    await showLuminaSheet<void>(
+      context: context,
+      builder: (sheetContext) => AgentApprovalSheet(
+        request: pending.first,
+        store: _agentEvents,
+        onAction: (type, id, payload) async {
+          await _sendAgentAction(type, id, payload);
+          if (sheetContext.mounted) Navigator.pop(sheetContext);
+        },
+      ),
+    );
+    _approvalSheetOpen = false;
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (!_showingConversation) return _conversationList();
+    final colors = LuminaTheme.of(context).colors;
     final messages = ref.watch(
       chatMessagesProvider((
         repository: widget.repository,
         conversationId: _conversationId,
       )),
     );
-    return Scaffold(
-      backgroundColor: AppColors.paper,
-      appBar: AppBar(
-        backgroundColor: AppColors.paper,
-        elevation: 0,
-        titleSpacing: 4,
-        title: StreamBuilder<List<Conversation>>(
-          stream: widget.repository.watchConversations(),
-          builder: (context, snapshot) {
-            final conversation = snapshot.data
-                ?.where((item) => item.id == _conversationId)
-                .firstOrNull;
-            return InkWell(
-              borderRadius: BorderRadius.circular(AppRadius.control),
-              onTap: _showConversations,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const CircleAvatar(
-                      radius: 17,
-                      backgroundColor: AppColors.accentSoft,
-                      child: Icon(
-                        Icons.auto_awesome,
-                        size: 18,
-                        color: AppColors.accent,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          conversation?.title ?? '聊天',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        Text(
-                          'Orialis 助手',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: AppColors.muted),
-                        ),
-                      ],
-                    ),
-                    const Icon(Icons.keyboard_arrow_down, size: 18),
-                  ],
+    final action = _currentAction;
+    final pendingApproval = _agentEvents.approvals.values.any(
+      (item) => !_agentEvents.actions.contains(item.id),
+    );
+    return BackButtonListener(
+      onBackButtonPressed: () async {
+        setState(() => _showingConversation = false);
+        return true;
+      },
+      child: ColoredBox(
+        color: colors.paper,
+        child: SafeArea(
+          child: Column(
+            children: [
+              OrialisTopBar(
+                title: _conversationTitle,
+                leading: LuminaIconButton(
+                  onPressed: () => setState(() => _showingConversation = false),
+                  icon: const LuminaIcon(LuminaIcons.back),
+                  tooltip: '返回会话列表',
                 ),
-              ),
-            );
-          },
-        ),
-        actions: [
-          IconButton(
-            onPressed: _showHermesCommand,
-            icon: const Icon(Icons.terminal),
-            tooltip: 'Hermes 命令',
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'delivery') _showDeliveryControls();
-              if (value == 'session') _showSessionControls();
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'delivery', child: Text('主动投递')),
-              PopupMenuItem(value: 'session', child: Text('会话控制')),
-            ],
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: messages.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, _) => Center(child: Text('消息暂时无法加载：$error')),
-              data: (items) =>
-                  items.isEmpty &&
-                      _agentEvents.streams.isEmpty &&
-                      !_agentEvents.typing
-                  ? const Center(child: Text('从一句话开始。'))
-                  : ListView(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.page,
-                        16,
-                        AppSpacing.page,
-                        20,
-                      ),
-                      children: [
-                        AgentEventsPanel(
-                          store: _agentEvents,
-                          onAction: _sendAgentAction,
-                        ),
-                        for (final message in items)
-                          _MessageBubble(
-                            message: message,
-                            onRetry: message.syncStatus == 'pendingCreate'
-                                ? () => _retryMessage(message.id)
-                                : null,
-                          ),
-                      ],
-                    ),
-            ),
-          ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.compact,
-                6,
-                AppSpacing.compact,
-                8,
-              ),
-              child: Column(
-                children: [
-                  if (_attachments.isNotEmpty)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-                      child: Wrap(
-                        spacing: AppSpacing.tight,
-                        runSpacing: 4,
-                        children: [
-                          for (
-                            var index = 0;
-                            index < _attachments.length;
-                            index++
-                          )
-                            InputChip(
-                              avatar: Icon(
-                                _attachments[index].mimeType.startsWith(
-                                      'image/',
-                                    )
-                                    ? Icons.image_outlined
-                                    : Icons.insert_drive_file_outlined,
-                                size: AppIconSize.compact,
-                              ),
-                              label: Text(
-                                _attachments[index].name,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              onDeleted: _sending
-                                  ? null
-                                  : () => setState(
-                                      () => _attachments.removeAt(index),
-                                    ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      IconButton(
-                        onPressed: _sending ? null : _chooseAttachment,
-                        icon: const Icon(Icons.add_circle_outline, size: 28),
-                        tooltip: '添加照片或文件',
-                      ),
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: AppColors.surface,
-                            borderRadius: BorderRadius.circular(24),
-                            border: Border.all(color: AppColors.outline),
-                          ),
-                          child: TextField(
-                            controller: _controller,
-                            minLines: 1,
-                            maxLines: 4,
-                            textInputAction: TextInputAction.send,
-                            onSubmitted: (_) => _send(),
-                            decoration: const InputDecoration(
-                              hintText: '写消息…',
-                              border: InputBorder.none,
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 11,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.controlGap),
-                      IconButton.filled(
-                        onPressed: _sending ? null : _send,
-                        icon: _sending
-                            ? const SizedBox.square(
-                                dimension: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.arrow_upward),
-                        tooltip: '发送',
-                      ),
-                    ],
+                actions: [
+                  LuminaIconButton(
+                    onPressed: _showChatOptions,
+                    icon: const LuminaIcon(LuminaIcons.more),
+                    tooltip: '更多会话操作',
                   ),
                 ],
               ),
-            ),
+              AnimatedSize(
+                duration: MediaQuery.of(context).disableAnimations
+                    ? Duration.zero
+                    : LuminaMotion.standard,
+                alignment: Alignment.topCenter,
+                child: action == null && !pendingApproval
+                    ? const SizedBox(width: double.infinity)
+                    : Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                        child: LuminaSurface(
+                          radius: 12,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            children: [
+                              const LuminaIcon(LuminaIcons.sparkles, size: 16),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  pendingApproval ? '有一项操作等待你确认' : action!,
+                                  style: LuminaTheme.of(
+                                    context,
+                                  ).textTheme.bodySmall,
+                                ),
+                              ),
+                              if (pendingApproval)
+                                LuminaButton(
+                                  onPressed: _presentApproval,
+                                  child: const Text('查看'),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+              ),
+              Expanded(
+                child: messages.when(
+                  loading: () => const Center(child: LuminaProgress()),
+                  error: (error, _) => const OrialisEmptyState(
+                    text: '消息暂时无法加载，请稍后再试。',
+                    card: false,
+                  ),
+                  data: (items) =>
+                      items.isEmpty &&
+                          _agentEvents.streams.isEmpty &&
+                          !_agentEvents.typing
+                      ? const OrialisEmptyState(
+                          text: '从一句话开始。\n记录想法，或一起安排今天。',
+                          card: false,
+                        )
+                      : ListView(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                          children: [
+                            for (final message in items)
+                              _MessageBubble(
+                                message: message,
+                                onRetry: message.syncStatus == 'pendingCreate'
+                                    ? () => _retryMessage(message.id)
+                                    : null,
+                              ),
+                            AgentEventsPanel(
+                              store: _agentEvents,
+                              onAction: _sendAgentAction,
+                            ),
+                          ],
+                        ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: LuminaSurface(
+                  radius: 24,
+                  padding: const EdgeInsets.all(8),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_attachments.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (
+                                var index = 0;
+                                index < _attachments.length;
+                                index++
+                              )
+                                LuminaButton(
+                                  primary: false,
+                                  onPressed: _sending
+                                      ? null
+                                      : () => setState(
+                                          () => _attachments.removeAt(index),
+                                        ),
+                                  icon: const LuminaIcon(
+                                    LuminaIcons.close,
+                                    size: 16,
+                                  ),
+                                  child: Text(
+                                    _attachments[index].name,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Expanded(
+                            child: LuminaTextField(
+                              controller: _controller,
+                              minLines: 1,
+                              maxLines: 4,
+                              hintText: '写消息…',
+                              textInputAction: TextInputAction.send,
+                              onSubmitted: (_) => _send(),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          LuminaIconButton(
+                            onPressed: _sending ? null : _chooseAttachment,
+                            icon: const LuminaIcon(LuminaIcons.add),
+                            tooltip: '添加照片或文件',
+                          ),
+                          const SizedBox(width: 8),
+                          LuminaIconButton(
+                            onPressed: _sending ? null : _send,
+                            icon: _sending
+                                ? const LuminaProgress()
+                                : const LuminaIcon(LuminaIcons.send),
+                            tooltip: '发送',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -608,37 +811,62 @@ class _MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final isUser = message.role == 'user';
     final attachments = _decodeAttachments(message.attachmentsJson);
+    final pending = message.syncStatus == 'pendingCreate';
+    final colors = LuminaTheme.of(context).colors;
+    final metadata = Text(
+      '${_formatMessageTime(message.createdAt)}${isUser && !pending ? '  ✓✓' : ''}',
+      style: LuminaTheme.of(
+        context,
+      ).textTheme.labelSmall.copyWith(color: colors.muted, fontSize: 11),
+    );
+    final inlineMetadata =
+        isUser && !pending && attachments.isEmpty && message.content.isNotEmpty;
     return OrialisChatBubble(
       isUser: isUser,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (message.content.isNotEmpty)
-            isUser
+            inlineMetadata
+                ? Stack(
+                    children: [
+                      Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(text: message.content),
+                            const WidgetSpan(
+                              child: SizedBox(width: 76, height: 16),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Positioned(right: 0, bottom: 0, child: metadata),
+                    ],
+                  )
+                : isUser
                 ? Text(message.content)
                 : SafeMarkdownView(source: message.content),
           for (final attachment in attachments)
             _AttachmentPreview(attachment: attachment),
-          const SizedBox(height: 5),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                _formatMessageTime(message.createdAt),
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: AppColors.muted,
-                  fontSize: 10,
-                ),
-              ),
-              if (isUser) ...[
-                const SizedBox(width: 4),
-                if (message.syncStatus == 'pendingCreate')
-                  TextButton(onPressed: onRetry, child: const Text('重试'))
-                else
-                  const Icon(Icons.done_all, size: 13, color: AppColors.accent),
+          if (!inlineMetadata) ...[
+            const SizedBox(height: 4),
+            Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                metadata,
+                if (isUser && pending) ...[
+                  LuminaButton(
+                    primary: false,
+                    onPressed: onRetry,
+                    child: const Text('待发送 · 重试'),
+                  ),
+                ],
               ],
-            ],
-          ),
+            ),
+          ],
         ],
       ),
     );
@@ -679,7 +907,7 @@ class _AttachmentPreview extends StatelessWidget {
       margin: const EdgeInsets.only(top: AppChatMetrics.attachmentTopGap),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        color: LuminaTheme.of(context).colors.accentSoft,
         borderRadius: BorderRadius.circular(AppRadius.attachment),
       ),
       child: isImage
@@ -700,10 +928,10 @@ class _AttachmentPreview extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
+          LuminaIcon(
             mimeType.startsWith('image/')
-                ? Icons.image_outlined
-                : Icons.insert_drive_file_outlined,
+                ? LuminaIcons.image
+                : LuminaIcons.file,
           ),
           const SizedBox(width: AppSpacing.controlGap),
           Flexible(child: Text(name, overflow: TextOverflow.ellipsis)),
@@ -752,6 +980,7 @@ class _CommandComposerState extends State<_CommandComposer> {
         16,
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
@@ -762,25 +991,23 @@ class _CommandComposerState extends State<_CommandComposer> {
           Row(
             children: [
               Expanded(
-                child: TextField(
+                child: LuminaTextField(
                   controller: _controller,
                   enabled: !_sending,
                   autofocus: true,
                   onSubmitted: (_) => _send(),
-                  decoration: const InputDecoration(
-                    hintText: '输入要交给 Hermes 的命令',
-                  ),
+                  hintText: '输入要交给 Hermes 的命令',
                 ),
               ),
               const SizedBox(width: AppSpacing.controlGap),
-              IconButton.filled(
+              LuminaIconButton(
                 onPressed: _sending ? null : _send,
                 icon: _sending
                     ? const SizedBox.square(
                         dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: LuminaProgress(),
                       )
-                    : const Icon(Icons.arrow_upward),
+                    : const LuminaIcon(LuminaIcons.send),
                 tooltip: '发送命令',
               ),
             ],
@@ -788,7 +1015,7 @@ class _CommandComposerState extends State<_CommandComposer> {
           const SizedBox(height: 4),
           Text(
             '结果会显示在聊天时间线中；旧服务端会安全忽略此扩展入口。',
-            style: Theme.of(context).textTheme.bodySmall,
+            style: LuminaTheme.of(context).textTheme.bodySmall,
           ),
         ],
       ),
@@ -838,6 +1065,7 @@ class _SessionControlsState extends State<_SessionControls> {
         18,
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('会话控制', style: TextStyle(fontWeight: FontWeight.w700)),
@@ -846,25 +1074,25 @@ class _SessionControlsState extends State<_SessionControls> {
             spacing: AppSpacing.tight,
             runSpacing: AppSpacing.tight,
             children: [
-              OutlinedButton.icon(
+              LuminaButton(
                 onPressed: _sending ? null : () => _run('session.create'),
-                icon: const Icon(Icons.add),
-                label: const Text('新建'),
+                icon: const LuminaIcon(LuminaIcons.add),
+                child: const Text('新建'),
               ),
-              OutlinedButton.icon(
+              LuminaButton(
                 onPressed: _sending ? null : () => _run('session.reset'),
-                icon: const Icon(Icons.restart_alt),
-                label: const Text('重置'),
+                icon: const LuminaIcon(LuminaIcons.sync),
+                child: const Text('重置'),
               ),
-              OutlinedButton.icon(
+              LuminaButton(
                 onPressed: _sending ? null : () => _run('session.resume'),
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('恢复'),
+                icon: const LuminaIcon(LuminaIcons.play),
+                child: const Text('恢复'),
               ),
-              OutlinedButton.icon(
+              LuminaButton(
                 onPressed: _sending ? null : () => _run('session.status'),
-                icon: const Icon(Icons.info_outline),
-                label: const Text('状态'),
+                icon: const LuminaIcon(LuminaIcons.info),
+                child: const Text('状态'),
               ),
             ],
           ),
@@ -872,20 +1100,20 @@ class _SessionControlsState extends State<_SessionControls> {
           Row(
             children: [
               Expanded(
-                child: TextField(
+                child: LuminaTextField(
                   controller: _titleController,
                   enabled: !_sending,
-                  decoration: const InputDecoration(hintText: '设置会话标题'),
+                  hintText: '设置会话标题',
                 ),
               ),
               const SizedBox(width: AppSpacing.controlGap),
-              IconButton.filled(
+              LuminaIconButton(
                 onPressed: _sending
                     ? null
                     : () => _run('session.title', {
                         'title': _titleController.text.trim(),
                       }),
-                icon: const Icon(Icons.check),
+                icon: const LuminaIcon(LuminaIcons.check),
                 tooltip: '保存标题',
               ),
             ],
@@ -893,7 +1121,7 @@ class _SessionControlsState extends State<_SessionControls> {
           const SizedBox(height: 4),
           Text(
             '会话事件有结果时会显示在聊天时间线中。',
-            style: Theme.of(context).textTheme.bodySmall,
+            style: LuminaTheme.of(context).textTheme.bodySmall,
           ),
         ],
       ),

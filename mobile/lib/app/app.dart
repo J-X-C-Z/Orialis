@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config/app_config.dart';
@@ -79,6 +79,7 @@ class OrialisApp extends ConsumerStatefulWidget {
 
 class _OrialisAppState extends ConsumerState<OrialisApp>
     with WidgetsBindingObserver {
+  late final _router = buildRouter();
   @override
   void initState() {
     super.initState();
@@ -96,16 +97,26 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _router.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
+    return WidgetsApp.router(
       title: 'Orialis',
       debugShowCheckedModeBanner: false,
-      theme: buildOrialisTheme(),
-      routerConfig: buildRouter(),
+      color: const Color(0xFF476F82),
+      builder: (context, child) => LuminaTheme(
+        brightness: MediaQuery.platformBrightnessOf(context),
+        child: Builder(
+          builder: (context) => DefaultTextStyle(
+            style: LuminaTheme.of(context).textTheme.bodyMedium,
+            child: child ?? const SizedBox.shrink(),
+          ),
+        ),
+      ),
+      routerConfig: _router,
     );
   }
 }
