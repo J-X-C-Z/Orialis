@@ -6,6 +6,10 @@ class AppColors {
   static const ink = Color(0xFF14201F);
   static const paper = Color(0xFFF7F7F3);
   static const surface = Colors.white;
+  static const sidebar = Color(0xFFF1F4F0);
+  static const glass = Color(0xECFFFFFF);
+  static const glassSelected = Color(0xFFF4FBF8);
+  static const glassBorder = Color(0xFFD7E3DE);
   static const accent = Color(0xFF287A70);
   static const accentSoft = Color(0xFFDDEEE8);
   static const muted = Color(0xFF687572);
@@ -28,6 +32,19 @@ class AppRadius {
   static const card = 18.0;
   static const control = 12.0;
   static const attachment = 10.0;
+  static const desktopPanel = 22.0;
+}
+
+class AppBreakpoints {
+  static const desktop = 900.0;
+  static const wide = 1180.0;
+}
+
+class AppLayout {
+  static const sidebarWidth = 236.0;
+  static const conversationSidebarWidth = 272.0;
+  static const contentMaxWidth = 1180.0;
+  static const chatContentMaxWidth = 920.0;
 }
 
 class AppIconSize {
@@ -37,6 +54,7 @@ class AppIconSize {
 
 class AppChatMetrics {
   static const bubbleMaxWidth = 320.0;
+  static const desktopBubbleMaxWidth = 680.0;
   static const bubbleHorizontalPadding = 15.0;
   static const bubbleVerticalPadding = 11.0;
   static const bubbleBottomGap = 10.0;
