@@ -273,6 +273,13 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
 
   Future<void> _chooseAttachment() async {
+    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+      final result = await FilePicker.pickFiles();
+      if (result.isNotEmpty) {
+        await _addPaths(result.map((file) => file.path).whereType<String>());
+      }
+      return;
+    }
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
@@ -388,6 +395,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         conversationId: _conversationId,
       )),
     );
+    final desktop =
+        MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop;
     return Scaffold(
       backgroundColor: AppColors.paper,
       appBar: AppBar(
@@ -402,7 +411,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                 .firstOrNull;
             return InkWell(
               borderRadius: BorderRadius.circular(AppRadius.control),
-              onTap: _showConversations,
+              onTap: desktop ? null : _showConversations,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Row(
@@ -436,7 +445,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         ),
                       ],
                     ),
-                    const Icon(Icons.keyboard_arrow_down, size: 18),
+                    if (!desktop)
+                      const Icon(Icons.keyboard_arrow_down, size: 18),
                   ],
                 ),
               ),
@@ -461,10 +471,42 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           ),
         ],
       ),
-      body: Column(
+      body: Row(
         children: [
+          if (desktop) ...[
+            SizedBox(
+              width: AppLayout.conversationSidebarWidth,
+              child: _ConversationSidebar(
+                repository: widget.repository,
+                selectedId: _conversationId,
+                onSelected: (id) {
+                  if (id != _conversationId) {
+                    setState(() => _conversationId = id);
+                  }
+                },
+                onCreate: () async {
+                  final conversation = await widget.repository
+                      .createConversation();
+                  if (mounted) {
+                    setState(() => _conversationId = conversation.id);
+                  }
+                },
+                onRename: _renameConversation,
+                onDelete: (conversation) async {
+                  await widget.repository.deleteConversation(conversation);
+                  if (conversation.id == _conversationId && mounted) {
+                    setState(() => _conversationId = 'default');
+                  }
+                },
+              ),
+            ),
+            const VerticalDivider(width: 1),
+          ],
           Expanded(
-            child: messages.when(
+            child: Column(
+              children: [
+                Expanded(
+                  child: messages.when(
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (error, _) => Center(child: Text('消息暂时无法加载：$error')),
               data: (items) =>
@@ -593,7 +635,144 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               ),
             ),
           ),
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _ConversationSidebar extends StatelessWidget {
+  const _ConversationSidebar({
+    required this.repository,
+    required this.selectedId,
+    required this.onSelected,
+    required this.onCreate,
+    required this.onRename,
+    required this.onDelete,
+  });
+
+  final ChatRepository repository;
+  final String selectedId;
+  final ValueChanged<String> onSelected;
+  final VoidCallback onCreate;
+  final ValueChanged<Conversation> onRename;
+  final ValueChanged<Conversation> onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: AppColors.sidebar,
+      child: SafeArea(
+        right: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          child: LuminaSolidSurface(
+            radius: AppRadius.desktopPanel,
+            color: AppColors.surface,
+            padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 4, 10),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '会话',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                      LuminaGlassControl(
+                        child: IconButton(
+                          onPressed: onCreate,
+                          icon: const Icon(Icons.add),
+                          tooltip: '新建会话',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: StreamBuilder<List<Conversation>>(
+                    stream: repository.watchConversations(),
+                    builder: (context, snapshot) {
+                      final conversations =
+                          snapshot.data ?? const <Conversation>[];
+                      if (conversations.isEmpty) {
+                        return const OrialisEmptyState(
+                          text: '正在同步会话…',
+                          card: false,
+                        );
+                      }
+                      return ListView.separated(
+                        itemCount: conversations.length,
+                        separatorBuilder: (_, _) =>
+                            const SizedBox(height: AppSpacing.tight),
+                        itemBuilder: (context, index) {
+                          final conversation = conversations[index];
+                          final selected = conversation.id == selectedId;
+                          return LuminaGlassControl(
+                            selected: selected,
+                            child: ListTile(
+                              dense: true,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.control,
+                                ),
+                              ),
+                              leading: Icon(
+                                conversation.type == 'main'
+                                    ? Icons.home_outlined
+                                    : Icons.chat_bubble_outline,
+                                size: 19,
+                              ),
+                              title: Text(
+                                conversation.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Text(
+                                conversation.type == 'main'
+                                    ? '主会话'
+                                    : '普通会话',
+                              ),
+                              onTap: () => onSelected(conversation.id),
+                              trailing: conversation.type == 'main'
+                                  ? null
+                                  : PopupMenuButton<String>(
+                                      tooltip: '会话操作',
+                                      onSelected: (action) {
+                                        if (action == 'rename') {
+                                          onRename(conversation);
+                                        } else if (action == 'delete') {
+                                          onDelete(conversation);
+                                        }
+                                      },
+                                      itemBuilder: (_) => const [
+                                        PopupMenuItem(
+                                          value: 'rename',
+                                          child: Text('重命名'),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'delete',
+                                          child: Text('删除'),
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
