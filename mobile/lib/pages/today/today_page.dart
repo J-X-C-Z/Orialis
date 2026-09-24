@@ -5,6 +5,7 @@ import '../../app/app.dart';
 import '../../app/design/design_components.dart';
 import '../../core/database/app_database.dart';
 import '../../features/events/presentation/task_editor.dart';
+import '../../features/events/presentation/task_children.dart';
 import '../shared/page_parts.dart';
 
 class TodayPage extends ConsumerStatefulWidget {
@@ -14,13 +15,24 @@ class TodayPage extends ConsumerStatefulWidget {
 }
 
 class _TodayPageState extends ConsumerState<TodayPage> {
-  late final Timer _clock = Timer.periodic(const Duration(minutes: 1), (_) {
-    if (mounted) setState(() {});
-  });
+  late final Timer _clock;
+  late final Stream<List<Task>> _tasksStream;
+  Stream<List<CalendarEvent>>? _schedulesStream;
+  String? _schedulesDay;
+
   @override
   void initState() {
     super.initState();
-    _clock;
+    // Hold one long-lived stream: rebuilding the page must not resubscribe
+    // Drift watches every minute tick.
+    _tasksStream = ref
+        .read(taskRepositoryProvider)
+        .watchTasksByFilters(completed: false);
+    // Minute ticks refresh the "next schedule" window; stream resubscription
+    // is avoided by caching the watch above and the day-scoped schedule watch.
+    _clock = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -29,11 +41,22 @@ class _TodayPageState extends ConsumerState<TodayPage> {
     super.dispose();
   }
 
+  Stream<List<CalendarEvent>> _schedulesFor(DateTime now) {
+    final day = dateKey(now);
+    final existing = _schedulesStream;
+    if (existing != null && _schedulesDay == day) return existing;
+    _schedulesDay = day;
+    return _schedulesStream = ref
+        .read(scheduleRepositoryProvider)
+        .watchForDate(DateTime(now.year, now.month, now.day));
+  }
+
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now(), key = dateKey(DateTime.now());
+    final now = DateTime.now(), key = dateKey(now);
     return OrialisPageScaffold(
       title: '今日',
+      padding: EdgeInsets.zero,
       actions: [
         Padding(
           padding: const EdgeInsets.only(right: 8),
@@ -41,11 +64,11 @@ class _TodayPageState extends ConsumerState<TodayPage> {
         ),
       ],
       body: StreamBuilder<List<Task>>(
-        stream: ref.watch(taskRepositoryProvider).watchTasks(),
+        stream: _tasksStream,
         builder: (context, tasks) {
           if (tasks.hasError) return const PageFailure();
           if (!tasks.hasData) return const Center(child: LuminaProgress());
-          final pending = tasks.data!.where((t) => !t.completed).toList();
+          final pending = tasks.data!;
           final focus = pending
               .where(
                 (t) =>
@@ -59,7 +82,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
                   .toList()
                 ..sort((a, b) => a.due!.compareTo(b.due!));
           return StreamBuilder<List<CalendarEvent>>(
-            stream: ref.watch(scheduleRepositoryProvider).watchForDate(now),
+            stream: _schedulesFor(now),
             builder: (context, schedules) {
               if (schedules.hasError) return const PageFailure();
               final remaining =
@@ -69,56 +92,65 @@ class _TodayPageState extends ConsumerState<TodayPage> {
                     ..sort((a, b) => a.startAt.compareTo(b.startAt));
               final next = remaining.firstOrNull;
               return ListView(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  16,
+                  20,
+                  24 +
+                      LuminaNavigationInset.of(context) +
+                      MediaQuery.paddingOf(context).bottom,
+                ),
                 children: [
                   ContentStack(
                     gap: 24,
                     children: [
                       OrialisSection(
                         title: '现在关注',
+                        raised: true,
                         trailing: QuietLabel('${focus.length} 项'),
-                        child: focus.isEmpty
-                            ? const OrialisEmptyState(
-                                text: '眼下没有需要赶的事。',
-                                card: false,
-                              )
-                            : ContentStack(
-                                children: [for (final t in focus) _task(t)],
-                              ),
+                        child: LuminaCompletionList(
+                          empty: _empty('眼下没有需要赶的事。'),
+                          children: [for (final t in focus) _task(t)],
+                        ),
                       ),
                       OrialisSection(
                         title: '下一安排',
+                        raised: true,
                         trailing: LuminaButton(
                           primary: false,
+                          icon: LuminaIcon(
+                            LuminaIcons.calendar,
+                            size: 18,
+                            color: LuminaTheme.of(context).colors.muted,
+                          ),
                           onPressed: () => context.go('/calendar'),
-                          child: const Text('日历'),
+                          child: Text(
+                            '日历',
+                            style: LuminaTheme.of(context).textTheme.bodyMedium
+                                .copyWith(
+                                  color: LuminaTheme.of(context).colors.muted,
+                                ),
+                          ),
                         ),
                         child: next == null
-                            ? const OrialisEmptyState(
-                                text: '今天没有接下来的安排。',
-                                card: false,
-                              )
+                            ? _empty('今天没有接下来的安排。')
                             : _schedule(next),
                       ),
                       OrialisSection(
                         title: '最近截止',
-                        child: deadlines.isEmpty
-                            ? const OrialisEmptyState(
-                                text: '暂无未来的截止事项。',
-                                card: false,
-                              )
-                            : ContentStack(
-                                children: [
-                                  for (final t in deadlines.take(3)) _task(t),
-                                ],
-                              ),
+                        raised: true,
+                        child: LuminaCompletionList(
+                          empty: _empty('暂无未来的截止事项。'),
+                          children: [
+                            for (final t in deadlines.take(3)) _task(t),
+                          ],
+                        ),
                       ),
                       OrialisSection(
                         title: '今日稍后',
+                        raised: true,
                         child: remaining.length < 2
-                            ? const OrialisEmptyState(
-                                text: '稍后留白，按自己的节奏继续。',
-                                card: false,
-                              )
+                            ? _empty('稍后留白，按自己的节奏继续。')
                             : ContentStack(
                                 children: [
                                   for (final s in remaining.skip(1))
@@ -137,8 +169,22 @@ class _TodayPageState extends ConsumerState<TodayPage> {
     );
   }
 
+  Widget _empty(String message) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 18),
+    child: Text(
+      message,
+      textAlign: TextAlign.center,
+      style: LuminaTheme.of(context).textTheme.bodyMedium.copyWith(
+        color: LuminaTheme.of(context).colors.muted,
+      ),
+    ),
+  );
+
   Widget _task(Task t) => OrialisListRow(
+    key: ValueKey(t.id),
+    depth: LuminaSurfaceDepth.recessed,
     title: t.title,
+    detail: TaskSourceLabel(task: t),
     subtitle: [
       if (t.due != null) t.due!,
       if (t.dueTime != null) t.dueTime!,
@@ -171,6 +217,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
     ),
   );
   Widget _schedule(CalendarEvent s) => OrialisListRow(
+    depth: LuminaSurfaceDepth.recessed,
     title: s.title,
     leading: const LuminaIcon(LuminaIcons.clock),
     subtitle: s.allDay

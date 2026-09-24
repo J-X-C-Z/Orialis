@@ -11,6 +11,7 @@ class AppConfig {
   static const _legacyAuthUsernameKey = 'orialis.authUsername';
   static const _compatAuthTokenKey = 'orialis.compatAuthToken';
   static const _compatAuthUsernameKey = 'orialis.compatAuthUsername';
+  static const _highPerformanceModeKey = 'orialis.highPerformanceMode';
   static const _secureStorage = FlutterSecureStorage();
   static const defaultServerUrl = String.fromEnvironment(
     'ORIALIS_SERVER_URL',
@@ -25,6 +26,16 @@ class AppConfig {
   Future<void> setServerUrl(String value) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(_serverUrlKey, value.trim());
+  }
+
+  Future<bool> highPerformanceMode() async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getBool(_highPerformanceModeKey) ?? true;
+  }
+
+  Future<void> setHighPerformanceMode(bool value) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_highPerformanceModeKey, value);
   }
 
   Future<String> deviceId() async {

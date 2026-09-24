@@ -534,6 +534,17 @@ async fn handle_text(
     device_id: &str,
     text: String,
 ) {
+    // Extension frames (delivery/command/artifact/session-control and the
+    // legacy typing/stream helpers) are not part of the sequenced event
+    // pipeline. Peek the type so they reach mobile instead of UnknownType.
+    if let Ok(value) = serde_json::from_str::<Value>(text.as_str()) {
+        if let Some(message_type) = value.get("type").and_then(Value::as_str) {
+            if protocol::is_extension_type(message_type) {
+                handle_extension_frame(state, socket, user_id, text.as_str()).await;
+                return;
+            }
+        }
+    }
     match protocol::parse_message(&text) {
         Ok(protocol::GatewayMessage::Ping { .. }) => {
             let _ = send_message(
@@ -650,6 +661,40 @@ async fn send_message(
         .send(Message::Text(payload.into()))
         .await
         .map_err(|_| ())
+}
+
+/// Handles plugin frames that live outside the sequenced GatewayMessage enum.
+/// Delivery frames are acknowledged so the plugin waiter unblocks; every
+/// extension frame is mapped onto a mobile `event` the client already renders.
+async fn handle_extension_frame(
+    state: &Arc<AppState>,
+    socket: &mut WebSocket,
+    user_id: &str,
+    text: &str,
+) {
+    let frame = match protocol::parse_extension(text) {
+        Ok(frame) => frame,
+        Err(error) => {
+            let _ = send_protocol_error(socket, &error).await;
+            return;
+        }
+    };
+    if matches!(
+        frame.message_type.as_str(),
+        "delivery.send" | "cron.delivery" | "proactive.delivery"
+    ) {
+        let delivery_id = frame.raw["delivery_id"].as_str().unwrap_or_default();
+        let conversation_id = frame.raw["conversation_id"].as_str();
+        let ack = protocol::delivery_ack(delivery_id, "received", conversation_id);
+        if let Ok(payload) = serde_json::to_string(&ack) {
+            let _ = socket.send(Message::Text(payload.into())).await;
+        }
+    }
+    for payload in protocol::extension_mobile_events(&frame) {
+        state
+            .mobile
+            .notify(user_id, protocol::mobile_event(payload));
+    }
 }
 
 async fn send_protocol_error(

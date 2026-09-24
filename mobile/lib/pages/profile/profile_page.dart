@@ -239,6 +239,27 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 ],
               ),
             ),
+            OrialisSection(
+              title: '显示与动效',
+              child: OrialisListRow(
+                title: '高性能模式',
+                subtitle: '减少实时玻璃模糊，保留色彩、阴影与自然动效',
+                trailing: LuminaSwitch(
+                  value: ref.watch(highPerformanceModeProvider),
+                  onChanged: (value) async {
+                    try {
+                      await ref
+                          .read(highPerformanceModeProvider.notifier)
+                          .setEnabled(value);
+                    } catch (_) {
+                      if (context.mounted) {
+                        showLuminaMessage(context, '设置未能保存，请重试');
+                      }
+                    }
+                  },
+                ),
+              ),
+            ),
             FutureBuilder<String>(
               future: _deviceId,
               builder: (_, s) => OrialisListRow(

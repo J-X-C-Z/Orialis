@@ -117,6 +117,68 @@ openChat(WidgetTester tester, {bool largeDark = false}) async {
 
 void main() {
   testWidgets(
+    'detail hides navigation, opens latest and preserves history position',
+    (tester) async {
+      final h = await openChat(tester);
+      expect(find.text('今日'), findsNothing);
+      Future<void> addMessage(int i) => h.repo.applyRemoteMessage({
+        'conversationId': h.id,
+        'id': 'scroll-$i',
+        'role': 'user',
+        'content': '消息 $i：用于验证进入会话和历史阅读的位置。',
+        'createdAt': DateTime.utc(2026, 9, 24, 0, i).toIso8601String(),
+        'version': 1,
+      });
+      final seeded = () async {
+        for (var i = 0; i < 35; i++) {
+          await addMessage(i);
+        }
+      }();
+      await tester.pumpAndSettle();
+      await seeded;
+      await tester.pumpAndSettle();
+      final scrollable = find.descendant(
+        of: find.byType(ListView),
+        matching: find.byType(Scrollable),
+      );
+      final position = tester.state<ScrollableState>(scrollable.first).position;
+      expect(position.extentAfter, lessThan(1));
+      expect(find.textContaining('↑'), findsWidgets);
+      expect(find.textContaining('✓'), findsNothing);
+      await tester.drag(find.byType(ListView), const Offset(0, 450));
+      await tester.pumpAndSettle();
+      final before = position.pixels;
+      final incoming = addMessage(35);
+      await tester.pumpAndSettle();
+      await incoming;
+      await tester.pumpAndSettle();
+      expect(position.pixels, closeTo(before, 1));
+      expect(find.text('新消息 ↓'), findsOneWidget);
+      await tester.tap(find.text('新消息 ↓'));
+      await tester.pumpAndSettle();
+      expect(position.extentAfter, lessThan(1));
+      await tester.tap(iconAction('返回会话列表'));
+      await tester.pumpAndSettle();
+      expect(find.text('今日'), findsOneWidget);
+      await tester.tap(find.text('离线会话').first);
+      await tester.pumpAndSettle();
+      final reopened = tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: find.byType(ListView),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position;
+      expect(reopened.extentAfter, lessThan(1));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    },
+  );
+  testWidgets(
     'offline conversation send, retry and system back preserve one local message',
     (tester) async {
       final h = await openChat(tester);

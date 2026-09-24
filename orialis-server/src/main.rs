@@ -128,6 +128,8 @@ struct Task {
     due_time: Option<String>,
     reminder_minutes: Option<i64>,
     project_id: Option<String>,
+    parent_task_id: Option<String>,
+    schedule_id: Option<String>,
     recurrence: Option<Recurrence>,
     created_at: String,
     updated_at: String,
@@ -148,6 +150,8 @@ struct TaskRow {
     due_time: Option<String>,
     reminder_minutes: Option<i64>,
     project_id: Option<String>,
+    parent_task_id: Option<String>,
+    schedule_id: Option<String>,
     recurrence_rule: Option<String>,
     recurrence_until: Option<String>,
     created_at: String,
@@ -177,6 +181,8 @@ impl TaskRow {
             due_time: self.due_time,
             reminder_minutes: self.reminder_minutes,
             project_id: self.project_id,
+            parent_task_id: self.parent_task_id,
+            schedule_id: self.schedule_id,
             recurrence: match (self.recurrence_rule, self.recurrence_until) {
                 (Some(rule), Some(until)) => Some(Recurrence { rule, until }),
                 _ => None,
@@ -203,6 +209,10 @@ struct TaskInput {
     due_time: Option<String>,
     reminder_minutes: Option<i64>,
     project_id: Option<String>,
+    #[serde(alias = "parent_task_id")]
+    parent_task_id: Option<String>,
+    #[serde(alias = "schedule_id")]
+    schedule_id: Option<String>,
     recurrence: Option<Recurrence>,
 }
 
@@ -229,6 +239,12 @@ struct TaskPatch {
     reminder_minutes: Option<PatchValue<i64>>,
     #[serde(default, deserialize_with = "deserialize_patch")]
     project_id: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    #[serde(alias = "parent_task_id")]
+    parent_task_id: Option<PatchValue<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    #[serde(alias = "schedule_id")]
+    schedule_id: Option<PatchValue<String>>,
     #[serde(default, deserialize_with = "deserialize_patch")]
     recurrence: Option<PatchValue<Recurrence>>,
     base_version: i64,
@@ -323,6 +339,7 @@ struct Schedule {
     start_at: String,
     end_at: String,
     all_day: bool,
+    important: bool,
     reminder_minutes: Option<i64>,
     created_at: String,
     updated_at: String,
@@ -340,6 +357,7 @@ struct ScheduleInput {
     start_at: String,
     end_at: String,
     all_day: Option<bool>,
+    important: Option<bool>,
     reminder_minutes: Option<i64>,
 }
 
@@ -517,6 +535,8 @@ struct SchedulePatch {
     all_day: Option<PatchValue<bool>>,
     #[serde(default, deserialize_with = "deserialize_patch")]
     reminder_minutes: Option<PatchValue<i64>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    important: Option<PatchValue<bool>>,
     base_version: i64,
 }
 
@@ -1869,7 +1889,7 @@ async fn list_tasks(
     let task_rows = if let Some(cursor) = cursor {
         sqlx::query_as::<_, TaskRow>(
             "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
-                    reminder_minutes,project_id,recurrence_rule,recurrence_until,
+                    reminder_minutes,project_id,parent_task_id,schedule_id,recurrence_rule,recurrence_until,
                     created_at,updated_at,version,deleted_at
              FROM tasks
              WHERE user_id=? AND deleted_at IS NULL
@@ -1891,7 +1911,7 @@ async fn list_tasks(
     } else {
         sqlx::query_as::<_, TaskRow>(
             "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
-                    reminder_minutes,project_id,recurrence_rule,recurrence_until,
+                    reminder_minutes,project_id,parent_task_id,schedule_id,recurrence_rule,recurrence_until,
                     created_at,updated_at,version,deleted_at
              FROM tasks WHERE user_id=? AND deleted_at IS NULL
              ORDER BY due IS NULL,due,due_time IS NULL,due_time,created_at,id
@@ -1959,7 +1979,7 @@ where
 {
     let row = sqlx::query_as::<_, TaskRow>(
         "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
-                reminder_minutes,project_id,recurrence_rule,recurrence_until,
+                reminder_minutes,project_id,parent_task_id,schedule_id,recurrence_rule,recurrence_until,
                 created_at,updated_at,version,deleted_at
          FROM tasks WHERE user_id=? AND id=? AND deleted_at IS NULL",
     )
@@ -1969,6 +1989,219 @@ where
     .await?
     .ok_or(AppError::NotFound)?;
     Ok(row.into_task())
+}
+
+async fn validate_task_attachments(
+    pool: &SqlitePool,
+    user_id: &str,
+    task_id: &str,
+    parent_task_id: Option<&str>,
+    schedule_id: Option<&str>,
+) -> Result<(), AppError> {
+    if parent_task_id.is_some() && schedule_id.is_some() {
+        return Err(AppError::BadRequest(
+            "a task cannot have both a parent task and a schedule".into(),
+        ));
+    }
+    if let Some(parent_id) = parent_task_id {
+        if parent_id == task_id {
+            return Err(AppError::BadRequest("a task cannot parent itself".into()));
+        }
+        let parent = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+            "SELECT parent_task_id,schedule_id FROM tasks
+             WHERE id=? AND user_id=? AND deleted_at IS NULL",
+        )
+        .bind(parent_id)
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("parent task is unavailable".into()))?;
+        if parent.0.is_some() || parent.1.is_some() {
+            return Err(AppError::BadRequest(
+                "child tasks cannot have children or schedules".into(),
+            ));
+        }
+        let has_children = sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE parent_task_id=? AND deleted_at IS NULL)",
+        )
+        .bind(task_id)
+        .fetch_one(pool)
+        .await?;
+        if has_children != 0 {
+            return Err(AppError::BadRequest(
+                "a task with child tasks cannot become a child".into(),
+            ));
+        }
+    }
+    if let Some(event_id) = schedule_id {
+        let has_children = sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(SELECT 1 FROM tasks
+             WHERE user_id=? AND parent_task_id=? AND deleted_at IS NULL)",
+        )
+        .bind(user_id)
+        .bind(task_id)
+        .fetch_one(pool)
+        .await?;
+        if has_children != 0 {
+            return Err(AppError::BadRequest(
+                "a task with child tasks cannot be assigned to a schedule".into(),
+            ));
+        }
+        let exists = sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(SELECT 1 FROM calendar_events
+             WHERE id=? AND user_id=? AND deleted_at IS NULL)",
+        )
+        .bind(event_id)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await?;
+        if exists == 0 {
+            return Err(AppError::BadRequest("schedule is unavailable".into()));
+        }
+    }
+    Ok(())
+}
+
+async fn update_child_completion(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: &str,
+    task: &Task,
+    was_completed: bool,
+) -> Result<(), AppError> {
+    let timestamp = now();
+    if let Some(parent_id) = task.parent_task_id.as_deref() {
+        reconcile_parent_completion(tx, user_id, parent_id, &timestamp).await?;
+    } else if was_completed != task.completed && task.completed {
+        let children = sqlx::query_as::<_, (String, i64)>(
+            "SELECT id,version FROM tasks
+             WHERE user_id=? AND parent_task_id=? AND deleted_at IS NULL AND completed=0",
+        )
+        .bind(user_id)
+        .bind(&task.id)
+        .fetch_all(&mut **tx)
+        .await?;
+        for (child_id, version) in children {
+            sqlx::query(
+                "UPDATE tasks SET completed=1,completed_at=?,updated_at=?,version=version+1
+                 WHERE user_id=? AND id=? AND version=? AND deleted_at IS NULL",
+            )
+            .bind(&timestamp)
+            .bind(&timestamp)
+            .bind(user_id)
+            .bind(&child_id)
+            .bind(version)
+            .execute(&mut **tx)
+            .await?;
+            let child = fetch_task(&mut **tx, user_id, &child_id).await?;
+            append_event(
+                &mut **tx,
+                user_id,
+                "task",
+                &child_id,
+                "upsert",
+                child.version,
+                Some(serde_json::to_string(&child).unwrap()),
+                None,
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn reconcile_parent_completion(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: &str,
+    parent_id: &str,
+    timestamp: &str,
+) -> Result<(), AppError> {
+    let children = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT COUNT(*),COALESCE(SUM(completed),0) FROM tasks
+         WHERE user_id=? AND parent_task_id=? AND deleted_at IS NULL",
+    )
+    .bind(user_id)
+    .bind(parent_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if children.0 == 0 {
+        return Ok(());
+    }
+    let parent_completed = children.0 > 0 && children.0 == children.1;
+    let parent = fetch_task(&mut **tx, user_id, parent_id).await?;
+    if parent.completed != parent_completed {
+        sqlx::query(
+            "UPDATE tasks SET completed=?,completed_at=?,updated_at=?,version=version+1
+             WHERE user_id=? AND id=? AND version=? AND deleted_at IS NULL",
+        )
+        .bind(parent_completed)
+        .bind(if parent_completed {
+            Some(timestamp.to_owned())
+        } else {
+            None
+        })
+        .bind(timestamp)
+        .bind(user_id)
+        .bind(parent_id)
+        .bind(parent.version)
+        .execute(&mut **tx)
+        .await?;
+        let updated_parent = fetch_task(&mut **tx, user_id, parent_id).await?;
+        append_event(
+            &mut **tx,
+            user_id,
+            "task",
+            parent_id,
+            "upsert",
+            updated_parent.version,
+            Some(serde_json::to_string(&updated_parent).unwrap()),
+            None,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+async fn soft_delete_children(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: &str,
+    relation_column: &str,
+    relation_id: &str,
+    timestamp: &str,
+) -> Result<(), AppError> {
+    // relation_column is selected only by server code, never by a request.
+    let query = format!(
+        "SELECT id,version FROM tasks WHERE user_id=? AND {relation_column}=? AND deleted_at IS NULL"
+    );
+    let children = sqlx::query_as::<_, (String, i64)>(&query)
+        .bind(user_id)
+        .bind(relation_id)
+        .fetch_all(&mut **tx)
+        .await?;
+    for (child_id, version) in children {
+        sqlx::query(
+            "UPDATE tasks SET deleted_at=?,updated_at=?,version=version+1
+             WHERE user_id=? AND id=? AND version=? AND deleted_at IS NULL",
+        )
+        .bind(timestamp)
+        .bind(timestamp)
+        .bind(user_id)
+        .bind(&child_id)
+        .bind(version)
+        .execute(&mut **tx)
+        .await?;
+        append_event(
+            &mut **tx,
+            user_id,
+            "task",
+            &child_id,
+            "delete",
+            version + 1,
+            None,
+            None,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 async fn create_task(
@@ -1998,6 +2231,14 @@ async fn create_task(
     }
     let id = input.id.unwrap_or_else(new_id);
     validate_entity_id("id", &id)?;
+    validate_task_attachments(
+        &state.pool,
+        &user_id,
+        &id,
+        input.parent_task_id.as_deref(),
+        input.schedule_id.as_deref(),
+    )
+    .await?;
     ensure_client_id_available(&state.pool, &user_id, "tasks", &id).await?;
     let timestamp = now();
     let completed = input.completed.unwrap_or(false);
@@ -2017,8 +2258,8 @@ async fn create_task(
     let result = sqlx::query(
         "INSERT INTO tasks
          (id,user_id,title,notes,important,urgent,completed,completed_at,due,due_time,
-          reminder_minutes,project_id,recurrence_rule,recurrence_until,created_at,updated_at,version)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+          reminder_minutes,project_id,parent_task_id,schedule_id,recurrence_rule,recurrence_until,created_at,updated_at,version)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
          ON CONFLICT(id) DO NOTHING",
     )
     .bind(&id)
@@ -2033,6 +2274,8 @@ async fn create_task(
     .bind(input.due_time)
     .bind(input.reminder_minutes)
     .bind(input.project_id)
+    .bind(input.parent_task_id)
+    .bind(input.schedule_id)
     .bind(input.recurrence.as_ref().map(|value| value.rule.clone()))
     .bind(input.recurrence.as_ref().map(|value| value.until.clone()))
     .bind(&timestamp)
@@ -2045,6 +2288,7 @@ async fn create_task(
         return Ok((StatusCode::OK, Json(existing)));
     }
     let task = fetch_task(&mut *tx, &user_id, &id).await?;
+    update_child_completion(&mut tx, &user_id, &task, false).await?;
     append_event(
         &mut *tx,
         &user_id,
@@ -2073,6 +2317,8 @@ async fn update_task(
     if current.version != input.base_version {
         return Err(AppError::Conflict("task version changed".into()));
     }
+    let was_completed = current.completed;
+    let previous_parent_task_id = current.parent_task_id.clone();
     let title = resolve_required(input.title, current.title, "title")?;
     let notes = resolve_nullable(input.notes, current.notes);
     let important = resolve_nullable(input.important, current.important);
@@ -2103,6 +2349,8 @@ async fn update_task(
     let due_time = resolve_nullable(input.due_time, current.due_time);
     let reminder_minutes = resolve_nullable(input.reminder_minutes, current.reminder_minutes);
     let project_id = resolve_nullable(input.project_id, current.project_id);
+    let parent_task_id = resolve_nullable(input.parent_task_id, current.parent_task_id);
+    let schedule_id = resolve_nullable(input.schedule_id, current.schedule_id);
     let recurrence = match input.recurrence {
         None => current.recurrence,
         Some(PatchValue::Value(value)) => Some(value),
@@ -2118,10 +2366,18 @@ async fn update_task(
     if let Some(project_id) = project_id.as_deref() {
         ensure_project(&state.pool, &user_id, project_id).await?;
     }
+    validate_task_attachments(
+        &state.pool,
+        &user_id,
+        &id,
+        parent_task_id.as_deref(),
+        schedule_id.as_deref(),
+    )
+    .await?;
     let mut tx = state.pool.begin().await?;
     let result = sqlx::query(
         "UPDATE tasks SET title=?,notes=?,important=?,urgent=?,completed=?,completed_at=?,due=?,due_time=?,
-         reminder_minutes=?,project_id=?,recurrence_rule=?,recurrence_until=?,updated_at=?,version=version+1
+         reminder_minutes=?,project_id=?,parent_task_id=?,schedule_id=?,recurrence_rule=?,recurrence_until=?,updated_at=?,version=version+1
          WHERE user_id=? AND id=? AND version=?",
     )
     .bind(title.trim())
@@ -2134,6 +2390,8 @@ async fn update_task(
     .bind(due_time)
     .bind(reminder_minutes)
     .bind(project_id)
+    .bind(parent_task_id)
+    .bind(schedule_id)
     .bind(recurrence.as_ref().map(|value| value.rule.clone()))
     .bind(recurrence.as_ref().map(|value| value.until.clone()))
     .bind(now())
@@ -2146,6 +2404,12 @@ async fn update_task(
         return Err(AppError::Conflict("task version changed".into()));
     }
     let task = fetch_task(&mut *tx, &user_id, &id).await?;
+    if let Some(previous_parent_id) = previous_parent_task_id.as_deref() {
+        if task.parent_task_id.as_deref() != Some(previous_parent_id) {
+            reconcile_parent_completion(&mut tx, &user_id, previous_parent_id, &now()).await?;
+        }
+    }
+    update_child_completion(&mut tx, &user_id, &task, was_completed).await?;
     append_event(
         &mut *tx,
         &user_id,
@@ -2201,6 +2465,13 @@ async fn delete_task(
         mutation_id(&headers),
     )
     .await?;
+    if let Some(parent_id) = task.parent_task_id.as_deref() {
+        reconcile_parent_completion(&mut tx, &user_id, parent_id, &timestamp).await?;
+    }
+    // Publish the owning tombstone first. Clients can acknowledge pending
+    // child mutations as they cascade locally, then apply each child's newer
+    // version from the following child tombstone event.
+    soft_delete_children(&mut tx, &user_id, "parent_task_id", &id, &timestamp).await?;
     tx.commit().await?;
     notify_sync_change(&state, &user_id, Some("task")).await;
     Ok(StatusCode::NO_CONTENT)
@@ -2426,7 +2697,7 @@ async fn project_summary(
     .await?;
     let next_action = sqlx::query_as::<_, TaskRow>(
         "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
-                reminder_minutes,project_id,recurrence_rule,recurrence_until,
+                reminder_minutes,project_id,parent_task_id,schedule_id,recurrence_rule,recurrence_until,
                 created_at,updated_at,version,deleted_at
          FROM tasks
          WHERE user_id=? AND project_id=? AND deleted_at IS NULL AND completed=0
@@ -3024,7 +3295,7 @@ async fn list_events(
     }
     let cursor = query.after.map(decode_schedule_cursor).transpose()?;
     let mut events = sqlx::query_as::<_, Schedule>(
-        "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version,deleted_at
+        "SELECT id,title,description,location,start_at,end_at,all_day,important,reminder_minutes,created_at,updated_at,version,deleted_at
          FROM calendar_events
          WHERE user_id=? AND deleted_at IS NULL
            AND (? IS NULL OR start_at>=?) AND (? IS NULL OR start_at<?)
@@ -3091,7 +3362,7 @@ where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
     sqlx::query_as::<_, Schedule>(
-        "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version,deleted_at
+        "SELECT id,title,description,location,start_at,end_at,all_day,important,reminder_minutes,created_at,updated_at,version,deleted_at
          FROM calendar_events WHERE user_id=? AND id=? AND deleted_at IS NULL",
     ).bind(user_id).bind(id).fetch_optional(executor).await?.ok_or(AppError::NotFound)
 }
@@ -3113,8 +3384,8 @@ async fn create_event(
     ensure_client_id_available(&state.pool, &user_id, "calendar_events", &id).await?;
     let timestamp = now();
     let mut tx = state.pool.begin().await?;
-    let result = sqlx::query("INSERT INTO calendar_events (id,user_id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO NOTHING")
-        .bind(&id).bind(&user_id).bind(input.title.trim()).bind(input.description).bind(input.location).bind(input.start_at).bind(input.end_at).bind(input.all_day.unwrap_or(false)).bind(input.reminder_minutes).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await?;
+    let result = sqlx::query("INSERT INTO calendar_events (id,user_id,title,description,location,start_at,end_at,all_day,important,reminder_minutes,created_at,updated_at,version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO NOTHING")
+        .bind(&id).bind(&user_id).bind(input.title.trim()).bind(input.description).bind(input.location).bind(input.start_at).bind(input.end_at).bind(input.all_day.unwrap_or(false)).bind(input.important.unwrap_or(false)).bind(input.reminder_minutes).bind(&timestamp).bind(&timestamp).execute(&mut *tx).await?;
     if result.rows_affected() == 0 {
         let existing = fetch_event(&mut *tx, &user_id, &id).await?;
         tx.rollback().await?;
@@ -3155,12 +3426,13 @@ async fn update_event(
     let start_at = resolve_required(input.start_at, current.start_at, "startAt")?;
     let end_at = resolve_required(input.end_at, current.end_at, "endAt")?;
     let all_day = resolve_required(input.all_day, current.all_day, "allDay")?;
+    let important = resolve_required(input.important, current.important, "important")?;
     let reminder_minutes = resolve_nullable(input.reminder_minutes, current.reminder_minutes);
     validate_calendar_range(&start_at, &end_at)?;
     validate_reminder(reminder_minutes)?;
     let mut tx = state.pool.begin().await?;
-    let result = sqlx::query("UPDATE calendar_events SET title=?,description=?,location=?,start_at=?,end_at=?,all_day=?,reminder_minutes=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
-        .bind(title.trim()).bind(description).bind(location).bind(start_at).bind(end_at).bind(all_day).bind(reminder_minutes).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&mut *tx).await?;
+    let result = sqlx::query("UPDATE calendar_events SET title=?,description=?,location=?,start_at=?,end_at=?,all_day=?,important=?,reminder_minutes=?,updated_at=?,version=version+1 WHERE user_id=? AND id=? AND version=?")
+        .bind(title.trim()).bind(description).bind(location).bind(start_at).bind(end_at).bind(all_day).bind(important).bind(reminder_minutes).bind(now()).bind(&user_id).bind(&id).bind(input.base_version).execute(&mut *tx).await?;
     if result.rows_affected() != 1 {
         return Err(AppError::Conflict("calendar event version changed".into()));
     }
@@ -3211,6 +3483,9 @@ async fn delete_event(
         mutation_id(&headers),
     )
     .await?;
+    // Keep the schedule tombstone ahead of its child tombstones for clients
+    // that acknowledge pending child outbox rows during local cascade.
+    soft_delete_children(&mut tx, &user_id, "schedule_id", &id, &timestamp).await?;
     tx.commit().await?;
     notify_sync_change(&state, &user_id, Some("calendar_event")).await;
     Ok(StatusCode::NO_CONTENT)
@@ -3243,7 +3518,7 @@ async fn sync_snapshot(
     let mut tx = state.pool.begin().await?;
     let tasks = sqlx::query_as::<_, TaskRow>(
         "SELECT id,title,notes,important,urgent,completed,completed_at,due,due_time,
-                reminder_minutes,project_id,recurrence_rule,recurrence_until,
+                reminder_minutes,project_id,parent_task_id,schedule_id,recurrence_rule,recurrence_until,
                 created_at,updated_at,version,deleted_at
          FROM tasks WHERE user_id=? AND deleted_at IS NULL ORDER BY created_at",
     )
@@ -3258,7 +3533,7 @@ async fn sync_snapshot(
          FROM projects WHERE user_id=? AND deleted_at IS NULL ORDER BY created_at",
     ).bind(&user_id).fetch_all(&mut *tx).await?;
     let calendar_events = sqlx::query_as::<_, Schedule>(
-        "SELECT id,title,description,location,start_at,end_at,all_day,reminder_minutes,created_at,updated_at,version,deleted_at
+        "SELECT id,title,description,location,start_at,end_at,all_day,important,reminder_minutes,created_at,updated_at,version,deleted_at
          FROM calendar_events WHERE user_id=? AND deleted_at IS NULL ORDER BY start_at",
     ).bind(&user_id).fetch_all(&mut *tx).await?;
     let milestones = sqlx::query_as::<_, Milestone>(
@@ -3389,6 +3664,460 @@ mod attachment_tests {
             until: "31-12-2026".into(),
         }))
         .is_err());
+    }
+
+    #[test]
+    fn task_and_schedule_patches_distinguish_missing_null_and_value() {
+        let missing: TaskPatch =
+            serde_json::from_value(serde_json::json!({"baseVersion": 1})).unwrap();
+        assert!(missing.parent_task_id.is_none());
+        assert!(missing.schedule_id.is_none());
+
+        let clearing: TaskPatch = serde_json::from_value(serde_json::json!({
+            "baseVersion": 1,
+            "parentTaskId": null,
+            "scheduleId": "schedule-1"
+        }))
+        .unwrap();
+        assert!(matches!(
+            clearing.parent_task_id,
+            Some(PatchValue::Null(()))
+        ));
+        assert!(matches!(clearing.schedule_id, Some(PatchValue::Value(id)) if id == "schedule-1"));
+
+        let schedule_patch: SchedulePatch = serde_json::from_value(serde_json::json!({
+            "baseVersion": 1,
+            "important": true
+        }))
+        .unwrap();
+        assert!(matches!(
+            schedule_patch.important,
+            Some(PatchValue::Value(true))
+        ));
+
+        let worker_create: TaskInput = serde_json::from_value(serde_json::json!({
+            "title": "snake case create",
+            "parent_task_id": "parent-1",
+            "schedule_id": "schedule-1"
+        }))
+        .unwrap();
+        assert_eq!(worker_create.parent_task_id.as_deref(), Some("parent-1"));
+        assert_eq!(worker_create.schedule_id.as_deref(), Some("schedule-1"));
+
+        let worker_patch: TaskPatch = serde_json::from_value(serde_json::json!({
+            "baseVersion": 1,
+            "parent_task_id": null,
+            "schedule_id": "schedule-2"
+        }))
+        .unwrap();
+        assert!(matches!(
+            worker_patch.parent_task_id,
+            Some(PatchValue::Null(()))
+        ));
+        assert!(matches!(
+            worker_patch.schedule_id,
+            Some(PatchValue::Value(id)) if id == "schedule-2"
+        ));
+    }
+
+    async fn feature_test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO users (id,username,password_hash) VALUES ('user-1','user-1','test')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn insert_feature_test_task(
+        pool: &SqlitePool,
+        id: &str,
+        parent_task_id: Option<&str>,
+        schedule_id: Option<&str>,
+    ) {
+        sqlx::query(
+            "INSERT INTO tasks (id,user_id,title,parent_task_id,schedule_id)
+             VALUES (?,?,?,?,?)",
+        )
+        .bind(id)
+        .bind("user-1")
+        .bind(id)
+        .bind(parent_task_id)
+        .bind(schedule_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn creating_or_reattaching_incomplete_child_reopens_completed_parent() {
+        let pool = feature_test_pool().await;
+        for parent_id in ["created-parent", "reattach-parent"] {
+            insert_feature_test_task(&pool, parent_id, None, None).await;
+            sqlx::query(
+                "UPDATE tasks SET completed=1,completed_at='2026-09-24T09:00:00Z'
+                 WHERE id=?",
+            )
+            .bind(parent_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        insert_feature_test_task(&pool, "new-child", Some("created-parent"), None).await;
+        let mut tx = pool.begin().await.unwrap();
+        let new_child = fetch_task(&mut *tx, "user-1", "new-child").await.unwrap();
+        update_child_completion(&mut tx, "user-1", &new_child, false)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let created_parent = fetch_task(&pool, "user-1", "created-parent")
+            .await
+            .unwrap();
+        assert!(!created_parent.completed);
+        assert_eq!(created_parent.version, 2);
+
+        insert_feature_test_task(&pool, "moving-child", Some("created-parent"), None).await;
+        let mut tx = pool.begin().await.unwrap();
+        let moving_child = fetch_task(&mut *tx, "user-1", "moving-child")
+            .await
+            .unwrap();
+        update_child_completion(&mut tx, "user-1", &moving_child, false)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query(
+            "UPDATE tasks SET parent_task_id='reattach-parent',version=version+1
+             WHERE id='moving-child'",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        let moved_child = fetch_task(&mut *tx, "user-1", "moving-child")
+            .await
+            .unwrap();
+        reconcile_parent_completion(&mut tx, "user-1", "created-parent", &now())
+            .await
+            .unwrap();
+        update_child_completion(&mut tx, "user-1", &moved_child, false)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let reattach_parent = fetch_task(&pool, "user-1", "reattach-parent")
+            .await
+            .unwrap();
+        assert!(!reattach_parent.completed);
+        assert_eq!(reattach_parent.version, 2);
+    }
+
+    #[tokio::test]
+    async fn removing_last_child_preserves_parent_completion_state() {
+        let pool = feature_test_pool().await;
+        insert_feature_test_task(&pool, "completed-parent", None, None).await;
+        insert_feature_test_task(&pool, "incomplete-parent", None, None).await;
+        sqlx::query(
+            "UPDATE tasks SET completed=1,completed_at='2026-09-24T09:00:00Z',version=2
+             WHERE id='completed-parent'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        insert_feature_test_task(
+            &pool,
+            "last-completed-child",
+            Some("completed-parent"),
+            None,
+        )
+        .await;
+        insert_feature_test_task(
+            &pool,
+            "last-incomplete-child",
+            Some("incomplete-parent"),
+            None,
+        )
+        .await;
+
+        for (parent_id, child_id) in [
+            ("completed-parent", "last-completed-child"),
+            ("incomplete-parent", "last-incomplete-child"),
+        ] {
+            let timestamp = now();
+            let mut tx = pool.begin().await.unwrap();
+            sqlx::query(
+                "UPDATE tasks SET deleted_at=?,updated_at=?,version=version+1 WHERE id=?",
+            )
+            .bind(&timestamp)
+            .bind(&timestamp)
+            .bind(child_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+            reconcile_parent_completion(&mut tx, "user-1", parent_id, &timestamp)
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+        }
+
+        let completed_parent = fetch_task(&pool, "user-1", "completed-parent")
+            .await
+            .unwrap();
+        assert!(completed_parent.completed);
+        assert_eq!(completed_parent.version, 2);
+        let incomplete_parent = fetch_task(&pool, "user-1", "incomplete-parent")
+            .await
+            .unwrap();
+        assert!(!incomplete_parent.completed);
+        assert_eq!(incomplete_parent.version, 1);
+    }
+
+    #[tokio::test]
+    async fn child_completion_reopens_parent_and_deletes_emit_child_tombstones() {
+        let pool = feature_test_pool().await;
+        sqlx::query(
+            "INSERT INTO calendar_events (id,user_id,title,start_at,end_at)
+             VALUES ('schedule-1','user-1','Schedule','2026-09-24T09:00:00Z','2026-09-24T10:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        insert_feature_test_task(&pool, "parent", None, None).await;
+        insert_feature_test_task(&pool, "child-1", Some("parent"), None).await;
+        insert_feature_test_task(&pool, "child-2", Some("parent"), None).await;
+        insert_feature_test_task(&pool, "schedule-child", None, Some("schedule-1")).await;
+
+        assert!(
+            validate_task_attachments(&pool, "user-1", "outsider", Some("parent"), None)
+                .await
+                .is_ok()
+        );
+        assert!(
+            validate_task_attachments(&pool, "user-1", "outsider", Some("child-1"), None)
+                .await
+                .is_err()
+        );
+        assert!(validate_task_attachments(
+            &pool,
+            "user-1",
+            "outsider",
+            Some("parent"),
+            Some("schedule-1")
+        )
+        .await
+        .is_err());
+        assert!(validate_task_attachments(
+            &pool,
+            "user-1",
+            "parent",
+            None,
+            Some("schedule-1")
+        )
+        .await
+        .is_err());
+        assert!(sqlx::query("UPDATE tasks SET schedule_id='schedule-1' WHERE id='parent'")
+            .execute(&pool)
+            .await
+            .is_err());
+
+        for child_id in ["child-1", "child-2"] {
+            let mut tx = pool.begin().await.unwrap();
+            sqlx::query(
+                "UPDATE tasks SET completed=1,completed_at='2026-09-24T10:00:00Z'
+                 WHERE id=?",
+            )
+            .bind(child_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+            let child = fetch_task(&mut *tx, "user-1", child_id).await.unwrap();
+            update_child_completion(&mut tx, "user-1", &child, false)
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+        }
+        let parent = fetch_task(&pool, "user-1", "parent").await.unwrap();
+        assert!(parent.completed);
+
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("UPDATE tasks SET completed=0,completed_at=NULL WHERE id='child-1'")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let child = fetch_task(&mut *tx, "user-1", "child-1").await.unwrap();
+        update_child_completion(&mut tx, "user-1", &child, true)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let parent = fetch_task(&pool, "user-1", "parent").await.unwrap();
+        assert!(!parent.completed);
+        assert!(
+            fetch_task(&pool, "user-1", "child-2")
+                .await
+                .unwrap()
+                .completed
+        );
+
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query(
+            "UPDATE tasks SET completed=1,completed_at='2026-09-24T11:00:00Z'
+             WHERE id='parent'",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        let parent = fetch_task(&mut *tx, "user-1", "parent").await.unwrap();
+        update_child_completion(&mut tx, "user-1", &parent, false)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        for child_id in ["child-1", "child-2"] {
+            assert!(
+                fetch_task(&pool, "user-1", child_id)
+                    .await
+                    .unwrap()
+                    .completed
+            );
+        }
+
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("UPDATE tasks SET completed=0,completed_at=NULL WHERE id='parent'")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let parent = fetch_task(&mut *tx, "user-1", "parent").await.unwrap();
+        update_child_completion(&mut tx, "user-1", &parent, true)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        for child_id in ["child-1", "child-2"] {
+            assert!(
+                fetch_task(&pool, "user-1", child_id)
+                    .await
+                    .unwrap()
+                    .completed
+            );
+        }
+
+        let timestamp = now();
+        let mut tx = pool.begin().await.unwrap();
+        let parent = fetch_task(&mut *tx, "user-1", "parent").await.unwrap();
+        sqlx::query(
+            "UPDATE tasks SET deleted_at=?,updated_at=?,version=version+1 WHERE id='parent'",
+        )
+            .bind(&timestamp)
+            .bind(&timestamp)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        append_event(
+            &mut *tx,
+            "user-1",
+            "task",
+            "parent",
+            "delete",
+            parent.version + 1,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        soft_delete_children(&mut tx, "user-1", "parent_task_id", "parent", &timestamp)
+            .await
+            .unwrap();
+        let schedule_version = sqlx::query_scalar::<_, i64>(
+            "SELECT version FROM calendar_events WHERE id='schedule-1'",
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE calendar_events SET deleted_at=?,updated_at=?,version=version+1
+             WHERE id='schedule-1'",
+        )
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        append_event(
+            &mut *tx,
+            "user-1",
+            "calendar_event",
+            "schedule-1",
+            "delete",
+            schedule_version + 1,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        soft_delete_children(&mut tx, "user-1", "schedule_id", "schedule-1", &timestamp)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let deleted_count =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks WHERE deleted_at IS NOT NULL")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let tombstone_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sync_events WHERE entity_type='task' AND operation='delete'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(deleted_count, 4);
+        assert_eq!(tombstone_count, 4);
+        let delete_events = sqlx::query_as::<_, (String, i64)>(
+            "SELECT entity_id,entity_version FROM sync_events
+             WHERE operation='delete' ORDER BY cursor",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            delete_events
+                .iter()
+                .map(|(id, _)| id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "parent",
+                "child-1",
+                "child-2",
+                "schedule-1",
+                "schedule-child"
+            ]
+        );
+        for (entity_id, event_version) in delete_events {
+            if entity_id == "schedule-1" {
+                let stored_version = sqlx::query_scalar::<_, i64>(
+                    "SELECT version FROM calendar_events WHERE id=?",
+                )
+                .bind(&entity_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+                assert_eq!(event_version, stored_version);
+            } else {
+                let stored_version = sqlx::query_scalar::<_, i64>(
+                    "SELECT version FROM tasks WHERE id=?",
+                )
+                .bind(&entity_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+                assert_eq!(event_version, stored_version);
+            }
+        }
     }
 
     #[test]

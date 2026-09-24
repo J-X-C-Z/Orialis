@@ -67,6 +67,10 @@ pub struct Task {
     pub due_time: Option<String>,
     pub reminder_minutes: Option<i64>,
     pub project_id: Option<EntityId>,
+    #[serde(default)]
+    pub parent_task_id: Option<EntityId>,
+    #[serde(default)]
+    pub schedule_id: Option<EntityId>,
     pub recurrence: Option<Recurrence>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
@@ -100,7 +104,7 @@ impl Serialize for Task {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Task", 18)?;
+        let mut state = serializer.serialize_struct("Task", 20)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("userId", &self.user_id)?;
         state.serialize_field("title", &self.title)?;
@@ -114,6 +118,8 @@ impl Serialize for Task {
         state.serialize_field("dueTime", &self.due_time)?;
         state.serialize_field("reminderMinutes", &self.reminder_minutes)?;
         state.serialize_field("projectId", &self.project_id)?;
+        state.serialize_field("parentTaskId", &self.parent_task_id)?;
+        state.serialize_field("scheduleId", &self.schedule_id)?;
         state.serialize_field("recurrence", &self.recurrence)?;
         state.serialize_field("createdAt", &self.created_at)?;
         state.serialize_field("updatedAt", &self.updated_at)?;
@@ -171,6 +177,8 @@ pub struct Schedule {
     pub start_at: Timestamp,
     pub end_at: Timestamp,
     pub all_day: bool,
+    #[serde(default)]
+    pub important: bool,
     pub reminder_minutes: Option<i64>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
@@ -240,6 +248,8 @@ mod tests {
             due_time: Some("23:59".into()),
             reminder_minutes: Some(30),
             project_id: None,
+            parent_task_id: None,
+            schedule_id: None,
             recurrence: None,
             created_at: "2026-09-16T08:00:00Z".into(),
             updated_at: "2026-09-16T08:00:00Z".into(),
@@ -275,6 +285,23 @@ mod tests {
         let json = serde_json::to_value(value).unwrap();
         assert_eq!(json["recurrence"]["rule"], "FREQ=WEEKLY;BYDAY=MO");
         assert_eq!(json["recurrence"]["until"], "2026-12-31");
+    }
+
+    #[test]
+    fn task_relationships_round_trip_and_legacy_payloads_default_to_none() {
+        let mut value = task(Some(false), Some(true));
+        value.parent_task_id = Some("parent-task-1".into());
+        let json = serde_json::to_value(&value).unwrap();
+        assert_eq!(json["parentTaskId"], "parent-task-1");
+        assert_eq!(json["scheduleId"], json!(null));
+        assert_eq!(serde_json::from_value::<Task>(json).unwrap(), value);
+
+        let mut legacy = serde_json::to_value(task(None, None)).unwrap();
+        legacy.as_object_mut().unwrap().remove("parentTaskId");
+        legacy.as_object_mut().unwrap().remove("scheduleId");
+        let decoded: Task = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.parent_task_id, None);
+        assert_eq!(decoded.schedule_id, None);
     }
 
     #[test]
@@ -346,6 +373,7 @@ mod tests {
             start_at: "2026-09-17T08:00:00+08:00".into(),
             end_at: "2026-09-17T09:40:00+08:00".into(),
             all_day: false,
+            important: true,
             reminder_minutes: Some(10),
             created_at: "2026-09-16T08:00:00Z".into(),
             updated_at: "2026-09-16T08:00:00Z".into(),
@@ -356,7 +384,33 @@ mod tests {
         let json = serde_json::to_value(event).unwrap();
         assert_eq!(json["startAt"], "2026-09-17T08:00:00+08:00");
         assert_eq!(json["endAt"], "2026-09-17T09:40:00+08:00");
+        assert_eq!(json["important"], true);
         assert!(json.get("taskId").is_none());
+    }
+
+    #[test]
+    fn legacy_schedule_payload_defaults_importance_to_false() {
+        let mut legacy = serde_json::to_value(Schedule {
+            id: "event-1".into(),
+            user_id: "user-1".into(),
+            title: "高等数学".into(),
+            description: None,
+            location: None,
+            start_at: "2026-09-17T08:00:00Z".into(),
+            end_at: "2026-09-17T09:00:00Z".into(),
+            all_day: false,
+            important: false,
+            reminder_minutes: None,
+            created_at: "2026-09-16T08:00:00Z".into(),
+            updated_at: "2026-09-16T08:00:00Z".into(),
+            version: 1,
+            deleted_at: None,
+        })
+        .unwrap();
+        legacy.as_object_mut().unwrap().remove("important");
+
+        let decoded: Schedule = serde_json::from_value(legacy).unwrap();
+        assert!(!decoded.important);
     }
 
     #[test]

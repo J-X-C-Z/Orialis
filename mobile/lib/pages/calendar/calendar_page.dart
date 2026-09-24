@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/app.dart';
 import '../../app/design/design_components.dart';
 import '../../core/database/app_database.dart';
+import '../../features/events/presentation/task_children.dart';
+import '../../features/events/presentation/task_editor.dart';
 import '../shared/page_parts.dart';
 
 typedef Schedule = CalendarEvent;
@@ -17,12 +19,27 @@ class CalendarPage extends ConsumerStatefulWidget {
 class _CalendarPageState extends ConsumerState<CalendarPage> {
   late DateTime _date = widget.initialDate ?? DateTime.now();
   bool _openedInitialSchedule = false;
-  int _view = 0;
+  late int _view = widget.initialScheduleId == null ? 2 : 0;
+  double _monthExpansion = 0;
+  double _shownMonthExpansion = 0;
+  bool _draggingMonth = false;
+  late final Stream<List<Schedule>> _schedules;
+  late final Stream<List<Task>> _tasks;
+  List<Task> _calendarTasks = const [];
+  final _weekDayKeys = List.generate(7, (_) => GlobalKey());
+  @override
+  void initState() {
+    super.initState();
+    _schedules = ref.read(scheduleRepositoryProvider).watchAll();
+    _tasks = ref.read(taskRepositoryProvider).watchTasks();
+  }
+
   void _move(int direction) => setState(() {
     _date = _view == 2
         ? DateTime(_date.year, _date.month + direction, 1)
         : _date.add(Duration(days: direction * (_view == 1 ? 7 : 1)));
   });
+
   bool _occurs(Schedule s, DateTime day) {
     final start = DateTime.parse(s.startAt).toLocal(),
         end = DateTime.parse(s.endAt).toLocal();
@@ -48,6 +65,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
               location: d.location,
               description: d.description,
               reminderMinutes: d.reminder,
+              important: d.important,
             );
           } else {
             await r.update(
@@ -59,6 +77,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
               location: d.location,
               description: d.description,
               reminderMinutes: d.reminder,
+              important: d.important,
             );
           }
         },
@@ -135,7 +154,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         const SizedBox(height: 16),
         Expanded(
           child: StreamBuilder<List<Schedule>>(
-            stream: ref.watch(scheduleRepositoryProvider).watchAll(),
+            stream: _schedules,
             builder: (context, snapshot) {
               if (snapshot.hasError) return const PageFailure();
               if (!snapshot.hasData) {
@@ -157,143 +176,340 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                   }
                 });
               }
-              return switch (_view) {
-                1 => _week(all),
-                2 => _month(all),
-                _ => _day(all.where((s) => _occurs(s, _date)).toList()),
-              };
+              return StreamBuilder<List<Task>>(
+                stream: _tasks,
+                builder: (context, tasks) {
+                  _calendarTasks = tasks.data ?? const [];
+                  return switch (_view) {
+                    1 => _week(all),
+                    2 => _month(all),
+                    _ => _day(all.where((s) => _occurs(s, _date)).toList()),
+                  };
+                },
+              );
             },
           ),
         ),
       ],
     ),
   );
-  Widget _day(List<Schedule> events) => ListView(
-    children: [
-      ContentStack(
-        gap: 16,
-        children: [
-          if (events.isEmpty)
-            const OrialisEmptyState(text: '这一天还没有安排。\n为重要的事留一段时间。'),
-          for (final s in events)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 58,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 16),
-                    child: QuietLabel(
-                      s.allDay
-                          ? '全天'
-                          : timeLabel(DateTime.parse(s.startAt).toLocal()),
-                    ),
+  EdgeInsets get _bottomInset => EdgeInsets.only(
+    bottom:
+        24 +
+        LuminaNavigationInset.of(context) +
+        MediaQuery.paddingOf(context).bottom,
+  );
+
+  List<Task> _dueOn(DateTime day) => _calendarTasks
+      .where((t) => !t.completed && t.due == dateKey(day))
+      .toList();
+
+  Color _statusColor(DateTime day, List<Schedule> schedules) {
+    final tasks = _dueOn(day);
+    final dark = LuminaTheme.of(context).colors.dark;
+    if (tasks.any((t) => t.important == true && t.urgent == true)) {
+      return LuminaCardPalette.rose.colors(dark: dark).accent;
+    }
+    if (tasks.any((t) => t.urgent == true)) {
+      return LuminaCardPalette.amber.colors(dark: dark).accent;
+    }
+    if (schedules.any((s) => s.important) ||
+        tasks.any((t) => t.important == true)) {
+      return LuminaCardPalette.ocean.colors(dark: dark).accent;
+    }
+    return LuminaTheme.of(context).colors.muted;
+  }
+
+  Widget _agenda(List<Schedule> events, {bool individualCards = false}) {
+    final sorted = [...events]
+      ..sort((a, b) {
+        if (a.allDay != b.allDay) return a.allDay ? -1 : 1;
+        return a.startAt.compareTo(b.startAt);
+      });
+    final due = _dueOn(_date);
+    final content = ContentStack(
+      gap: 14,
+      children: [
+        if (sorted.isEmpty && due.isEmpty)
+          const OrialisEmptyState(text: '这一天还没有安排。\n为重要的事留一段时间。'),
+        for (final s in sorted)
+          if (individualCards)
+            LuminaCollapsibleCard(
+              key: ValueKey('day-schedule-${s.id}'),
+              storageId: 'calendar.schedule.${s.id}',
+              title: s.title,
+              child: ContentStack(
+                children: [
+                  _scheduleRow(s),
+                  const LuminaEngravedDivider(),
+                  TaskChildrenPanel(scheduleId: s.id, parentTitle: s.title),
+                ],
+              ),
+            )
+          else
+            _scheduleRow(s),
+        if (due.isNotEmpty) ...[
+          const OrialisSectionHeader(title: '当天截止'),
+          LuminaCompletionList(
+            animateChanges: true,
+            children: [
+              for (final task in due)
+                OrialisListRow(
+                  key: ValueKey(task.id),
+                  depth: LuminaSurfaceDepth.recessed,
+                  title: task.title,
+                  subtitle: task.dueTime ?? '当天截止',
+                  detail: TaskSourceLabel(task: task),
+                  trailing: LuminaCheck(
+                    value: task.completed,
+                    onChanged: (v) =>
+                        ref.read(taskRepositoryProvider).complete(task, v),
+                  ),
+                  onTap: () => showTaskEditor(
+                    context,
+                    task: task,
+                    onSave: (d) => ref
+                        .read(taskRepositoryProvider)
+                        .updateDetails(
+                          task,
+                          title: d.title,
+                          notes: d.notes,
+                          due: d.due,
+                          dueTime: d.dueTime,
+                          important: d.important,
+                          urgent: d.urgent,
+                          reminderMinutes: d.reminderMinutes,
+                          recurrence: d.recurrence,
+                          projectId: d.projectId,
+                          reminderMinutesProvided: true,
+                          recurrenceProvided: true,
+                          projectIdProvided: true,
+                        ),
                   ),
                 ),
-                Expanded(
-                  child: LuminaSurface(
-                    onTap: () => _detail(s),
-                    child: ContentStack(
-                      gap: 8,
-                      children: [
-                        Text(
-                          s.title,
-                          style: LuminaTheme.of(context).textTheme.titleMedium,
-                        ),
-                        QuietLabel(
-                          s.allDay
-                              ? '全天日程'
-                              : '${timeLabel(DateTime.parse(s.startAt).toLocal())} — ${timeLabel(DateTime.parse(s.endAt).toLocal())}',
-                        ),
-                        if (s.location?.isNotEmpty == true)
-                          QuietLabel(s.location!),
-                        if (s.description?.isNotEmpty == true)
-                          Text(
-                            s.description!,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          LuminaButton(
-            primary: false,
-            onPressed: () => setState(() => _date = DateTime.now()),
-            child: const Text('回到今天'),
+            ],
           ),
         ],
+      ],
+    );
+    return individualCards
+        ? content
+        : LuminaSurface(depth: LuminaSurfaceDepth.raised, child: content);
+  }
+
+  Widget _scheduleRow(Schedule s) {
+    final start = DateTime.parse(s.startAt).toLocal();
+    final end = DateTime.parse(s.endAt).toLocal();
+    final now = DateTime.now();
+    final ongoing = !s.allDay && !now.isBefore(start) && now.isBefore(end);
+    final text = LuminaTheme.of(context).textTheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: MediaQuery.textScalerOf(context).scale(64).clamp(64, 96),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 14, right: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  s.allDay ? '全天' : timeLabel(start),
+                  style: text.labelMedium,
+                ),
+                if (!s.allDay) ...[
+                  Text('—', style: text.bodySmall),
+                  Text(timeLabel(end), style: text.bodySmall),
+                  if (dateKey(start) != dateKey(end))
+                    Text('跨日', style: text.bodySmall),
+                ],
+                if (ongoing)
+                  Text(
+                    '进行中',
+                    style: text.labelSmall.copyWith(color: AppColors.accent),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        Expanded(
+          child: LuminaPalette(
+            palette: s.important
+                ? LuminaCardPalette.ocean
+                : LuminaCardPalette.mist,
+            child: OrialisListRow(
+              depth: LuminaSurfaceDepth.recessed,
+              title: s.title,
+              subtitle: [
+                if (s.important) '重要',
+                if (s.location?.isNotEmpty == true) s.location!,
+                if (s.description?.isNotEmpty == true) s.description!,
+              ].join(' · '),
+              onTap: () => _detail(s),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _day(List<Schedule> events) => ListView(
+    padding: _bottomInset,
+    children: [
+      _agenda(events, individualCards: true),
+      const SizedBox(height: 16),
+      LuminaButton(
+        primary: false,
+        onPressed: () => setState(() => _date = DateTime.now()),
+        child: const Text('回到今天'),
       ),
     ],
   );
+
+  Widget _dayCell(DateTime day, List<Schedule> all, {bool week = false}) {
+    final events = all.where((s) => _occurs(s, day)).toList();
+    final count = events.length + _dueOn(day).length;
+    final selected = dateKey(day) == dateKey(_date);
+    final colors = LuminaTheme.of(context).colors;
+    final text = LuminaTheme.of(context).textTheme;
+    final density = count == 0 ? 0.0 : (.06 + count.clamp(0, 6) * .025);
+    return Semantics(
+      selected: selected,
+      label: '${dateKey(day)}，$count 项',
+      child: LuminaSurface(
+        key: ValueKey(
+          'calendar-date-${week ? 'week' : 'month'}-${dateKey(day)}',
+        ),
+        radius: 12,
+        glass: true,
+        diffuseGlass: true,
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+        color: Color.lerp(
+          colors.surface,
+          colors.accent,
+          selected ? .23 : density,
+        ),
+        onTap: () {
+          setState(() => _date = day);
+          if (week) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              final target = _weekDayKeys[day.weekday - 1].currentContext;
+              if (!mounted || target == null) return;
+              Scrollable.ensureVisible(
+                target,
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : LuminaMotion.standard,
+                curve: luminaEaseOut,
+              );
+            });
+          }
+        },
+        child: SizedBox(
+          height: MediaQuery.textScalerOf(context).scale(week ? 58 : 38),
+          width: double.infinity,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (week)
+                Text(
+                  ['一', '二', '三', '四', '五', '六', '日'][day.weekday - 1],
+                  maxLines: 1,
+                  style: text.bodySmall,
+                ),
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    '${day.day}',
+                    style: text.labelLarge,
+                    maxLines: 1,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              SizedBox(
+                height: 5,
+                child: count == 0
+                    ? null
+                    : DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: _statusColor(day, events),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                        child: SizedBox(width: 5 + count.clamp(0, 5) * 2.0),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _week(List<Schedule> all) {
     final monday = DateTime(
       _date.year,
       _date.month,
       _date.day - _date.weekday + 1,
     );
-    return ListView(
-      children: [
-        ContentStack(
-          children: [
-            for (var i = 0; i < 7; i++)
-              Builder(
-                builder: (context) {
-                  final day = monday.add(Duration(days: i));
-                  final events = all.where((s) => _occurs(s, day)).toList();
-                  return LuminaSurface(
-                    onTap: () => setState(() {
-                      _date = day;
-                      _view = 0;
-                    }),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+    return SingleChildScrollView(
+      padding: _bottomInset,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LuminaSurface(
+            child: Row(
+              children: [
+                for (var i = 0; i < 7; i++)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: _dayCell(
+                        monday.add(Duration(days: i)),
+                        all,
+                        week: true,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          for (var i = 0; i < 7; i++) ...[
+            Builder(
+              builder: (context) {
+                final day = monday.add(Duration(days: i));
+                final schedules = all.where((s) => _occurs(s, day)).toList()
+                  ..sort(
+                    (a, b) => a.allDay == b.allDay
+                        ? a.startAt.compareTo(b.startAt)
+                        : a.allDay
+                        ? -1
+                        : 1,
+                  );
+                return KeyedSubtree(
+                  key: _weekDayKeys[i],
+                  child: LuminaCollapsibleCard(
+                    key: ValueKey('week-day-${dateKey(day)}'),
+                    storageId: 'calendar.week.${dateKey(day)}',
+                    title:
+                        '${day.month}月${day.day}日 · 周${['一', '二', '三', '四', '五', '六', '日'][i]}',
+                    child: ContentStack(
                       children: [
-                        SizedBox(
-                          width: 62,
-                          child: ContentStack(
-                            gap: 4,
-                            children: [
-                              QuietLabel(
-                                ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][i],
-                              ),
-                              Text(
-                                '${day.day}',
-                                style: LuminaTheme.of(
-                                  context,
-                                ).textTheme.titleLarge,
-                              ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: ContentStack(
-                            gap: 8,
-                            children: [
-                              if (events.isEmpty) const QuietLabel('无安排'),
-                              for (final s in events)
-                                OrialisListRow(
-                                  title: s.title,
-                                  subtitle: s.allDay
-                                      ? '全天'
-                                      : timeLabel(
-                                          DateTime.parse(s.startAt).toLocal(),
-                                        ),
-                                  onTap: () => _detail(s),
-                                ),
-                            ],
-                          ),
-                        ),
+                        if (schedules.isEmpty) const QuietLabel('这一天没有日程。'),
+                        for (final schedule in schedules)
+                          _scheduleRow(schedule),
                       ],
                     ),
-                  );
-                },
-              ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 14),
           ],
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -302,87 +518,186 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     final length = DateTime(_date.year, _date.month + 1, 0).day;
     final offset = first.weekday - 1;
     final weeks = ((length + offset) / 7).ceil();
-    return SingleChildScrollView(
-      child: ContentStack(
-        gap: 8,
-        children: [
-          Row(
+    // Keep data filtering and static date widgets outside the animation tick.
+    final cells = <int, Widget>{};
+    final summaries = <int, List<String>>{};
+    for (var number = 1; number <= length; number++) {
+      final day = DateTime(_date.year, _date.month, number);
+      cells[number] = _dayCell(day, all);
+      summaries[number] = [
+        ...all.where((s) => _occurs(s, day)).map((s) => s.title),
+        ..._dueOn(day).map((t) => t.title),
+      ];
+    }
+    return ListView(
+      padding: _bottomInset,
+      children: [
+        LuminaSurface(
+          child: Column(
             children: [
-              for (final d in ['一', '二', '三', '四', '五', '六', '日'])
-                Expanded(child: Center(child: QuietLabel(d))),
-            ],
-          ),
-          for (var row = 0; row < weeks; row++)
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+              Row(
                 children: [
-                  for (var col = 0; col < 7; col++)
-                    Expanded(
-                      child: Builder(
-                        builder: (context) {
-                          final number = row * 7 + col - offset + 1;
-                          if (number < 1 || number > length) {
-                            return const SizedBox();
-                          }
-                          final day = DateTime(_date.year, _date.month, number);
-                          final events = all
-                              .where((s) => _occurs(s, day))
-                              .toList();
-                          return Padding(
-                            padding: const EdgeInsets.all(2),
-                            child: Semantics(
-                              label:
-                                  '${day.month}月$number日，${events.length}项日程',
-                              button: true,
-                              child: LuminaSurface(
-                                radius: 12,
-                                padding: const EdgeInsets.all(5),
-                                onTap: () => setState(() {
-                                  _date = day;
-                                  _view = 0;
-                                }),
-                                child: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    minHeight: 86,
-                                  ),
-                                  child: ContentStack(
-                                    gap: 5,
-                                    children: [
-                                      Text(
-                                        '$number',
-                                        style: LuminaTheme.of(
-                                          context,
-                                        ).textTheme.labelMedium,
-                                      ),
-                                      for (final s in events.take(2))
-                                        GestureDetector(
-                                          onTap: () => _detail(s),
-                                          child: Text(
-                                            s.title,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: LuminaTheme.of(
-                                              context,
-                                            ).textTheme.bodySmall,
-                                          ),
-                                        ),
-                                      if (events.length > 2)
-                                        QuietLabel('+${events.length - 2}'),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
+                  for (final d in ['一', '二', '三', '四', '五', '六', '日'])
+                    Expanded(child: Center(child: QuietLabel(d))),
                 ],
               ),
-            ),
-        ],
-      ),
+              const SizedBox(height: 8),
+              TweenAnimationBuilder<double>(
+                tween: Tween(end: _monthExpansion),
+                duration:
+                    _draggingMonth || MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : LuminaMotion.standard,
+                curve: luminaEaseOut,
+                builder: (context, progress, _) {
+                  _shownMonthExpansion = progress;
+                  return Column(
+                    children: [
+                      for (var row = 0; row < weeks; row++)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              for (var col = 0; col < 7; col++)
+                                Expanded(
+                                  child: Builder(
+                                    builder: (context) {
+                                      final number = row * 7 + col - offset + 1;
+                                      if (number < 1 || number > length) {
+                                        return const SizedBox();
+                                      }
+                                      final titles = summaries[number]!;
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 2,
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          children: [
+                                            cells[number]!,
+                                            Offstage(
+                                              offstage: progress == 0,
+                                              child: ClipRect(
+                                                child: Align(
+                                                  alignment:
+                                                      Alignment.topCenter,
+                                                  heightFactor: progress,
+                                                  child: Opacity(
+                                                    opacity: progress,
+                                                    child: SizedBox(
+                                                      height:
+                                                          MediaQuery.textScalerOf(
+                                                            context,
+                                                          ).scale(72),
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .stretch,
+                                                        children: [
+                                                          if (titles.isNotEmpty)
+                                                            LuminaSurface(
+                                                              radius: 6,
+                                                              padding:
+                                                                  const EdgeInsets.all(
+                                                                    3,
+                                                                  ),
+                                                              child: Text(
+                                                                titles.first,
+                                                                maxLines: 2,
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                                style:
+                                                                    LuminaTheme.of(
+                                                                          context,
+                                                                        )
+                                                                        .textTheme
+                                                                        .bodySmall,
+                                                              ),
+                                                            ),
+                                                          if (titles.length > 1)
+                                                            Text(
+                                                              '+${titles.length - 1}',
+                                                              style:
+                                                                  LuminaTheme.of(
+                                                                        context,
+                                                                      )
+                                                                      .textTheme
+                                                                      .labelSmall,
+                                                            ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onVerticalDragStart: (_) => setState(() {
+                  _monthExpansion = _shownMonthExpansion;
+                  _draggingMonth = true;
+                }),
+                onVerticalDragUpdate: (details) => setState(
+                  () => _monthExpansion =
+                      (_monthExpansion + details.delta.dy / 180).clamp(
+                        0.0,
+                        1.0,
+                      ),
+                ),
+                onVerticalDragEnd: (details) => setState(() {
+                  _draggingMonth = false;
+                  _monthExpansion = details.primaryVelocity!.abs() > 250
+                      ? (details.primaryVelocity! > 0 ? 1 : 0)
+                      : (_monthExpansion >= .5 ? 1 : 0);
+                }),
+                onVerticalDragCancel: () => setState(() {
+                  _draggingMonth = false;
+                  _monthExpansion = _monthExpansion >= .5 ? 1 : 0;
+                }),
+                child: LuminaTap(
+                  onTap: () => setState(
+                    () => _monthExpansion = _monthExpansion < .5 ? 1 : 0,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const LuminaIcon(LuminaIcons.chevronDown, size: 16),
+                        const SizedBox(width: 8),
+                        Text(
+                          _monthExpansion < .5 ? '展开月历' : '收起月历',
+                          style: LuminaTheme.of(context).textTheme.labelSmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const QuietLabel('底色深浅表示繁忙程度 · 色点表示重要或紧急'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        OrialisSectionHeader(title: '${_date.month}月${_date.day}日'),
+        _agenda(all.where((s) => _occurs(s, _date)).toList()),
+      ],
     );
   }
 
@@ -399,6 +714,9 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         if (s.description != null) Text(s.description!),
         if (s.reminderMinutes != null)
           QuietLabel('提前 ${s.reminderMinutes} 分钟提醒'),
+        if (s.important) const QuietLabel('重要日程'),
+        const LuminaEngravedDivider(),
+        TaskChildrenPanel(scheduleId: s.id, parentTitle: s.title),
         LuminaButton(
           onPressed: () {
             Navigator.pop(sheetContext);
@@ -409,7 +727,11 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         LuminaButton(
           primary: false,
           onPressed: () async {
-            if (await confirmDelete(sheetContext, s.title)) {
+            if (await confirmDelete(
+              sheetContext,
+              s.title,
+              detail: '这次日程的附属事件也将一并删除。',
+            )) {
               await ref.read(scheduleRepositoryProvider).delete(s);
               if (sheetContext.mounted) Navigator.pop(sheetContext);
             }
@@ -427,13 +749,14 @@ class _ScheduleDraft {
     required this.start,
     required this.end,
     required this.allDay,
+    required this.important,
     this.location,
     this.description,
     this.reminder,
   });
   final String title;
   final DateTime start, end;
-  final bool allDay;
+  final bool allDay, important;
   final String? location, description;
   final int? reminder;
 }
@@ -468,6 +791,7 @@ class _ScheduleEditorState extends State<_ScheduleEditor> {
         ).toLocal().subtract(const Duration(microseconds: 1))
       : DateTime.parse(widget.event!.endAt).toLocal();
   late bool _allDay = widget.event?.allDay ?? false;
+  late bool _important = widget.event?.important ?? false;
   bool _saving = false;
   String? _error;
   @override
@@ -536,6 +860,7 @@ class _ScheduleEditorState extends State<_ScheduleEditor> {
           start: start,
           end: end,
           allDay: _allDay,
+          important: _important,
           location: _location.text.trim().isEmpty
               ? null
               : _location.text.trim(),
@@ -569,14 +894,12 @@ class _ScheduleEditorState extends State<_ScheduleEditor> {
         label: '标题',
         autofocus: widget.event == null,
       ),
-      Row(
-        children: [
-          const Expanded(child: Text('全天')),
-          LuminaSwitch(
-            value: _allDay,
-            onChanged: (v) => setState(() => _allDay = v),
-          ),
-        ],
+      OrialisListRow(
+        title: '全天',
+        trailing: LuminaSwitch(
+          value: _allDay,
+          onChanged: (v) => setState(() => _allDay = v),
+        ),
       ),
       for (final start in [true, false])
         Row(
@@ -599,6 +922,13 @@ class _ScheduleEditorState extends State<_ScheduleEditor> {
           ],
         ),
       LuminaTextField(controller: _location, label: '地点'),
+      OrialisListRow(
+        title: '重要日程',
+        trailing: LuminaSwitch(
+          value: _important,
+          onChanged: (v) => setState(() => _important = v),
+        ),
+      ),
       LuminaTextField(controller: _description, label: '描述', maxLines: 3),
       LuminaTextField(
         controller: _reminder,

@@ -21,6 +21,7 @@ class ScheduleRepository {
     String? description,
     String? location,
     bool allDay = false,
+    bool important = false,
     int? reminderMinutes,
   }) => _delegate.createCalendarEvent(
     title: title,
@@ -29,6 +30,7 @@ class ScheduleRepository {
     description: description,
     location: location,
     allDay: allDay,
+    important: important,
     reminderMinutes: reminderMinutes,
   );
 
@@ -40,6 +42,7 @@ class ScheduleRepository {
     String? description,
     String? location,
     bool? allDay,
+    bool? important,
     int? reminderMinutes,
   }) => _delegate.updateSchedule(
     schedule,
@@ -49,6 +52,7 @@ class ScheduleRepository {
     description: description,
     location: location,
     allDay: allDay,
+    important: important,
     reminderMinutes: reminderMinutes,
     reminderMinutesProvided: true,
   );

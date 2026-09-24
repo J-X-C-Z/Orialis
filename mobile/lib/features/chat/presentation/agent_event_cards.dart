@@ -21,40 +21,46 @@ class AgentEventsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final children = <Widget>[];
-    for (final stream in store.streams.values) {
-      if (stream.text.isNotEmpty || stream.error != null) {
-        children.add(_StreamCard(stream: stream));
-      }
-    }
-    if (store.tools.isNotEmpty) {
-      children.add(_ToolTimelineCard(items: store.tools.values.toList()));
-    }
-    for (final request in store.clarifications.values) {
-      children.add(
-        _ClarifyCard(request: request, store: store, onAction: onAction),
-      );
-    }
-    for (final result in store.commandResults.values) {
-      children.add(_CommandResultCard(result: result));
-    }
-    for (final session in store.sessions.values) {
-      children.add(_SessionCard(session: session));
-    }
-    for (final artifact in store.artifacts.values) {
-      children.add(_ArtifactCard(artifact: artifact));
-    }
-    for (final notice in store.deliveryNotices) {
-      children.add(_NoticeCard(notice: notice));
-    }
-    for (final error in store.errors) {
-      children.add(_ErrorCard(error: error));
-    }
-    for (final event in store.fallbacks) {
-      children.add(_FallbackCard(event: event));
-    }
-    if (children.isEmpty) return const SizedBox.shrink();
-    return Column(children: [for (final child in children) child]);
+    // Stream deltas only wake this panel; the chat page chrome stays put.
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) {
+        final children = <Widget>[];
+        for (final stream in store.streams.values) {
+          if (stream.text.isNotEmpty || stream.error != null) {
+            children.add(_StreamCard(stream: stream));
+          }
+        }
+        if (store.tools.isNotEmpty) {
+          children.add(_ToolTimelineCard(items: store.tools.values.toList()));
+        }
+        for (final request in store.clarifications.values) {
+          children.add(
+            _ClarifyCard(request: request, store: store, onAction: onAction),
+          );
+        }
+        for (final result in store.commandResults.values) {
+          children.add(_CommandResultCard(result: result));
+        }
+        for (final session in store.sessions.values) {
+          children.add(_SessionCard(session: session));
+        }
+        for (final artifact in store.artifacts.values) {
+          children.add(_ArtifactCard(artifact: artifact));
+        }
+        for (final notice in store.deliveryNotices) {
+          children.add(_NoticeCard(notice: notice));
+        }
+        for (final error in store.errors) {
+          children.add(_ErrorCard(error: error));
+        }
+        for (final event in store.fallbacks) {
+          children.add(_FallbackCard(event: event));
+        }
+        if (children.isEmpty) return const SizedBox.shrink();
+        return Column(children: [for (final child in children) child]);
+      },
+    );
   }
 }
 
@@ -348,8 +354,20 @@ class _SessionCard extends StatelessWidget {
   Widget build(BuildContext context) => _EventCard(
     icon: LuminaIcons.chat,
     title: '会话：${session.title ?? session.id}',
-    child: Text(
-      '${session.event.replaceFirst('session.', '')}${session.status == null ? '' : ' · ${session.status}'}',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${session.event.replaceFirst('session.', '')}'
+          '${session.status == null ? '' : ' · ${session.status}'}'
+          '${session.command == null ? '' : ' · ${session.command}'}',
+        ),
+        if (session.message != null && session.message!.trim().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: LuminaSelectableText(session.message!.trim()),
+          ),
+      ],
     ),
   );
 }

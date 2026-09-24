@@ -18,6 +18,23 @@ The first slice is `Task` and `Schedule` v1. The existing `calendar_event` wire
 value remains the v1 sync compatibility value even though the domain name is
 `Schedule`.
 
+Tasks may be linked directly to one parent task or one schedule through
+`parentTaskId` or `scheduleId`; the two links are mutually exclusive. Parent
+tasks must belong to the same user, cannot be the task itself, and cannot
+create cycles or nested child tasks. Children retain independent due dates,
+priority, and completion state. Completing a parent completes its direct
+children; completing all non-empty direct children completes the parent.
+Uncompleting a child reopens its parent, while reopening a parent leaves child
+completion unchanged. Deleting a task or schedule soft-deletes its direct
+children. The UI must confirm the affected scope before deletion. These
+lifecycle rules require the service mutation to update versions and emit
+outbox/sync events atomically.
+
+`parentTaskId` and `scheduleId` are nullable additions and may be omitted by
+legacy clients. Omission on a patch preserves the stored link; explicit `null`
+clears it. Schedule `important` defaults to `false` when omitted by legacy
+clients.
+
 ## Compatibility
 
 Schemas are strict for published fixtures. Additive changes require an explicit

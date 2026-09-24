@@ -5,16 +5,8 @@ class ContentStack extends StatelessWidget {
   final List<Widget> children;
   final double gap;
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      for (var i = 0; i < children.length; i++) ...[
-        if (i != 0) SizedBox(height: gap),
-        children[i],
-      ],
-    ],
-  );
+  Widget build(BuildContext context) =>
+      LuminaStack(gap: gap, children: children);
 }
 
 class QuietLabel extends StatelessWidget {
@@ -57,12 +49,16 @@ Future<String?> chooseRecordAction(BuildContext context) =>
       ),
     );
 
-Future<bool> confirmDelete(BuildContext context, String title) async =>
+Future<bool> confirmDelete(
+  BuildContext context,
+  String title, {
+  String? detail,
+}) async =>
     await showLuminaDialog<bool>(
       context: context,
       builder: (context) => LuminaDialog(
         title: '删除记录？',
-        content: Text('“$title”将从当前列表移除。'),
+        content: Text('“$title”将从当前列表移除。${detail == null ? '' : '\n$detail'}'),
         actions: [
           LuminaButton(
             primary: false,

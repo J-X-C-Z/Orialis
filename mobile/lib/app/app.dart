@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config/app_config.dart';
@@ -15,6 +15,7 @@ import '../core/sync/sync_engine.dart';
 import '../core/sync/sync_coordinator.dart';
 import 'router/app_router.dart';
 import 'design/app_theme.dart';
+import 'design/lumina_blur.dart';
 
 final databaseProvider = Provider<AppDatabase>((ref) {
   final database = AppDatabase();
@@ -23,6 +24,37 @@ final databaseProvider = Provider<AppDatabase>((ref) {
 });
 
 final appConfigProvider = Provider<AppConfig>((ref) => AppConfig());
+
+class HighPerformanceModeController extends StateNotifier<bool> {
+  HighPerformanceModeController(this._config) : super(true) {
+    unawaited(_load());
+  }
+
+  final AppConfig _config;
+  int _revision = 0;
+
+  Future<void> _load() async {
+    final saved = await _config.highPerformanceMode();
+    if (mounted && _revision == 0) state = saved;
+  }
+
+  Future<void> setEnabled(bool value) async {
+    final previous = state;
+    final revision = ++_revision;
+    state = value;
+    try {
+      await _config.setHighPerformanceMode(value);
+    } catch (_) {
+      if (mounted && revision == _revision) state = previous;
+      rethrow;
+    }
+  }
+}
+
+final highPerformanceModeProvider =
+    StateNotifierProvider<HighPerformanceModeController, bool>(
+      (ref) => HighPerformanceModeController(ref.watch(appConfigProvider)),
+    );
 
 final eventRepositoryProvider = Provider<EventRepository>((ref) {
   return EventRepository(
@@ -103,16 +135,31 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
 
   @override
   Widget build(BuildContext context) {
+    final highPerformanceMode = ref.watch(highPerformanceModeProvider);
+    // Frame-time watcher may auto-downgrade BlurL → BlurM → BlurS on weak devices.
+    LuminaBlurPolicy.instance.ensureFrameWatcher();
+    // High-performance chrome keeps a live frost (BlurL). Never leave it on
+    // legacy σ=18 or fully disabled after a stale policy.
+    if (LuminaBlurPolicy.instance.chrome.level == LuminaBlurLevel.blurXS &&
+        highPerformanceMode) {
+      LuminaBlurPolicy.instance.useHighPerformanceChrome();
+    }
     return WidgetsApp.router(
       title: 'Orialis',
       debugShowCheckedModeBanner: false,
       color: const Color(0xFF476F82),
       builder: (context, child) => LuminaTheme(
         brightness: MediaQuery.platformBrightnessOf(context),
+        highPerformanceMode: highPerformanceMode,
         child: Builder(
           builder: (context) => DefaultTextStyle(
             style: LuminaTheme.of(context).textTheme.bodyMedium,
-            child: child ?? const SizedBox.shrink(),
+            child: AnnotatedRegion<SystemUiOverlayStyle>(
+              value: MediaQuery.platformBrightnessOf(context) == Brightness.dark
+                  ? SystemUiOverlayStyle.light
+                  : SystemUiOverlayStyle.dark,
+              child: child ?? const SizedBox.shrink(),
+            ),
           ),
         ),
       ),

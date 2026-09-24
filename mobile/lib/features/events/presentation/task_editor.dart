@@ -4,6 +4,7 @@ import '../../../app/design/design_components.dart';
 import '../../../core/database/app_database.dart';
 import '../../../pages/shared/page_parts.dart';
 import '../data/event_repository.dart';
+import 'task_children.dart';
 
 enum TriStateChoice { unset, no, yes }
 
@@ -41,14 +42,17 @@ Future<void> showTaskEditor(
   BuildContext context, {
   required Future<void> Function(TaskEditorDraft) onSave,
   Task? task,
+  String? sourceLabel,
 }) => showLuminaSheet<void>(
   context: context,
-  builder: (_) => _TaskEditor(task: task, onSave: onSave),
+  builder: (_) =>
+      _TaskEditor(task: task, onSave: onSave, sourceLabel: sourceLabel),
 );
 
 class _TaskEditor extends ConsumerStatefulWidget {
-  const _TaskEditor({required this.onSave, this.task});
+  const _TaskEditor({required this.onSave, this.task, this.sourceLabel});
   final Task? task;
+  final String? sourceLabel;
   final Future<void> Function(TaskEditorDraft) onSave;
   @override
   ConsumerState<_TaskEditor> createState() => _TaskEditorState();
@@ -126,6 +130,10 @@ class _TaskEditorState extends ConsumerState<_TaskEditor> {
         widget.task == null ? '新增事件' : '编辑事件',
         style: LuminaTheme.of(context).textTheme.titleLarge,
       ),
+      if (widget.sourceLabel != null)
+        QuietLabel('所属 · ${widget.sourceLabel}')
+      else if (widget.task != null)
+        TaskSourceLabel(task: widget.task!),
       LuminaTextField(
         controller: _title,
         label: '标题',
@@ -237,6 +245,15 @@ class _TaskEditorState extends ConsumerState<_TaskEditor> {
         label: '提前提醒（分钟，可留空）',
         keyboardType: TextInputType.number,
       ),
+      if (widget.task != null &&
+          widget.task!.parentTaskId == null &&
+          widget.task!.scheduleId == null) ...[
+        const LuminaEngravedDivider(),
+        TaskChildrenPanel(
+          parentTaskId: widget.task!.id,
+          parentTitle: widget.task!.title,
+        ),
+      ],
       if (_error != null)
         Text(_error!, style: const TextStyle(color: AppColors.danger)),
       Row(

@@ -2,6 +2,40 @@ import '../../../app/design/design_components.dart';
 
 enum MarkdownBlockType { heading, paragraph, code, bullets, ordered, table }
 
+final RegExp _fencePattern = RegExp(r'^\s*```\s*([\w+-]*)\s*$');
+final RegExp _headingPattern = RegExp(r'^\s*(#{1,6})\s+(.+?)\s*$');
+final RegExp _listItemPattern = RegExp(r'^\s*([-*+] |\d+[.)] )(.+)$');
+final RegExp _listBulletPattern = RegExp(r'^\s*([-*+] |\d+[.)] )');
+final RegExp _orderedMarkerPattern = RegExp(r'^\d');
+final RegExp _tableSeparatorCellPattern = RegExp(r'^:?-{3,}:?$');
+final RegExp _tableEdgePattern = RegExp(r'^\|');
+final RegExp _tableTrailingPipePattern = RegExp(r'\|$');
+final RegExp _inlineSpanPattern = RegExp(
+  r'(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^\)]+\))',
+);
+
+/// Completed chat bubbles re-parse on every parent rebuild. Keep a tiny LRU so
+/// long conversations do not pay full Markdown cost on each stream tick or
+/// scroll-driven rebuild of neighboring rows.
+final Map<String, List<MarkdownBlock>> _markdownBlockCache = {};
+const int _markdownBlockCacheLimit = 48;
+
+List<MarkdownBlock> _parseMarkdownCached(String source) {
+  final cached = _markdownBlockCache.remove(source);
+  if (cached != null) {
+    _markdownBlockCache[source] = cached;
+    return cached;
+  }
+  final blocks = MarkdownBlock.parse(source);
+  if (source.length <= 8000) {
+    _markdownBlockCache[source] = blocks;
+    if (_markdownBlockCache.length > _markdownBlockCacheLimit) {
+      _markdownBlockCache.remove(_markdownBlockCache.keys.first);
+    }
+  }
+  return blocks;
+}
+
 class MarkdownBlock {
   const MarkdownBlock({
     required this.type,
@@ -24,7 +58,7 @@ class MarkdownBlock {
         index++;
         continue;
       }
-      final fence = RegExp(r'^\s*```\s*([\w+-]*)\s*$').firstMatch(line);
+      final fence = _fencePattern.firstMatch(line);
       if (fence != null) {
         final code = <String>[];
         index++;
@@ -45,7 +79,7 @@ class MarkdownBlock {
         );
         continue;
       }
-      final heading = RegExp(r'^\s*(#{1,6})\s+(.+?)\s*$').firstMatch(line);
+      final heading = _headingPattern.firstMatch(line);
       if (heading != null) {
         blocks.add(
           MarkdownBlock(
@@ -69,16 +103,14 @@ class MarkdownBlock {
         blocks.add(MarkdownBlock(type: MarkdownBlockType.table, lines: table));
         continue;
       }
-      final listMatch = RegExp(r'^\s*([-*+] |\d+[.)] )(.+)$').firstMatch(line);
+      final listMatch = _listItemPattern.firstMatch(line);
       if (listMatch != null) {
-        final ordered = RegExp(r'^\d').hasMatch(listMatch.group(1)!);
+        final ordered = _orderedMarkerPattern.hasMatch(listMatch.group(1)!);
         final items = <String>[];
         while (index < lines.length) {
-          final item = RegExp(
-            r'^\s*([-*+] |\d+[.)] )(.+)$',
-          ).firstMatch(lines[index]);
+          final item = _listItemPattern.firstMatch(lines[index]);
           if (item == null ||
-              RegExp(r'^\d').hasMatch(item.group(1)!) != ordered) {
+              _orderedMarkerPattern.hasMatch(item.group(1)!) != ordered) {
             break;
           }
           items.add(item.group(2)!);
@@ -101,7 +133,7 @@ class MarkdownBlock {
           !lines[index].trimLeft().startsWith('#') &&
           !lines[index].trimLeft().startsWith('```') &&
           !_isTableStart(lines, index) &&
-          !RegExp(r'^\s*([-*+] |\d+[.)] )').hasMatch(lines[index])) {
+          !_listBulletPattern.hasMatch(lines[index])) {
         paragraph.add(lines[index].trim());
         index++;
       }
@@ -116,7 +148,7 @@ class MarkdownBlock {
     if (index + 1 >= lines.length || !lines[index].contains('|')) return false;
     final separator = lines[index + 1].split('|').every((cell) {
       final value = cell.trim();
-      return value.isEmpty || RegExp(r'^:?-{3,}:?$').hasMatch(value);
+      return value.isEmpty || _tableSeparatorCellPattern.hasMatch(value);
     });
     return separator && lines[index + 1].contains('-');
   }
@@ -141,7 +173,7 @@ class SafeMarkdownView extends StatelessWidget {
     if (source.trim().isEmpty) return const SizedBox.shrink();
     final blocks = fallback
         ? const <MarkdownBlock>[]
-        : MarkdownBlock.parse(source);
+        : _parseMarkdownCached(source);
     if (fallback || blocks.isEmpty) return LuminaSelectableText(source);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -276,9 +308,8 @@ class _InlineText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final spans = <TextSpan>[];
-    final pattern = RegExp(r'(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^\)]+\))');
     var cursor = 0;
-    for (final match in pattern.allMatches(text)) {
+    for (final match in _inlineSpanPattern.allMatches(text)) {
       if (match.start > cursor) {
         spans.add(TextSpan(text: text.substring(cursor, match.start)));
       }
@@ -322,8 +353,8 @@ class _InlineText extends StatelessWidget {
 
 List<String> _tableCells(String line) => line
     .trim()
-    .replaceFirst(RegExp(r'^\|'), '')
-    .replaceFirst(RegExp(r'\|$'), '')
+    .replaceFirst(_tableEdgePattern, '')
+    .replaceFirst(_tableTrailingPipePattern, '')
     .split('|')
     .map((value) => value.trim())
     .toList();

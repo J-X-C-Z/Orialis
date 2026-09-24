@@ -16,7 +16,12 @@ GoRouter buildRouter() {
     initialLocation: '/today',
     routes: [
       GoRoute(path: '/auth', builder: (_, _) => const AuthPage()),
-      StatefulShellRoute.indexedStack(
+      StatefulShellRoute(
+        navigatorContainerBuilder: (context, shell, children) =>
+            LuminaBranchTransition(
+              index: shell.currentIndex,
+              children: children,
+            ),
         builder: (context, state, navigationShell) =>
             OrialisShell(navigationShell: navigationShell),
         branches: [

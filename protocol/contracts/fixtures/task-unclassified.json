@@ -10,6 +10,8 @@
   "dueTime": "23:59",
   "reminderMinutes": 30,
   "projectId": null,
+  "parentTaskId": null,
+  "scheduleId": null,
   "recurrence": null,
   "createdAt": "2026-09-17T08:00:00Z",
   "updatedAt": "2026-09-17T08:00:00Z",

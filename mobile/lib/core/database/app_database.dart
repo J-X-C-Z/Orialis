@@ -16,6 +16,8 @@ class Tasks extends Table {
   TextColumn get completedAt => text().nullable()();
   IntColumn get reminderMinutes => integer().nullable()();
   TextColumn get projectId => text().nullable()();
+  TextColumn get parentTaskId => text().nullable()();
+  TextColumn get scheduleId => text().nullable()();
   TextColumn get recurrence => text().nullable()();
   IntColumn get version => integer().withDefault(const Constant(1))();
   IntColumn get remoteVersion => integer().withDefault(const Constant(0))();
@@ -37,6 +39,7 @@ class CalendarEvents extends Table {
   TextColumn get startAt => text()();
   TextColumn get endAt => text()();
   BoolColumn get allDay => boolean().withDefault(const Constant(false))();
+  BoolColumn get important => boolean().withDefault(const Constant(false))();
   IntColumn get reminderMinutes => integer().nullable()();
   IntColumn get version => integer().withDefault(const Constant(1))();
   IntColumn get remoteVersion => integer().withDefault(const Constant(0))();
@@ -166,7 +169,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase({QueryExecutor? executor}) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -310,6 +313,23 @@ class AppDatabase extends _$AppDatabase {
           'conversations',
           'local_revision',
           () => m.addColumn(conversations, conversations.localRevision),
+        );
+      }
+      if (from < 9) {
+        await addColumnIfMissing(
+          'tasks',
+          'parent_task_id',
+          () => m.addColumn(tasks, tasks.parentTaskId),
+        );
+        await addColumnIfMissing(
+          'tasks',
+          'schedule_id',
+          () => m.addColumn(tasks, tasks.scheduleId),
+        );
+        await addColumnIfMissing(
+          'calendar_events',
+          'important',
+          () => m.addColumn(calendarEvents, calendarEvents.important),
         );
       }
     },

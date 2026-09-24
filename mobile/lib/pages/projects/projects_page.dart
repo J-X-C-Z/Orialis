@@ -6,6 +6,13 @@ import '../../features/projects/data/project_repository.dart';
 import '../../features/events/presentation/task_editor.dart';
 import '../shared/page_parts.dart';
 
+/// Maps the stored project status onto the product wording.
+String _projectStatusLabel(String status) => switch (status) {
+  'completed' => '已完成',
+  'archived' => '已归档',
+  _ => '进行中',
+};
+
 class ProjectsPage extends ConsumerStatefulWidget {
   const ProjectsPage({this.embedded = false, super.key});
   final bool embedded;
@@ -14,7 +21,7 @@ class ProjectsPage extends ConsumerStatefulWidget {
 }
 
 class _ProjectsPageState extends ConsumerState<ProjectsPage> {
-  String? _selected;
+  String? _selected = LuminaCardMemory.selectedProject;
   Future<void> _editProject([Project? project]) async {
     await showLuminaSheet<void>(
       context: context,
@@ -72,6 +79,23 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     );
   }
 
+  final _scroll = ScrollController();
+  void _openProject(Project p) {
+    setState(() => _selected = p.id);
+    LuminaCardMemory.selectProject(p.id);
+  }
+
+  void _closeProject() {
+    setState(() => _selected = null);
+    LuminaCardMemory.selectProject(null);
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final body = StreamBuilder<List<Project>>(
@@ -84,222 +108,124 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         return PopScope(
           canPop: selected == null,
           onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) setState(() => _selected = null);
+            if (!didPop) _closeProject();
           },
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+            controller: _scroll,
+            padding: EdgeInsets.fromLTRB(
+              20,
+              4,
+              20,
+              24 +
+                  LuminaNavigationInset.of(context) +
+                  MediaQuery.paddingOf(context).bottom,
+            ),
             children: [
-              ContentStack(
-                gap: 20,
-                children: [
-                  Row(
-                    children: [
-                      if (selected != null) ...[
-                        LuminaIconButton(
-                          tooltip: '返回项目',
-                          icon: const LuminaIcon(LuminaIcons.back),
-                          onPressed: () => setState(() => _selected = null),
-                        ),
-                        const SizedBox(width: 12),
-                      ],
-                      Expanded(
-                        child: Text(
-                          selected?.name ?? '把想法，逐步实现',
-                          style: LuminaTheme.of(context).textTheme.titleLarge,
-                        ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '把想法，逐步实现',
+                        style: LuminaTheme.of(context).textTheme.titleLarge,
                       ),
-                      LuminaIconButton(
-                        tooltip: selected == null ? '新建项目' : '新增里程碑',
-                        icon: const LuminaIcon(LuminaIcons.add),
-                        onPressed: () => selected == null
-                            ? _editProject()
-                            : _milestone(selected),
-                      ),
-                    ],
-                  ),
-                  if (selected == null) ...[
-                    if (projects.isEmpty)
-                      const OrialisEmptyState(text: '为一个稍长的目标建立项目，再拆成可完成的里程碑。'),
-                    for (final p in projects)
-                      LuminaSurface(
-                        onTap: () => setState(() => _selected = p.id),
-                        child: ContentStack(
+                    ),
+                    LuminaIconButton(
+                      tooltip: '新建项目',
+                      icon: const LuminaIcon(LuminaIcons.add),
+                      onPressed: () => _editProject(),
+                    ),
+                  ],
+                ),
+              ),
+              if (projects.isEmpty)
+                const OrialisEmptyState(text: '为一个稍长的目标建立项目，再拆成可完成的里程碑。'),
+              for (final p in projects)
+                LuminaReveal(
+                  key: ValueKey(p.id),
+                  visible: true,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 20),
+                    child: LuminaExpandableCard(
+                      expanded: selected?.id == p.id,
+                      onExpand: () => _openProject(p),
+                      header: LuminaCardHeader(
+                        title: p.name,
+                        expanded: selected?.id == p.id,
+                        onTitleTap: () => selected?.id == p.id
+                            ? _closeProject()
+                            : _openProject(p),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Row(
-                              children: [
-                                const LuminaIcon(LuminaIcons.folder),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    p.name,
-                                    style: LuminaTheme.of(
-                                      context,
-                                    ).textTheme.titleMedium,
-                                  ),
-                                ),
-                                LuminaIconButton(
-                                  tooltip: '管理 ${p.name}',
-                                  icon: const LuminaIcon(LuminaIcons.more),
-                                  onPressed: () async {
-                                    final action = await chooseRecordAction(
-                                      context,
-                                    );
-                                    if (!mounted) return;
-                                    if (action == 'edit') await _editProject(p);
-                                    if (action == 'delete' &&
-                                        context.mounted &&
-                                        await confirmDelete(context, p.name)) {
-                                      await ref
-                                          .read(projectRepositoryProvider)
-                                          .deleteProject(p);
-                                    }
-                                  },
-                                ),
-                              ],
-                            ),
-                            QuietLabel(p.goal ?? '还没有设置目标'),
-                            StreamBuilder<List<ProjectMilestone>>(
-                              stream: ref
-                                  .watch(projectRepositoryProvider)
-                                  .watchMilestones(p.id),
-                              builder: (_, s) {
-                                final items =
-                                    s.data ?? const <ProjectMilestone>[];
-                                final next = items
-                                    .where((m) => !m.completed)
-                                    .firstOrNull;
-                                return ContentStack(
-                                  gap: 6,
-                                  children: [
-                                    QuietLabel(
-                                      '${items.where((m) => m.completed).length} / ${items.length} 里程碑',
-                                    ),
-                                    Text(
-                                      next == null
-                                          ? (items.isEmpty
-                                                ? '下一步：添加里程碑'
-                                                : '全部里程碑已完成')
-                                          : '下一步：${next.title}',
-                                    ),
-                                  ],
+                            LuminaIconButton(
+                              tooltip: '管理 ${p.name}',
+                              icon: const LuminaIcon(LuminaIcons.more),
+                              onPressed: () async {
+                                final action = await chooseRecordAction(
+                                  context,
                                 );
+                                if (!mounted) return;
+                                if (action == 'edit') await _editProject(p);
+                                if (action == 'delete' &&
+                                    context.mounted &&
+                                    await confirmDelete(context, p.name)) {
+                                  await ref
+                                      .read(projectRepositoryProvider)
+                                      .deleteProject(p);
+                                }
                               },
                             ),
                           ],
                         ),
                       ),
-                  ] else ...[
-                    if (selected.goal != null) QuietLabel(selected.goal!),
-                    OrialisSection(
-                      title: '里程碑',
-                      child: StreamBuilder<List<ProjectMilestone>>(
-                        stream: ref
-                            .watch(projectRepositoryProvider)
-                            .watchMilestones(selected.id),
-                        builder: (_, snapshot) {
-                          if (snapshot.hasError) return const PageFailure();
-                          final milestones =
-                              snapshot.data ?? const <ProjectMilestone>[];
-                          return ContentStack(
+                      summary: LuminaStack(
+                        gap: 6,
+                        children: [
+                          Row(
                             children: [
-                              if (milestones.isEmpty)
-                                const QuietLabel('还没有里程碑。'),
-                              for (final m in milestones)
-                                OrialisListRow(
-                                  title: m.title,
-                                  subtitle: m.due ?? '无截止日期',
-                                  leading: LuminaCheck(
-                                    value: m.completed,
-                                    onChanged: (v) => ref
-                                        .read(projectRepositoryProvider)
-                                        .completeMilestone(m, v),
-                                  ),
-                                  trailing: LuminaIconButton(
-                                    tooltip: '管理里程碑',
-                                    icon: const LuminaIcon(LuminaIcons.more),
-                                    onPressed: () async {
-                                      final a = await chooseRecordAction(
-                                        context,
-                                      );
-                                      if (!mounted) return;
-                                      if (a == 'edit') {
-                                        await _milestone(selected, m);
-                                      }
-                                      if (a == 'delete' &&
-                                          context.mounted &&
-                                          await confirmDelete(
-                                            context,
-                                            m.title,
-                                          )) {
-                                        await ref
-                                            .read(projectRepositoryProvider)
-                                            .deleteMilestone(m);
-                                      }
-                                    },
-                                  ),
-                                  onTap: () => _milestone(selected, m),
+                              Expanded(
+                                child: QuietLabel(
+                                  p.goal ?? '还没有设置目标',
                                 ),
+                              ),
+                              QuietLabel(_projectStatusLabel(p.status)),
                             ],
-                          );
-                        },
-                      ),
-                    ),
-                    OrialisSection(
-                      title: '关联事件',
-                      child: StreamBuilder<List<Task>>(
-                        stream: ref
-                            .watch(projectRepositoryProvider)
-                            .watchProjectTasks(selected.id),
-                        builder: (_, s) {
-                          if (s.hasError) return const PageFailure();
-                          final tasks = s.data ?? const <Task>[];
-                          final next = selectNextAction(selected, tasks);
-                          return ContentStack(
-                            children: [
-                              if (tasks.isEmpty)
-                                const QuietLabel('在事件编辑中选择此项目，即可建立关联。'),
-                              if (next != null)
-                                QuietLabel('下一行动 · ${next.title}'),
-                              for (final t in tasks)
-                                OrialisListRow(
-                                  title: t.title,
-                                  subtitle: t.due ?? '无截止日期',
-                                  trailing: LuminaCheck(
-                                    value: t.completed,
-                                    onChanged: (v) => ref
-                                        .read(taskRepositoryProvider)
-                                        .complete(t, v),
+                          ),
+                          StreamBuilder<List<ProjectMilestone>>(
+                            stream: ref
+                                .watch(projectRepositoryProvider)
+                                .watchMilestones(p.id),
+                            builder: (_, snapshot) {
+                              final items =
+                                  snapshot.data ?? const <ProjectMilestone>[];
+                              final next = items
+                                  .where((m) => !m.completed)
+                                  .firstOrNull;
+                              return LuminaStack(
+                                gap: 6,
+                                children: [
+                                  QuietLabel(
+                                    '${items.where((m) => m.completed).length} / ${items.length} 里程碑',
                                   ),
-                                  onTap: () => showTaskEditor(
-                                    context,
-                                    task: t,
-                                    onSave: (d) => ref
-                                        .read(taskRepositoryProvider)
-                                        .updateDetails(
-                                          t,
-                                          title: d.title,
-                                          notes: d.notes,
-                                          due: d.due,
-                                          dueTime: d.dueTime,
-                                          important: d.important,
-                                          urgent: d.urgent,
-                                          reminderMinutes: d.reminderMinutes,
-                                          recurrence: d.recurrence,
-                                          projectId: d.projectId,
-                                          reminderMinutesProvided: true,
-                                          recurrenceProvided: true,
-                                          projectIdProvided: true,
-                                        ),
+                                  Text(
+                                    next == null
+                                        ? (items.isEmpty
+                                              ? '下一步：添加里程碑'
+                                              : '全部里程碑已完成')
+                                        : '下一步：${next.title}',
                                   ),
-                                ),
-                            ],
-                          );
-                        },
+                                ],
+                              );
+                            },
+                          ),
+                        ],
                       ),
+                      detailBuilder: (_) => _details(p),
                     ),
-                  ],
-                ],
-              ),
+                  ),
+                ),
             ],
           ),
         );
@@ -313,6 +239,127 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
             body: body,
           );
   }
+
+  Widget _details(Project project) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      if (project.goal != null)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: QuietLabel(project.goal!),
+        ),
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: LuminaCardHeader(
+          title: '里程碑',
+          trailing: LuminaIconButton(
+            tooltip: '新增里程碑',
+            icon: const LuminaIcon(LuminaIcons.add),
+            onPressed: () => _milestone(project),
+          ),
+        ),
+      ),
+      StreamBuilder<List<ProjectMilestone>>(
+        stream: ref
+            .watch(projectRepositoryProvider)
+            .watchMilestones(project.id),
+        builder: (_, snapshot) {
+          if (snapshot.hasError) return const PageFailure();
+          return LuminaCompletionList(
+            empty: const QuietLabel('还没有里程碑。'),
+            children: [
+              for (final m in snapshot.data ?? const <ProjectMilestone>[])
+                OrialisListRow(
+                  key: ValueKey(m.id),
+                  depth: LuminaSurfaceDepth.recessed,
+                  title: m.title,
+                  subtitle: m.due ?? '无截止日期',
+                  leading: LuminaCheck(
+                    value: m.completed,
+                    onChanged: (value) => ref
+                        .read(projectRepositoryProvider)
+                        .completeMilestone(m, value),
+                  ),
+                  trailing: LuminaIconButton(
+                    tooltip: '管理里程碑',
+                    icon: const LuminaIcon(LuminaIcons.more),
+                    onPressed: () async {
+                      final action = await chooseRecordAction(context);
+                      if (!mounted) return;
+                      if (action == 'edit') await _milestone(project, m);
+                      if (action == 'delete' &&
+                          mounted &&
+                          await confirmDelete(context, m.title)) {
+                        await ref
+                            .read(projectRepositoryProvider)
+                            .deleteMilestone(m);
+                      }
+                    },
+                  ),
+                  onTap: () => _milestone(project, m),
+                ),
+            ],
+          );
+        },
+      ),
+      const LuminaEngravedDivider(),
+      const OrialisSectionHeader(title: '关联事件'),
+      StreamBuilder<List<Task>>(
+        stream: ref
+            .watch(projectRepositoryProvider)
+            .watchProjectTasks(project.id),
+        builder: (_, snapshot) {
+          if (snapshot.hasError) return const PageFailure();
+          final tasks = snapshot.data ?? const <Task>[];
+          final next = selectNextAction(project, tasks);
+          return LuminaCompletionList(
+            empty: const QuietLabel('在事件编辑中选择此项目，即可建立关联。'),
+            children: [
+              if (next != null)
+                QuietLabel(
+                  '下一行动 · ${next.title}',
+                  key: const ValueKey('next-action'),
+                ),
+              for (final t in tasks)
+                OrialisListRow(
+                  key: ValueKey(t.id),
+                  depth: LuminaSurfaceDepth.recessed,
+                  title: t.title,
+                  subtitle: t.due ?? '无截止日期',
+                  trailing: LuminaCheck(
+                    value: t.completed,
+                    onChanged: (value) =>
+                        ref.read(taskRepositoryProvider).complete(t, value),
+                  ),
+                  onTap: () => showTaskEditor(
+                    context,
+                    task: t,
+                    onSave: (d) => ref
+                        .read(taskRepositoryProvider)
+                        .updateDetails(
+                          t,
+                          title: d.title,
+                          notes: d.notes,
+                          due: d.due,
+                          dueTime: d.dueTime,
+                          important: d.important,
+                          urgent: d.urgent,
+                          reminderMinutes: d.reminderMinutes,
+                          recurrence: d.recurrence,
+                          projectId: d.projectId,
+                          reminderMinutesProvided: true,
+                          recurrenceProvided: true,
+                          projectIdProvided: true,
+                        ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    ],
+  );
 }
 
 class _NameEditor extends StatefulWidget {
@@ -387,11 +434,12 @@ class _NameEditorState extends State<_NameEditor> {
                   await widget.onSave(_name.text.trim(), _detail.text.trim());
                   if (context.mounted) Navigator.pop(context);
                 } catch (_) {
-                  if (mounted)
+                  if (mounted) {
                     setState(() {
                       _saving = false;
                       _error = '保存失败，内容已保留，请重试。';
                     });
+                  }
                 }
               },
         child: Text(_saving ? '保存中…' : '保存'),

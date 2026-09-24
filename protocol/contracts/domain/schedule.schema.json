@@ -26,6 +26,7 @@
     "startAt": { "$ref": "./common.schema.json#/$defs/timestamp" },
     "endAt": { "$ref": "./common.schema.json#/$defs/timestamp" },
     "allDay": { "type": "boolean" },
+    "important": { "type": "boolean", "default": false },
     "reminderMinutes": {
       "type": ["integer", "null"],
       "minimum": 0
