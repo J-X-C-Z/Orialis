@@ -19,67 +19,118 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   @override
   Widget build(BuildContext context) {
     final repository = ref.watch(projectRepositoryProvider);
+    final desktop =
+        MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop;
+
     return OrialisPageScaffold(
-      title: _selected == null ? '项目' : _selected!.name,
-      subtitle: _selected == null ? '项目、里程碑与关联任务' : '里程碑与 Next Action',
+      title: desktop
+          ? '项目'
+          : (_selected == null ? '项目' : _selected!.name),
+      subtitle: desktop
+          ? '项目、里程碑与 Next Action'
+          : (_selected == null ? '项目、里程碑与关联任务' : '里程碑与 Next Action'),
       actions: [
-        if (_selected != null)
+        if (!desktop && _selected != null)
           IconButton(
             onPressed: () => setState(() => _selected = null),
             icon: const Icon(Icons.arrow_back),
           ),
       ],
-      floatingActionButton: _selected == null
-          ? FloatingActionButton.extended(
-              onPressed: () => _createProject(context),
-              icon: const Icon(Icons.add),
-              label: const Text('新建项目'),
-            )
-          : FloatingActionButton.extended(
-              onPressed: () => _createMilestone(context, _selected!),
-              icon: const Icon(Icons.add),
-              label: const Text('新建里程碑'),
-            ),
-      body: _selected == null
-          ? StreamBuilder<List<Project>>(
-              stream: repository.watchProjects(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(child: Text('加载失败：${snapshot.error}'));
-                }
-                final projects = snapshot.data ?? const [];
-                if (projects.isEmpty) {
-                  return const OrialisEmptyState(text: '还没有项目。', card: false);
-                }
-                return ListView.separated(
-                  padding: const EdgeInsets.all(AppSpacing.page),
-                  itemCount: projects.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) => Card(
-                    child: ListTile(
-                      title: Text(projects[index].name),
-                      subtitle: Text(projects[index].goal ?? '暂无目标'),
-                      trailing: PopupMenuButton<String>(
-                        onSelected: (action) async {
-                          if (action == 'edit') {
-                            await _editProject(context, projects[index]);
-                          }
-                          if (action == 'delete') {
-                            await repository.deleteProject(projects[index]);
-                          }
-                        },
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(value: 'edit', child: Text('编辑')),
-                          PopupMenuItem(value: 'delete', child: Text('删除')),
-                        ],
-                      ),
-                      onTap: () => setState(() => _selected = projects[index]),
-                    ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _selected == null
+            ? () => _createProject(context)
+            : () => _createMilestone(context, _selected!),
+        icon: const Icon(Icons.add),
+        label: Text(_selected == null ? '新建项目' : '新建里程碑'),
+      ),
+      body: desktop
+          ? Row(
+              children: [
+                SizedBox(
+                  width: 330,
+                  child: _buildProjectList(
+                    context,
+                    repository,
+                    desktop: true,
                   ),
-                );
-              },
+                ),
+                const VerticalDivider(width: 1),
+                Expanded(
+                  child: _selected == null
+                      ? const OrialisEmptyState(
+                          text: '从左侧选择一个项目，查看里程碑与 Next Action。',
+                          card: false,
+                        )
+                      : _ProjectDetail(
+                          project: _selected!,
+                          repository: repository,
+                        ),
+                ),
+              ],
             )
+          : _selected == null
+          ? _buildProjectList(context, repository)
           : _ProjectDetail(project: _selected!, repository: repository),
+    );
+  }
+
+  Widget _buildProjectList(
+    BuildContext context,
+    ProjectRepository repository, {
+    bool desktop = false,
+  }) {
+    return StreamBuilder<List<Project>>(
+      stream: repository.watchProjects(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(child: Text('加载失败：${snapshot.error}'));
+        }
+        final projects = snapshot.data ?? const [];
+        if (projects.isEmpty) {
+          return const OrialisEmptyState(text: '还没有项目。', card: false);
+        }
+        return ListView.separated(
+          padding: const EdgeInsets.all(AppSpacing.page),
+          itemCount: projects.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final project = projects[index];
+            final selected = _selected?.id == project.id;
+            return LuminaGlassControl(
+              selected: desktop && selected,
+              child: ListTile(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.control),
+                ),
+                title: Text(project.name),
+                subtitle: Text(
+                  project.goal ?? '暂无目标',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (action) async {
+                    if (action == 'edit') {
+                      await _editProject(context, project);
+                    }
+                    if (action == 'delete') {
+                      await repository.deleteProject(project);
+                      if (_selected?.id == project.id && mounted) {
+                        setState(() => _selected = null);
+                      }
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'edit', child: Text('编辑')),
+                    PopupMenuItem(value: 'delete', child: Text('删除')),
+                  ],
+                ),
+                onTap: () => setState(() => _selected = project),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
