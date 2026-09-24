@@ -61,6 +61,20 @@ jobs:
       - working-directory: mobile
         run: flutter test
 
+  macos-client:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: bash scripts/bootstrap-macos.sh
+      - working-directory: mobile
+        run: flutter pub get
+      - working-directory: mobile
+        run: flutter build macos --debug
+
   hygiene:
     runs-on: ubuntu-latest
     steps:
