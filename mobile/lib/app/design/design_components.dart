@@ -45,7 +45,23 @@ class OrialisPageScaffold extends StatelessWidget {
       ),
       body: SafeArea(
         top: false,
-        child: Padding(padding: padding, child: body),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final content = Padding(padding: padding, child: body);
+            if (constraints.maxWidth < AppBreakpoints.desktop) {
+              return content;
+            }
+            return Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: AppLayout.contentMaxWidth,
+                ),
+                child: content,
+              ),
+            );
+          },
+        ),
       ),
       bottomNavigationBar: bottomActions,
       floatingActionButton: floatingActionButton,
@@ -284,8 +300,11 @@ class OrialisChatBubble extends StatelessWidget {
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints: const BoxConstraints(
-          maxWidth: AppChatMetrics.bubbleMaxWidth,
+        constraints: BoxConstraints(
+          maxWidth:
+              MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
+              ? AppChatMetrics.desktopBubbleMaxWidth
+              : AppChatMetrics.bubbleMaxWidth,
         ),
         margin: const EdgeInsets.only(bottom: AppChatMetrics.bubbleBottomGap),
         padding: const EdgeInsets.symmetric(
@@ -300,4 +319,75 @@ class OrialisChatBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+
+/// Stable content surface used by Lumina's Solid material language.
+class LuminaSolidSurface extends StatelessWidget {
+  const LuminaSolidSurface({
+    required this.child,
+    this.padding = EdgeInsets.zero,
+    this.radius = AppRadius.card,
+    this.color = AppColors.surface,
+    super.key,
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final double radius;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: AppColors.outline),
+    ),
+    child: Padding(padding: padding, child: child),
+  );
+}
+
+/// Lightweight Flowing Glass control surface.
+///
+/// It intentionally avoids a full-screen backdrop blur. The translucent fill,
+/// bright edge and shallow elevation retain Lumina's interaction hierarchy
+/// while keeping desktop lists and sidebars inexpensive to render.
+class LuminaGlassControl extends StatelessWidget {
+  const LuminaGlassControl({
+    required this.child,
+    this.selected = false,
+    this.padding = EdgeInsets.zero,
+    this.radius = AppRadius.control,
+    super.key,
+  });
+
+  final Widget child;
+  final bool selected;
+  final EdgeInsetsGeometry padding;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) => AnimatedContainer(
+    duration: const Duration(milliseconds: 160),
+    curve: Curves.easeOutCubic,
+    padding: padding,
+    decoration: BoxDecoration(
+      color: selected ? AppColors.glassSelected : AppColors.glass,
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(
+        color: selected ? AppColors.accentSoft : AppColors.glassBorder,
+      ),
+      boxShadow: selected
+          ? const [
+              BoxShadow(
+                color: Color(0x12000000),
+                blurRadius: 14,
+                offset: Offset(0, 5),
+              ),
+            ]
+          : const [],
+    ),
+    child: child,
+  );
 }
