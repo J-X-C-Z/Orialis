@@ -1,8 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'design_tokens.dart';
 
 ThemeData buildOrialisTheme() {
+  final desktop =
+      defaultTargetPlatform == TargetPlatform.macOS ||
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.linux;
   final scheme = ColorScheme.fromSeed(
     seedColor: AppColors.accent,
     brightness: Brightness.light,
@@ -11,6 +16,7 @@ ThemeData buildOrialisTheme() {
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme.copyWith(primary: AppColors.accent),
+    visualDensity: desktop ? VisualDensity.compact : VisualDensity.standard,
     scaffoldBackgroundColor: AppColors.paper,
     appBarTheme: const AppBarTheme(
       backgroundColor: AppColors.paper,
@@ -41,6 +47,11 @@ ThemeData buildOrialisTheme() {
         borderRadius: BorderRadius.circular(AppRadius.control),
         borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
       ),
+    ),
+    dividerTheme: const DividerThemeData(
+      color: AppColors.outline,
+      space: 1,
+      thickness: 1,
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: AppColors.paper,
