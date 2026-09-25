@@ -52,6 +52,20 @@ pub(crate) async fn capabilities() -> Json<CapabilitiesResponse> {
             "attachments",
             "agent-devices",
             "websocket",
+            "task_children",
+            "schedule_importance",
         ],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::capabilities;
+
+    #[tokio::test]
+    async fn advertises_task_children_and_schedule_importance() {
+        let response = capabilities().await;
+        assert!(response.0.capabilities.contains(&"task_children"));
+        assert!(response.0.capabilities.contains(&"schedule_importance"));
+    }
 }

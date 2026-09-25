@@ -302,35 +302,30 @@ async fn handle_agent_event(
                 )
                 .await;
             }
-            let message = protocol::GatewayMessage::MessageSend {
-                version: protocol::PROTOCOL_VERSION,
-                message_id: request_id.clone(),
-                conversation_id: conversation_id.clone(),
-                content: if command.starts_with('/') {
-                    command.clone()
-                } else {
-                    format!("/{command}")
-                },
-                attachments: vec![],
+            let message_id = request_id.clone();
+            let content = if command.starts_with('/') {
+                command.clone()
+            } else {
+                format!("/{command}")
             };
-            let response = send_agent_request(&state.agent, user_id, message).await;
+            let response = run_session_command(
+                &state.agent,
+                user_id,
+                &conversation_id,
+                &message_id,
+                &content,
+            )
+            .await;
             let payload = match response {
-                Ok(protocol::GatewayMessage::MessageReply { content, .. }) => {
+                Ok(output) => {
                     serde_json::json!({
                         "kind": "hermes.command.result",
                         "id": request_id,
                         "command": command,
                         "status": "completed",
-                        "content": content,
+                        "content": output,
                     })
                 }
-                Ok(other) => serde_json::json!({
-                    "kind": "hermes.command.result",
-                    "id": request_id,
-                    "command": command,
-                    "status": "failed",
-                    "content": format!("unexpected Agent response: {other:?}"),
-                }),
                 Err(error) => serde_json::json!({
                     "kind": "hermes.command.result",
                     "id": request_id,
@@ -342,46 +337,58 @@ async fn handle_agent_event(
             return send_envelope(socket, protocol::mobile_event(payload)).await;
         }
         "session.create" | "session.reset" | "session.resume" | "session.status"
-        | "session.title" => {
+        | "session.title" | "session.retry" | "session.stop" => {
+            let title = envelope
+                .payload
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            if kind == "session.title" && title.is_none() {
+                return send_error(
+                    socket,
+                    Some(request_id),
+                    "invalid_session_title",
+                    "session title must not be empty",
+                )
+                .await;
+            }
             let command = match kind {
-                "session.create" | "session.reset" => "/new".to_owned(),
+                // Hermes treats /new and /reset as aliases; keep both so the
+                // mobile labels match the slash command that actually runs.
+                "session.create" => match title {
+                    Some(title) => format!("/new {title}"),
+                    None => "/new".to_owned(),
+                },
+                "session.reset" => "/reset".to_owned(),
                 "session.resume" => "/resume".to_owned(),
                 "session.status" => "/status".to_owned(),
-                "session.title" => envelope
-                    .payload
-                    .get("title")
-                    .and_then(Value::as_str)
-                    .map(|title| format!("/title {title}"))
-                    .unwrap_or_else(|| "/status".to_owned()),
+                "session.title" => format!("/title {}", title.unwrap_or_default()),
+                // Recovery actions for a failed turn ("request was not processed").
+                "session.retry" => "/retry".to_owned(),
+                "session.stop" => "/stop".to_owned(),
                 _ => unreachable!(),
             };
-            let message = protocol::GatewayMessage::MessageSend {
-                version: protocol::PROTOCOL_VERSION,
-                message_id: request_id.clone(),
-                conversation_id: conversation_id.clone(),
-                content: command.clone(),
-                attachments: vec![],
-            };
-            return match send_agent_request(&state.agent, user_id, message).await {
-                Ok(protocol::GatewayMessage::MessageReply { content, .. }) => {
+            return match run_session_command(
+                &state.agent,
+                user_id,
+                &conversation_id,
+                &request_id,
+                &command,
+            )
+            .await
+            {
+                Ok(content) => {
                     send_envelope(
                         socket,
                         protocol::mobile_event(serde_json::json!({
                             "kind": "session.status",
                             "id": session_id,
                             "event": kind,
+                            "command": command,
                             "status": "completed",
                             "message": content,
                         })),
-                    )
-                    .await
-                }
-                Ok(_) => {
-                    send_error(
-                        socket,
-                        Some(request_id),
-                        "invalid_agent_response",
-                        "Agent returned an unexpected session response",
                     )
                     .await
                 }
@@ -423,6 +430,54 @@ async fn send_agent_request(
         .map_err(|_| "Agent connection closed before responding".to_owned())
 }
 
+/// True when Hermes answered a destructive slash command with its confirm prompt
+/// instead of running it. Session-control buttons are already the user's intent,
+/// so the follow-up `/approve` below completes the action without a second dialog.
+fn looks_like_slash_confirm(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    lower.contains("confirm /") && (lower.contains("approve") || lower.contains("cancel"))
+}
+
+async fn run_session_command(
+    agent: &AgentRegistry,
+    user_id: &str,
+    conversation_id: &str,
+    request_id: &str,
+    command: &str,
+) -> Result<String, String> {
+    let send = |message_id: String, content: String| protocol::GatewayMessage::MessageSend {
+        version: protocol::PROTOCOL_VERSION,
+        message_id,
+        conversation_id: conversation_id.to_owned(),
+        content,
+        attachments: vec![],
+    };
+    let first = send_agent_request(
+        agent,
+        user_id,
+        send(format!("{request_id}"), command.to_owned()),
+    )
+    .await?;
+    let content = match first {
+        protocol::GatewayMessage::MessageReply { content, .. } => content,
+        _ => return Err("Agent returned an unexpected session response".to_owned()),
+    };
+    if !looks_like_slash_confirm(&content) {
+        return Ok(content);
+    }
+    // Complete the pending destructive confirm that Hermes just raised.
+    let approved = send_agent_request(
+        agent,
+        user_id,
+        send(format!("{request_id}-approve"), "/approve".to_owned()),
+    )
+    .await?;
+    match approved {
+        protocol::GatewayMessage::MessageReply { content, .. } => Ok(content),
+        _ => Err("Agent returned an unexpected session confirm response".to_owned()),
+    }
+}
+
 fn registry_error_message(error: RegistryError) -> String {
     match error {
         RegistryError::NoConnection => "no Orialis Hermes plugin is connected".to_owned(),
@@ -455,4 +510,26 @@ async fn send_envelope(socket: &mut WebSocket, envelope: MobileEnvelope) -> Resu
         .send(Message::Text(text.into()))
         .await
         .map_err(|_| ())
+}
+
+#[cfg(test)]
+mod session_control_tests {
+    use super::looks_like_slash_confirm;
+
+    #[test]
+    fn detects_destructive_slash_confirm_prompts() {
+        assert!(looks_like_slash_confirm(
+            "⚠️ **Confirm /new**\n\nThis starts a fresh session.\n\nChoose:\n• **Approve Once**\n• **Cancel**"
+        ));
+        assert!(looks_like_slash_confirm(
+            "Confirm /reset — choose Approve or Cancel"
+        ));
+    }
+
+    #[test]
+    fn ignores_ordinary_session_replies() {
+        assert!(!looks_like_slash_confirm("Started a fresh session."));
+        assert!(!looks_like_slash_confirm("/status · model ready"));
+        assert!(!looks_like_slash_confirm("Your request was not processed."));
+    }
 }

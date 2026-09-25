@@ -10,6 +10,12 @@ class TaskRepository {
 
   Stream<List<Task>> watchTasks() => _delegate.watchTasks();
 
+  Stream<List<Task>> watchChildren(String parentTaskId) =>
+      _delegate.watchChildren(parentTaskId);
+
+  Stream<List<Task>> watchForSchedule(String scheduleId) =>
+      _delegate.watchForSchedule(scheduleId);
+
   Stream<List<Task>> watchTasksForDate(DateTime date) =>
       _delegate.watchTasksForDate(date);
 
@@ -37,6 +43,8 @@ class TaskRepository {
     int? reminderMinutes,
     TaskRecurrence? recurrence,
     String? projectId,
+    String? parentTaskId,
+    String? scheduleId,
   }) => _delegate.createTask(
     title: title,
     notes: notes,
@@ -47,6 +55,8 @@ class TaskRepository {
     reminderMinutes: reminderMinutes,
     recurrence: recurrence,
     projectId: projectId,
+    parentTaskId: parentTaskId,
+    scheduleId: scheduleId,
   );
 
   Future<void> complete(Task task, bool completed) =>
@@ -66,9 +76,13 @@ class TaskRepository {
     int? reminderMinutes,
     TaskRecurrence? recurrence,
     String? projectId,
+    String? parentTaskId,
+    String? scheduleId,
     bool reminderMinutesProvided = false,
     bool recurrenceProvided = false,
     bool projectIdProvided = false,
+    bool parentTaskIdProvided = false,
+    bool scheduleIdProvided = false,
   }) => _delegate.updateTaskDetails(
     task,
     title: title,
@@ -80,9 +94,13 @@ class TaskRepository {
     reminderMinutes: reminderMinutes,
     recurrence: recurrence,
     projectId: projectId,
+    parentTaskId: parentTaskId,
+    scheduleId: scheduleId,
     reminderMinutesProvided: reminderMinutesProvided,
     recurrenceProvided: recurrenceProvided,
     projectIdProvided: projectIdProvided,
+    parentTaskIdProvided: parentTaskIdProvided,
+    scheduleIdProvided: scheduleIdProvided,
   );
 
   Future<void> delete(Task task) => _delegate.deleteTask(task);

@@ -1,4 +1,4 @@
-package app.orialis
+package com.example.lumina_ui_example
 
 import io.flutter.embedding.android.FlutterActivity
 

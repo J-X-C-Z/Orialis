@@ -37,6 +37,8 @@
       "minimum": 0
     },
     "projectId": { "$ref": "./common.schema.json#/$defs/nullableEntityId" },
+    "parentTaskId": { "$ref": "./common.schema.json#/$defs/nullableEntityId" },
+    "scheduleId": { "$ref": "./common.schema.json#/$defs/nullableEntityId" },
     "recurrence": { "$ref": "./common.schema.json#/$defs/recurrence" },
     "createdAt": { "$ref": "./common.schema.json#/$defs/timestamp" },
     "updatedAt": { "$ref": "./common.schema.json#/$defs/timestamp" },
@@ -44,6 +46,15 @@
     "deletedAt": { "$ref": "./common.schema.json#/$defs/nullableTimestamp" }
   },
   "allOf": [
+    {
+      "not": {
+        "required": ["parentTaskId", "scheduleId"],
+        "properties": {
+          "parentTaskId": { "$ref": "./common.schema.json#/$defs/entityId" },
+          "scheduleId": { "$ref": "./common.schema.json#/$defs/entityId" }
+        }
+      }
+    },
     {
       "if": { "properties": { "completed": { "const": false } } },
       "then": { "properties": { "completedAt": { "type": "null" } } }

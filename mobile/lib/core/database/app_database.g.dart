@@ -129,6 +129,28 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _parentTaskIdMeta = const VerificationMeta(
+    'parentTaskId',
+  );
+  @override
+  late final GeneratedColumn<String> parentTaskId = GeneratedColumn<String>(
+    'parent_task_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _scheduleIdMeta = const VerificationMeta(
+    'scheduleId',
+  );
+  @override
+  late final GeneratedColumn<String> scheduleId = GeneratedColumn<String>(
+    'schedule_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _recurrenceMeta = const VerificationMeta(
     'recurrence',
   );
@@ -234,6 +256,8 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
     completedAt,
     reminderMinutes,
     projectId,
+    parentTaskId,
+    scheduleId,
     recurrence,
     version,
     remoteVersion,
@@ -326,6 +350,21 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
       context.handle(
         _projectIdMeta,
         projectId.isAcceptableOrUnknown(data['project_id']!, _projectIdMeta),
+      );
+    }
+    if (data.containsKey('parent_task_id')) {
+      context.handle(
+        _parentTaskIdMeta,
+        parentTaskId.isAcceptableOrUnknown(
+          data['parent_task_id']!,
+          _parentTaskIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('schedule_id')) {
+      context.handle(
+        _scheduleIdMeta,
+        scheduleId.isAcceptableOrUnknown(data['schedule_id']!, _scheduleIdMeta),
       );
     }
     if (data.containsKey('recurrence')) {
@@ -439,6 +478,14 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
         DriftSqlType.string,
         data['${effectivePrefix}project_id'],
       ),
+      parentTaskId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}parent_task_id'],
+      ),
+      scheduleId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}schedule_id'],
+      ),
       recurrence: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}recurrence'],
@@ -492,6 +539,8 @@ class Task extends DataClass implements Insertable<Task> {
   final String? completedAt;
   final int? reminderMinutes;
   final String? projectId;
+  final String? parentTaskId;
+  final String? scheduleId;
   final String? recurrence;
   final int version;
   final int remoteVersion;
@@ -512,6 +561,8 @@ class Task extends DataClass implements Insertable<Task> {
     this.completedAt,
     this.reminderMinutes,
     this.projectId,
+    this.parentTaskId,
+    this.scheduleId,
     this.recurrence,
     required this.version,
     required this.remoteVersion,
@@ -550,6 +601,12 @@ class Task extends DataClass implements Insertable<Task> {
     }
     if (!nullToAbsent || projectId != null) {
       map['project_id'] = Variable<String>(projectId);
+    }
+    if (!nullToAbsent || parentTaskId != null) {
+      map['parent_task_id'] = Variable<String>(parentTaskId);
+    }
+    if (!nullToAbsent || scheduleId != null) {
+      map['schedule_id'] = Variable<String>(scheduleId);
     }
     if (!nullToAbsent || recurrence != null) {
       map['recurrence'] = Variable<String>(recurrence);
@@ -593,6 +650,12 @@ class Task extends DataClass implements Insertable<Task> {
       projectId: projectId == null && nullToAbsent
           ? const Value.absent()
           : Value(projectId),
+      parentTaskId: parentTaskId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(parentTaskId),
+      scheduleId: scheduleId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(scheduleId),
       recurrence: recurrence == null && nullToAbsent
           ? const Value.absent()
           : Value(recurrence),
@@ -625,6 +688,8 @@ class Task extends DataClass implements Insertable<Task> {
       completedAt: serializer.fromJson<String?>(json['completedAt']),
       reminderMinutes: serializer.fromJson<int?>(json['reminderMinutes']),
       projectId: serializer.fromJson<String?>(json['projectId']),
+      parentTaskId: serializer.fromJson<String?>(json['parentTaskId']),
+      scheduleId: serializer.fromJson<String?>(json['scheduleId']),
       recurrence: serializer.fromJson<String?>(json['recurrence']),
       version: serializer.fromJson<int>(json['version']),
       remoteVersion: serializer.fromJson<int>(json['remoteVersion']),
@@ -650,6 +715,8 @@ class Task extends DataClass implements Insertable<Task> {
       'completedAt': serializer.toJson<String?>(completedAt),
       'reminderMinutes': serializer.toJson<int?>(reminderMinutes),
       'projectId': serializer.toJson<String?>(projectId),
+      'parentTaskId': serializer.toJson<String?>(parentTaskId),
+      'scheduleId': serializer.toJson<String?>(scheduleId),
       'recurrence': serializer.toJson<String?>(recurrence),
       'version': serializer.toJson<int>(version),
       'remoteVersion': serializer.toJson<int>(remoteVersion),
@@ -673,6 +740,8 @@ class Task extends DataClass implements Insertable<Task> {
     Value<String?> completedAt = const Value.absent(),
     Value<int?> reminderMinutes = const Value.absent(),
     Value<String?> projectId = const Value.absent(),
+    Value<String?> parentTaskId = const Value.absent(),
+    Value<String?> scheduleId = const Value.absent(),
     Value<String?> recurrence = const Value.absent(),
     int? version,
     int? remoteVersion,
@@ -695,6 +764,8 @@ class Task extends DataClass implements Insertable<Task> {
         ? reminderMinutes.value
         : this.reminderMinutes,
     projectId: projectId.present ? projectId.value : this.projectId,
+    parentTaskId: parentTaskId.present ? parentTaskId.value : this.parentTaskId,
+    scheduleId: scheduleId.present ? scheduleId.value : this.scheduleId,
     recurrence: recurrence.present ? recurrence.value : this.recurrence,
     version: version ?? this.version,
     remoteVersion: remoteVersion ?? this.remoteVersion,
@@ -721,6 +792,12 @@ class Task extends DataClass implements Insertable<Task> {
           ? data.reminderMinutes.value
           : this.reminderMinutes,
       projectId: data.projectId.present ? data.projectId.value : this.projectId,
+      parentTaskId: data.parentTaskId.present
+          ? data.parentTaskId.value
+          : this.parentTaskId,
+      scheduleId: data.scheduleId.present
+          ? data.scheduleId.value
+          : this.scheduleId,
       recurrence: data.recurrence.present
           ? data.recurrence.value
           : this.recurrence,
@@ -754,6 +831,8 @@ class Task extends DataClass implements Insertable<Task> {
           ..write('completedAt: $completedAt, ')
           ..write('reminderMinutes: $reminderMinutes, ')
           ..write('projectId: $projectId, ')
+          ..write('parentTaskId: $parentTaskId, ')
+          ..write('scheduleId: $scheduleId, ')
           ..write('recurrence: $recurrence, ')
           ..write('version: $version, ')
           ..write('remoteVersion: $remoteVersion, ')
@@ -767,7 +846,7 @@ class Task extends DataClass implements Insertable<Task> {
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     title,
     notes,
@@ -779,6 +858,8 @@ class Task extends DataClass implements Insertable<Task> {
     completedAt,
     reminderMinutes,
     projectId,
+    parentTaskId,
+    scheduleId,
     recurrence,
     version,
     remoteVersion,
@@ -787,7 +868,7 @@ class Task extends DataClass implements Insertable<Task> {
     updatedAt,
     deletedAt,
     syncStatus,
-  );
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -803,6 +884,8 @@ class Task extends DataClass implements Insertable<Task> {
           other.completedAt == this.completedAt &&
           other.reminderMinutes == this.reminderMinutes &&
           other.projectId == this.projectId &&
+          other.parentTaskId == this.parentTaskId &&
+          other.scheduleId == this.scheduleId &&
           other.recurrence == this.recurrence &&
           other.version == this.version &&
           other.remoteVersion == this.remoteVersion &&
@@ -825,6 +908,8 @@ class TasksCompanion extends UpdateCompanion<Task> {
   final Value<String?> completedAt;
   final Value<int?> reminderMinutes;
   final Value<String?> projectId;
+  final Value<String?> parentTaskId;
+  final Value<String?> scheduleId;
   final Value<String?> recurrence;
   final Value<int> version;
   final Value<int> remoteVersion;
@@ -846,6 +931,8 @@ class TasksCompanion extends UpdateCompanion<Task> {
     this.completedAt = const Value.absent(),
     this.reminderMinutes = const Value.absent(),
     this.projectId = const Value.absent(),
+    this.parentTaskId = const Value.absent(),
+    this.scheduleId = const Value.absent(),
     this.recurrence = const Value.absent(),
     this.version = const Value.absent(),
     this.remoteVersion = const Value.absent(),
@@ -868,6 +955,8 @@ class TasksCompanion extends UpdateCompanion<Task> {
     this.completedAt = const Value.absent(),
     this.reminderMinutes = const Value.absent(),
     this.projectId = const Value.absent(),
+    this.parentTaskId = const Value.absent(),
+    this.scheduleId = const Value.absent(),
     this.recurrence = const Value.absent(),
     this.version = const Value.absent(),
     this.remoteVersion = const Value.absent(),
@@ -893,6 +982,8 @@ class TasksCompanion extends UpdateCompanion<Task> {
     Expression<String>? completedAt,
     Expression<int>? reminderMinutes,
     Expression<String>? projectId,
+    Expression<String>? parentTaskId,
+    Expression<String>? scheduleId,
     Expression<String>? recurrence,
     Expression<int>? version,
     Expression<int>? remoteVersion,
@@ -915,6 +1006,8 @@ class TasksCompanion extends UpdateCompanion<Task> {
       if (completedAt != null) 'completed_at': completedAt,
       if (reminderMinutes != null) 'reminder_minutes': reminderMinutes,
       if (projectId != null) 'project_id': projectId,
+      if (parentTaskId != null) 'parent_task_id': parentTaskId,
+      if (scheduleId != null) 'schedule_id': scheduleId,
       if (recurrence != null) 'recurrence': recurrence,
       if (version != null) 'version': version,
       if (remoteVersion != null) 'remote_version': remoteVersion,
@@ -939,6 +1032,8 @@ class TasksCompanion extends UpdateCompanion<Task> {
     Value<String?>? completedAt,
     Value<int?>? reminderMinutes,
     Value<String?>? projectId,
+    Value<String?>? parentTaskId,
+    Value<String?>? scheduleId,
     Value<String?>? recurrence,
     Value<int>? version,
     Value<int>? remoteVersion,
@@ -961,6 +1056,8 @@ class TasksCompanion extends UpdateCompanion<Task> {
       completedAt: completedAt ?? this.completedAt,
       reminderMinutes: reminderMinutes ?? this.reminderMinutes,
       projectId: projectId ?? this.projectId,
+      parentTaskId: parentTaskId ?? this.parentTaskId,
+      scheduleId: scheduleId ?? this.scheduleId,
       recurrence: recurrence ?? this.recurrence,
       version: version ?? this.version,
       remoteVersion: remoteVersion ?? this.remoteVersion,
@@ -1009,6 +1106,12 @@ class TasksCompanion extends UpdateCompanion<Task> {
     if (projectId.present) {
       map['project_id'] = Variable<String>(projectId.value);
     }
+    if (parentTaskId.present) {
+      map['parent_task_id'] = Variable<String>(parentTaskId.value);
+    }
+    if (scheduleId.present) {
+      map['schedule_id'] = Variable<String>(scheduleId.value);
+    }
     if (recurrence.present) {
       map['recurrence'] = Variable<String>(recurrence.value);
     }
@@ -1053,6 +1156,8 @@ class TasksCompanion extends UpdateCompanion<Task> {
           ..write('completedAt: $completedAt, ')
           ..write('reminderMinutes: $reminderMinutes, ')
           ..write('projectId: $projectId, ')
+          ..write('parentTaskId: $parentTaskId, ')
+          ..write('scheduleId: $scheduleId, ')
           ..write('recurrence: $recurrence, ')
           ..write('version: $version, ')
           ..write('remoteVersion: $remoteVersion, ')
@@ -1143,6 +1248,21 @@ class $CalendarEventsTable extends CalendarEvents
     requiredDuringInsert: false,
     defaultConstraints: GeneratedColumn.constraintIsAlways(
       'CHECK ("all_day" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _importantMeta = const VerificationMeta(
+    'important',
+  );
+  @override
+  late final GeneratedColumn<bool> important = GeneratedColumn<bool>(
+    'important',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("important" IN (0, 1))',
     ),
     defaultValue: const Constant(false),
   );
@@ -1247,6 +1367,7 @@ class $CalendarEventsTable extends CalendarEvents
     startAt,
     endAt,
     allDay,
+    important,
     reminderMinutes,
     version,
     remoteVersion,
@@ -1316,6 +1437,12 @@ class $CalendarEventsTable extends CalendarEvents
       context.handle(
         _allDayMeta,
         allDay.isAcceptableOrUnknown(data['all_day']!, _allDayMeta),
+      );
+    }
+    if (data.containsKey('important')) {
+      context.handle(
+        _importantMeta,
+        important.isAcceptableOrUnknown(data['important']!, _importantMeta),
       );
     }
     if (data.containsKey('reminder_minutes')) {
@@ -1416,6 +1543,10 @@ class $CalendarEventsTable extends CalendarEvents
         DriftSqlType.bool,
         data['${effectivePrefix}all_day'],
       )!,
+      important: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}important'],
+      )!,
       reminderMinutes: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}reminder_minutes'],
@@ -1465,6 +1596,7 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
   final String startAt;
   final String endAt;
   final bool allDay;
+  final bool important;
   final int? reminderMinutes;
   final int version;
   final int remoteVersion;
@@ -1481,6 +1613,7 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
     required this.startAt,
     required this.endAt,
     required this.allDay,
+    required this.important,
     this.reminderMinutes,
     required this.version,
     required this.remoteVersion,
@@ -1504,6 +1637,7 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
     map['start_at'] = Variable<String>(startAt);
     map['end_at'] = Variable<String>(endAt);
     map['all_day'] = Variable<bool>(allDay);
+    map['important'] = Variable<bool>(important);
     if (!nullToAbsent || reminderMinutes != null) {
       map['reminder_minutes'] = Variable<int>(reminderMinutes);
     }
@@ -1532,6 +1666,7 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
       startAt: Value(startAt),
       endAt: Value(endAt),
       allDay: Value(allDay),
+      important: Value(important),
       reminderMinutes: reminderMinutes == null && nullToAbsent
           ? const Value.absent()
           : Value(reminderMinutes),
@@ -1560,6 +1695,7 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
       startAt: serializer.fromJson<String>(json['startAt']),
       endAt: serializer.fromJson<String>(json['endAt']),
       allDay: serializer.fromJson<bool>(json['allDay']),
+      important: serializer.fromJson<bool>(json['important']),
       reminderMinutes: serializer.fromJson<int?>(json['reminderMinutes']),
       version: serializer.fromJson<int>(json['version']),
       remoteVersion: serializer.fromJson<int>(json['remoteVersion']),
@@ -1581,6 +1717,7 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
       'startAt': serializer.toJson<String>(startAt),
       'endAt': serializer.toJson<String>(endAt),
       'allDay': serializer.toJson<bool>(allDay),
+      'important': serializer.toJson<bool>(important),
       'reminderMinutes': serializer.toJson<int?>(reminderMinutes),
       'version': serializer.toJson<int>(version),
       'remoteVersion': serializer.toJson<int>(remoteVersion),
@@ -1600,6 +1737,7 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
     String? startAt,
     String? endAt,
     bool? allDay,
+    bool? important,
     Value<int?> reminderMinutes = const Value.absent(),
     int? version,
     int? remoteVersion,
@@ -1616,6 +1754,7 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
     startAt: startAt ?? this.startAt,
     endAt: endAt ?? this.endAt,
     allDay: allDay ?? this.allDay,
+    important: important ?? this.important,
     reminderMinutes: reminderMinutes.present
         ? reminderMinutes.value
         : this.reminderMinutes,
@@ -1638,6 +1777,7 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
       startAt: data.startAt.present ? data.startAt.value : this.startAt,
       endAt: data.endAt.present ? data.endAt.value : this.endAt,
       allDay: data.allDay.present ? data.allDay.value : this.allDay,
+      important: data.important.present ? data.important.value : this.important,
       reminderMinutes: data.reminderMinutes.present
           ? data.reminderMinutes.value
           : this.reminderMinutes,
@@ -1667,6 +1807,7 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
           ..write('startAt: $startAt, ')
           ..write('endAt: $endAt, ')
           ..write('allDay: $allDay, ')
+          ..write('important: $important, ')
           ..write('reminderMinutes: $reminderMinutes, ')
           ..write('version: $version, ')
           ..write('remoteVersion: $remoteVersion, ')
@@ -1688,6 +1829,7 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
     startAt,
     endAt,
     allDay,
+    important,
     reminderMinutes,
     version,
     remoteVersion,
@@ -1708,6 +1850,7 @@ class CalendarEvent extends DataClass implements Insertable<CalendarEvent> {
           other.startAt == this.startAt &&
           other.endAt == this.endAt &&
           other.allDay == this.allDay &&
+          other.important == this.important &&
           other.reminderMinutes == this.reminderMinutes &&
           other.version == this.version &&
           other.remoteVersion == this.remoteVersion &&
@@ -1726,6 +1869,7 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
   final Value<String> startAt;
   final Value<String> endAt;
   final Value<bool> allDay;
+  final Value<bool> important;
   final Value<int?> reminderMinutes;
   final Value<int> version;
   final Value<int> remoteVersion;
@@ -1743,6 +1887,7 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
     this.startAt = const Value.absent(),
     this.endAt = const Value.absent(),
     this.allDay = const Value.absent(),
+    this.important = const Value.absent(),
     this.reminderMinutes = const Value.absent(),
     this.version = const Value.absent(),
     this.remoteVersion = const Value.absent(),
@@ -1761,6 +1906,7 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
     required String startAt,
     required String endAt,
     this.allDay = const Value.absent(),
+    this.important = const Value.absent(),
     this.reminderMinutes = const Value.absent(),
     this.version = const Value.absent(),
     this.remoteVersion = const Value.absent(),
@@ -1784,6 +1930,7 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
     Expression<String>? startAt,
     Expression<String>? endAt,
     Expression<bool>? allDay,
+    Expression<bool>? important,
     Expression<int>? reminderMinutes,
     Expression<int>? version,
     Expression<int>? remoteVersion,
@@ -1802,6 +1949,7 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
       if (startAt != null) 'start_at': startAt,
       if (endAt != null) 'end_at': endAt,
       if (allDay != null) 'all_day': allDay,
+      if (important != null) 'important': important,
       if (reminderMinutes != null) 'reminder_minutes': reminderMinutes,
       if (version != null) 'version': version,
       if (remoteVersion != null) 'remote_version': remoteVersion,
@@ -1822,6 +1970,7 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
     Value<String>? startAt,
     Value<String>? endAt,
     Value<bool>? allDay,
+    Value<bool>? important,
     Value<int?>? reminderMinutes,
     Value<int>? version,
     Value<int>? remoteVersion,
@@ -1840,6 +1989,7 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
       startAt: startAt ?? this.startAt,
       endAt: endAt ?? this.endAt,
       allDay: allDay ?? this.allDay,
+      important: important ?? this.important,
       reminderMinutes: reminderMinutes ?? this.reminderMinutes,
       version: version ?? this.version,
       remoteVersion: remoteVersion ?? this.remoteVersion,
@@ -1875,6 +2025,9 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
     }
     if (allDay.present) {
       map['all_day'] = Variable<bool>(allDay.value);
+    }
+    if (important.present) {
+      map['important'] = Variable<bool>(important.value);
     }
     if (reminderMinutes.present) {
       map['reminder_minutes'] = Variable<int>(reminderMinutes.value);
@@ -1916,6 +2069,7 @@ class CalendarEventsCompanion extends UpdateCompanion<CalendarEvent> {
           ..write('startAt: $startAt, ')
           ..write('endAt: $endAt, ')
           ..write('allDay: $allDay, ')
+          ..write('important: $important, ')
           ..write('reminderMinutes: $reminderMinutes, ')
           ..write('version: $version, ')
           ..write('remoteVersion: $remoteVersion, ')
@@ -5783,6 +5937,8 @@ typedef $$TasksTableCreateCompanionBuilder =
       Value<String?> completedAt,
       Value<int?> reminderMinutes,
       Value<String?> projectId,
+      Value<String?> parentTaskId,
+      Value<String?> scheduleId,
       Value<String?> recurrence,
       Value<int> version,
       Value<int> remoteVersion,
@@ -5806,6 +5962,8 @@ typedef $$TasksTableUpdateCompanionBuilder =
       Value<String?> completedAt,
       Value<int?> reminderMinutes,
       Value<String?> projectId,
+      Value<String?> parentTaskId,
+      Value<String?> scheduleId,
       Value<String?> recurrence,
       Value<int> version,
       Value<int> remoteVersion,
@@ -5877,6 +6035,16 @@ class $$TasksTableFilterComposer extends Composer<_$AppDatabase, $TasksTable> {
 
   ColumnFilters<String> get projectId => $composableBuilder(
     column: $table.projectId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get parentTaskId => $composableBuilder(
+    column: $table.parentTaskId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get scheduleId => $composableBuilder(
+    column: $table.scheduleId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5985,6 +6153,16 @@ class $$TasksTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get parentTaskId => $composableBuilder(
+    column: $table.parentTaskId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get scheduleId => $composableBuilder(
+    column: $table.scheduleId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get recurrence => $composableBuilder(
     column: $table.recurrence,
     builder: (column) => ColumnOrderings(column),
@@ -6072,6 +6250,16 @@ class $$TasksTableAnnotationComposer
   GeneratedColumn<String> get projectId =>
       $composableBuilder(column: $table.projectId, builder: (column) => column);
 
+  GeneratedColumn<String> get parentTaskId => $composableBuilder(
+    column: $table.parentTaskId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get scheduleId => $composableBuilder(
+    column: $table.scheduleId,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get recurrence => $composableBuilder(
     column: $table.recurrence,
     builder: (column) => column,
@@ -6144,6 +6332,8 @@ class $$TasksTableTableManager
                 Value<String?> completedAt = const Value.absent(),
                 Value<int?> reminderMinutes = const Value.absent(),
                 Value<String?> projectId = const Value.absent(),
+                Value<String?> parentTaskId = const Value.absent(),
+                Value<String?> scheduleId = const Value.absent(),
                 Value<String?> recurrence = const Value.absent(),
                 Value<int> version = const Value.absent(),
                 Value<int> remoteVersion = const Value.absent(),
@@ -6165,6 +6355,8 @@ class $$TasksTableTableManager
                 completedAt: completedAt,
                 reminderMinutes: reminderMinutes,
                 projectId: projectId,
+                parentTaskId: parentTaskId,
+                scheduleId: scheduleId,
                 recurrence: recurrence,
                 version: version,
                 remoteVersion: remoteVersion,
@@ -6188,6 +6380,8 @@ class $$TasksTableTableManager
                 Value<String?> completedAt = const Value.absent(),
                 Value<int?> reminderMinutes = const Value.absent(),
                 Value<String?> projectId = const Value.absent(),
+                Value<String?> parentTaskId = const Value.absent(),
+                Value<String?> scheduleId = const Value.absent(),
                 Value<String?> recurrence = const Value.absent(),
                 Value<int> version = const Value.absent(),
                 Value<int> remoteVersion = const Value.absent(),
@@ -6209,6 +6403,8 @@ class $$TasksTableTableManager
                 completedAt: completedAt,
                 reminderMinutes: reminderMinutes,
                 projectId: projectId,
+                parentTaskId: parentTaskId,
+                scheduleId: scheduleId,
                 recurrence: recurrence,
                 version: version,
                 remoteVersion: remoteVersion,
@@ -6250,6 +6446,7 @@ typedef $$CalendarEventsTableCreateCompanionBuilder =
       required String startAt,
       required String endAt,
       Value<bool> allDay,
+      Value<bool> important,
       Value<int?> reminderMinutes,
       Value<int> version,
       Value<int> remoteVersion,
@@ -6269,6 +6466,7 @@ typedef $$CalendarEventsTableUpdateCompanionBuilder =
       Value<String> startAt,
       Value<String> endAt,
       Value<bool> allDay,
+      Value<bool> important,
       Value<int?> reminderMinutes,
       Value<int> version,
       Value<int> remoteVersion,
@@ -6321,6 +6519,11 @@ class $$CalendarEventsTableFilterComposer
 
   ColumnFilters<bool> get allDay => $composableBuilder(
     column: $table.allDay,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get important => $composableBuilder(
+    column: $table.important,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -6409,6 +6612,11 @@ class $$CalendarEventsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get important => $composableBuilder(
+    column: $table.important,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get reminderMinutes => $composableBuilder(
     column: $table.reminderMinutes,
     builder: (column) => ColumnOrderings(column),
@@ -6481,6 +6689,9 @@ class $$CalendarEventsTableAnnotationComposer
 
   GeneratedColumn<bool> get allDay =>
       $composableBuilder(column: $table.allDay, builder: (column) => column);
+
+  GeneratedColumn<bool> get important =>
+      $composableBuilder(column: $table.important, builder: (column) => column);
 
   GeneratedColumn<int> get reminderMinutes => $composableBuilder(
     column: $table.reminderMinutes,
@@ -6555,6 +6766,7 @@ class $$CalendarEventsTableTableManager
                 Value<String> startAt = const Value.absent(),
                 Value<String> endAt = const Value.absent(),
                 Value<bool> allDay = const Value.absent(),
+                Value<bool> important = const Value.absent(),
                 Value<int?> reminderMinutes = const Value.absent(),
                 Value<int> version = const Value.absent(),
                 Value<int> remoteVersion = const Value.absent(),
@@ -6572,6 +6784,7 @@ class $$CalendarEventsTableTableManager
                 startAt: startAt,
                 endAt: endAt,
                 allDay: allDay,
+                important: important,
                 reminderMinutes: reminderMinutes,
                 version: version,
                 remoteVersion: remoteVersion,
@@ -6591,6 +6804,7 @@ class $$CalendarEventsTableTableManager
                 required String startAt,
                 required String endAt,
                 Value<bool> allDay = const Value.absent(),
+                Value<bool> important = const Value.absent(),
                 Value<int?> reminderMinutes = const Value.absent(),
                 Value<int> version = const Value.absent(),
                 Value<int> remoteVersion = const Value.absent(),
@@ -6608,6 +6822,7 @@ class $$CalendarEventsTableTableManager
                 startAt: startAt,
                 endAt: endAt,
                 allDay: allDay,
+                important: important,
                 reminderMinutes: reminderMinutes,
                 version: version,
                 remoteVersion: remoteVersion,

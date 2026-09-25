@@ -1,8 +1,40 @@
-import 'package:flutter/material.dart';
-
-import '../../../app/design/design_tokens.dart';
+import '../../../app/design/design_components.dart';
 
 enum MarkdownBlockType { heading, paragraph, code, bullets, ordered, table }
+
+final RegExp _fencePattern = RegExp(r'^\s*```\s*([\w+-]*)\s*$');
+final RegExp _headingPattern = RegExp(r'^\s*(#{1,6})\s+(.+?)\s*$');
+final RegExp _listItemPattern = RegExp(r'^\s*([-*+] |\d+[.)] )(.+)$');
+final RegExp _listBulletPattern = RegExp(r'^\s*([-*+] |\d+[.)] )');
+final RegExp _orderedMarkerPattern = RegExp(r'^\d');
+final RegExp _tableSeparatorCellPattern = RegExp(r'^:?-{3,}:?$');
+final RegExp _tableEdgePattern = RegExp(r'^\|');
+final RegExp _tableTrailingPipePattern = RegExp(r'\|$');
+final RegExp _inlineSpanPattern = RegExp(
+  r'(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^\)]+\))',
+);
+
+/// Completed chat bubbles re-parse on every parent rebuild. Keep a tiny LRU so
+/// long conversations do not pay full Markdown cost on each stream tick or
+/// scroll-driven rebuild of neighboring rows.
+final Map<String, List<MarkdownBlock>> _markdownBlockCache = {};
+const int _markdownBlockCacheLimit = 48;
+
+List<MarkdownBlock> _parseMarkdownCached(String source) {
+  final cached = _markdownBlockCache.remove(source);
+  if (cached != null) {
+    _markdownBlockCache[source] = cached;
+    return cached;
+  }
+  final blocks = MarkdownBlock.parse(source);
+  if (source.length <= 8000) {
+    _markdownBlockCache[source] = blocks;
+    if (_markdownBlockCache.length > _markdownBlockCacheLimit) {
+      _markdownBlockCache.remove(_markdownBlockCache.keys.first);
+    }
+  }
+  return blocks;
+}
 
 class MarkdownBlock {
   const MarkdownBlock({
@@ -26,7 +58,7 @@ class MarkdownBlock {
         index++;
         continue;
       }
-      final fence = RegExp(r'^\s*```\s*([\w+-]*)\s*$').firstMatch(line);
+      final fence = _fencePattern.firstMatch(line);
       if (fence != null) {
         final code = <String>[];
         index++;
@@ -47,7 +79,7 @@ class MarkdownBlock {
         );
         continue;
       }
-      final heading = RegExp(r'^\s*(#{1,6})\s+(.+?)\s*$').firstMatch(line);
+      final heading = _headingPattern.firstMatch(line);
       if (heading != null) {
         blocks.add(
           MarkdownBlock(
@@ -60,8 +92,8 @@ class MarkdownBlock {
         continue;
       }
       if (_isTableStart(lines, index)) {
-        final table = <String>[lines[index], lines[index + 2]];
-        index += 3;
+        final table = <String>[lines[index]];
+        index += 2;
         while (index < lines.length &&
             lines[index].contains('|') &&
             lines[index].trim().isNotEmpty) {
@@ -71,16 +103,14 @@ class MarkdownBlock {
         blocks.add(MarkdownBlock(type: MarkdownBlockType.table, lines: table));
         continue;
       }
-      final listMatch = RegExp(r'^\s*([-*+] |\d+[.)] )(.+)$').firstMatch(line);
+      final listMatch = _listItemPattern.firstMatch(line);
       if (listMatch != null) {
-        final ordered = RegExp(r'^\d').hasMatch(listMatch.group(1)!);
+        final ordered = _orderedMarkerPattern.hasMatch(listMatch.group(1)!);
         final items = <String>[];
         while (index < lines.length) {
-          final item = RegExp(
-            r'^\s*([-*+] |\d+[.)] )(.+)$',
-          ).firstMatch(lines[index]);
+          final item = _listItemPattern.firstMatch(lines[index]);
           if (item == null ||
-              RegExp(r'^\d').hasMatch(item.group(1)!) != ordered) {
+              _orderedMarkerPattern.hasMatch(item.group(1)!) != ordered) {
             break;
           }
           items.add(item.group(2)!);
@@ -103,7 +133,7 @@ class MarkdownBlock {
           !lines[index].trimLeft().startsWith('#') &&
           !lines[index].trimLeft().startsWith('```') &&
           !_isTableStart(lines, index) &&
-          !RegExp(r'^\s*([-*+] |\d+[.)] )').hasMatch(lines[index])) {
+          !_listBulletPattern.hasMatch(lines[index])) {
         paragraph.add(lines[index].trim());
         index++;
       }
@@ -118,7 +148,7 @@ class MarkdownBlock {
     if (index + 1 >= lines.length || !lines[index].contains('|')) return false;
     final separator = lines[index + 1].split('|').every((cell) {
       final value = cell.trim();
-      return value.isEmpty || RegExp(r'^:?-{3,}:?$').hasMatch(value);
+      return value.isEmpty || _tableSeparatorCellPattern.hasMatch(value);
     });
     return separator && lines[index + 1].contains('-');
   }
@@ -143,8 +173,8 @@ class SafeMarkdownView extends StatelessWidget {
     if (source.trim().isEmpty) return const SizedBox.shrink();
     final blocks = fallback
         ? const <MarkdownBlock>[]
-        : MarkdownBlock.parse(source);
-    if (fallback || blocks.isEmpty) return SelectableText(source);
+        : _parseMarkdownCached(source);
+    if (fallback || blocks.isEmpty) return LuminaSelectableText(source);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [for (final block in blocks) _BlockView(block: block)],
@@ -161,15 +191,15 @@ class _BlockView extends StatelessWidget {
     switch (block.type) {
       case MarkdownBlockType.heading:
         final style = switch (block.level) {
-          1 => Theme.of(context).textTheme.headlineSmall,
-          2 => Theme.of(context).textTheme.titleLarge,
-          _ => Theme.of(context).textTheme.titleMedium,
+          1 => LuminaTheme.of(context).textTheme.headlineSmall,
+          2 => LuminaTheme.of(context).textTheme.titleLarge,
+          _ => LuminaTheme.of(context).textTheme.titleMedium,
         };
         return Padding(
           padding: const EdgeInsets.only(top: AppSpacing.compact, bottom: 4),
           child: _InlineText(
             text: block.lines.single,
-            style: style?.copyWith(fontWeight: FontWeight.w700),
+            style: style.copyWith(fontWeight: FontWeight.w700),
           ),
         );
       case MarkdownBlockType.code:
@@ -178,10 +208,10 @@ class _BlockView extends StatelessWidget {
           margin: const EdgeInsets.symmetric(vertical: 4),
           padding: const EdgeInsets.all(AppSpacing.item),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: LuminaTheme.of(context).colors.accentSoft,
             borderRadius: BorderRadius.circular(AppRadius.attachment),
           ),
-          child: SelectableText(
+          child: LuminaSelectableText(
             block.lines.join('\n'),
             style: const TextStyle(
               fontFamily: 'monospace',
@@ -222,22 +252,40 @@ class _BlockView extends StatelessWidget {
         final rows = block.lines.map(_tableCells).toList();
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          child: DataTable(
-            columns: [
-              for (final cell in rows.first)
-                DataColumn(
-                  label: _InlineText(
-                    text: cell,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-            ],
-            rows: [
-              for (final row in rows.skip(1))
-                DataRow(
-                  cells: [
-                    for (var i = 0; i < rows.first.length; i++)
-                      DataCell(_InlineText(text: i < row.length ? row[i] : '')),
+          child: Table(
+            defaultColumnWidth: const IntrinsicColumnWidth(),
+            border: TableBorder(
+              horizontalInside: BorderSide(
+                color: LuminaTheme.of(context).colors.outline,
+              ),
+            ),
+            children: [
+              for (var rowIndex = 0; rowIndex < rows.length; rowIndex++)
+                TableRow(
+                  decoration: rowIndex == 0
+                      ? BoxDecoration(
+                          color: LuminaTheme.of(context).colors.accentSoft,
+                        )
+                      : null,
+                  children: [
+                    for (var column = 0; column < rows.first.length; column++)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 240),
+                          child: _InlineText(
+                            text: column < rows[rowIndex].length
+                                ? rows[rowIndex][column]
+                                : '',
+                            style: rowIndex == 0
+                                ? const TextStyle(fontWeight: FontWeight.w600)
+                                : null,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
             ],
@@ -260,9 +308,8 @@ class _InlineText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final spans = <TextSpan>[];
-    final pattern = RegExp(r'(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^\)]+\))');
     var cursor = 0;
-    for (final match in pattern.allMatches(text)) {
+    for (final match in _inlineSpanPattern.allMatches(text)) {
       if (match.start > cursor) {
         spans.add(TextSpan(text: text.substring(cursor, match.start)));
       }
@@ -306,8 +353,8 @@ class _InlineText extends StatelessWidget {
 
 List<String> _tableCells(String line) => line
     .trim()
-    .replaceFirst(RegExp(r'^\|'), '')
-    .replaceFirst(RegExp(r'\|$'), '')
+    .replaceFirst(_tableEdgePattern, '')
+    .replaceFirst(_tableTrailingPipePattern, '')
     .split('|')
     .map((value) => value.trim())
     .toList();

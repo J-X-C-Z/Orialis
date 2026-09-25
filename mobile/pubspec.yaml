@@ -7,6 +7,8 @@ environment:
   sdk: ">=3.9.0 <4.0.0"
 
 dependencies:
+  lumina_ui:
+    path: ../packages/lumina_ui
   dio: ^5.8.0+1
   drift: ^2.28.1
   drift_flutter: ^0.2.4

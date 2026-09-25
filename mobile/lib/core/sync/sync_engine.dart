@@ -38,23 +38,41 @@ class SyncEngine {
   final AppConfig config;
   final OrialisApiClient? apiClient;
 
-  Future<SyncState> syncOnce() async {
+  // Reused across sync rounds so each run does not rebuild Dio, interceptors,
+  // or outbox helpers just to push a handful of rows.
+  OrialisApiClient? _ownedApi;
+  OutboxStore? _outbox;
+  Set<String>? _serverCapabilities;
+
+  OutboxStore get _outboxStore => _outbox ??= OutboxStore(database);
+
+  Future<OrialisApiClient> _resolveApi() async {
+    final existing = apiClient ?? _ownedApi;
+    if (existing != null) return existing;
     final baseUrl = await config.serverUrl();
     final deviceId = await config.deviceId();
-    final api =
-        apiClient ??
-        OrialisApiClient(baseUrl: baseUrl, deviceId: deviceId, config: config);
-    final outbox = OutboxStore(database);
+    return _ownedApi ??= OrialisApiClient(
+      baseUrl: baseUrl,
+      deviceId: deviceId,
+      config: config,
+    );
+  }
+
+  Future<SyncState> syncOnce() async {
     try {
+      final api = await _resolveApi();
+      _serverCapabilities = null;
+      final outbox = _outboxStore;
       await outbox.recoverInFlight();
       await outbox.recoverAcknowledgedEntities();
-      await _pushConversations(api);
+      // A task can reference a schedule, and a child can reference a task.
+      // Upload schedules before tasks; _pushTasks uploads roots before children.
+      await Future.wait([_pushConversations(api), _pushCalendarEvents(api)]);
       await _pushTasks(api);
-      await _pushCalendarEvents(api);
       await _pullConversations(api);
-      await _pushMessages(api);
-      await _pullMessages(api);
+      await Future.wait([_pushMessages(api), _pullMessages(api)]);
       await _pull(api);
+      await _pushTasks(api, includeDerivedCompletionMutations: true);
       await _pushProjects(api);
       await _pushProjectMilestones(api);
       return SyncState.idle;
@@ -141,7 +159,7 @@ class SyncEngine {
     final rows = await (database.select(
       database.projects,
     )..where((row) => row.syncStatus.isNotIn(const ['synced']))).get();
-    final outbox = OutboxStore(database);
+    final outbox = _outboxStore;
     for (final project in rows) {
       final mutation =
           await outbox.findPendingForEntity('project', project.id) ??
@@ -206,7 +224,7 @@ class SyncEngine {
     final rows = await (database.select(
       database.projectMilestones,
     )..where((row) => row.syncStatus.isNotIn(const ['synced']))).get();
-    final outbox = OutboxStore(database);
+    final outbox = _outboxStore;
     for (final milestone in rows) {
       final mutation =
           await outbox.findPendingForEntity(
@@ -322,36 +340,79 @@ class SyncEngine {
     }
   }
 
-  Future<void> _pushTasks(OrialisApiClient api) async {
+  Future<void> _pushTasks(
+    OrialisApiClient api, {
+    bool includeDerivedCompletionMutations = false,
+  }) async {
     final pending = await (database.select(
       database.tasks,
     )..where((row) => row.syncStatus.isNotIn(const ['synced']))).get();
-    final outbox = OutboxStore(database);
+    final outbox = _outboxStore;
+    // The contract allows one child level. Upload roots first so a newly
+    // created parent exists before the server validates its child's FK.
+    pending.sort((left, right) {
+      if (left.parentTaskId == null && right.parentTaskId != null) return -1;
+      if (left.parentTaskId != null && right.parentTaskId == null) return 1;
+      return 0;
+    });
+    await _requireTaskCapabilities(pending, outbox);
     for (final task in pending) {
+      final current = await (database.select(
+        database.tasks,
+      )..where((row) => row.id.equals(task.id))).getSingleOrNull();
+      if (current == null || current.syncStatus == 'synced') continue;
+      if (await _hasDeletingAssociation(current)) continue;
+      final currentMutation = await outbox.findPendingForEntity(
+        'task',
+        current.id,
+      );
+      final currentPayload = currentMutation == null
+          ? _taskPayload(current)
+          : Map<String, dynamic>.from(
+              jsonDecode(currentMutation.payloadJson) as Map,
+            );
+      final isDerivedCompletion =
+          currentPayload['_derivedCompletionCauseId'] is String;
+      // The parent mutation is authoritative for derived child completion.
+      // Pull its versioned child events before sending unrelated child edits.
+      if (isDerivedCompletion &&
+          current.syncStatus != 'pendingCreate' &&
+          !includeDerivedCompletionMutations) {
+        continue;
+      }
       final mutation =
-          await outbox.findPendingForEntity('task', task.id) ??
+          currentMutation ??
           await outbox.enqueue(
             entityType: 'task',
-            entityId: task.id,
-            operation: _operationFor(task.syncStatus),
-            payloadJson: jsonEncode(_taskPayload(task)),
+            entityId: current.id,
+            operation: _operationFor(current.syncStatus),
+            payloadJson: jsonEncode(_taskPayload(current)),
             baseVersion:
-                task.syncStatus == 'pendingUpdate' ||
-                    task.syncStatus == 'pendingDelete'
-                ? task.remoteVersion
+                current.syncStatus == 'pendingUpdate' ||
+                    current.syncStatus == 'pendingDelete'
+                ? current.remoteVersion
                 : null,
-            entityRevision: task.localRevision,
+            entityRevision: current.localRevision,
           );
       await outbox.markInFlight(mutation.mutationId);
-      final payload = jsonDecode(mutation.payloadJson) as Map<String, dynamic>;
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(mutation.payloadJson) as Map,
+      );
+      // Outbox rows created by older app versions do not contain these keys.
+      // Fill only absent keys so an explicit null remains an intentional clear.
+      _completePendingAssociationPayload(payload, current);
+      final outgoingPayload = _taskPayloadForUpload(
+        payload,
+        mutation.operation,
+      );
       Map<String, dynamic> result;
       try {
         if (mutation.operation == 'create') {
-          result = await api.createTask(payload, mutation.mutationId);
+          result = await api.createTask(outgoingPayload, mutation.mutationId);
         } else if (mutation.operation == 'delete') {
           try {
             await api.deleteTask(
-              task.id,
+              current.id,
               mutation.baseVersion,
               mutation.mutationId,
             );
@@ -360,8 +421,8 @@ class SyncEngine {
           }
           result = <String, dynamic>{};
         } else {
-          result = await api.updateTask(task.id, {
-            ...payload,
+          result = await api.updateTask(current.id, {
+            ...outgoingPayload,
             'baseVersion': mutation.baseVersion,
           }, mutation.mutationId);
         }
@@ -376,7 +437,7 @@ class SyncEngine {
             'version':
                 applied['entityVersion'] ??
                 applied['entity_version'] ??
-                task.remoteVersion,
+                current.remoteVersion,
           };
         } else {
           if (_isRetryableTransportError(error)) {
@@ -388,19 +449,26 @@ class SyncEngine {
         }
       }
       final remoteVersion =
-          (result['version'] as num?)?.toInt() ?? task.remoteVersion;
+          (result['version'] as num?)?.toInt() ?? current.remoteVersion;
       await outbox.acknowledgeTaskMutation(
         mutationId: mutation.mutationId,
-        entityId: task.id,
+        entityId: current.id,
         entityRevision: mutation.entityRevision,
         remoteVersion: remoteVersion,
         serverVersion: (result['version'] as num?)?.toInt(),
       );
       await outbox.rebasePendingForEntity(
         entityType: 'task',
-        entityId: task.id,
+        entityId: current.id,
         baseVersion: remoteVersion,
       );
+      if (mutation.operation == 'delete') {
+        await _cascadeLocalChildren(
+          parentId: current.id,
+          deletedAt:
+              current.deletedAt ?? DateTime.now().toUtc().toIso8601String(),
+        );
+      }
     }
   }
 
@@ -607,6 +675,10 @@ class SyncEngine {
       )) {
         return;
       }
+      await _cascadeLocalChildren(
+        parentId: entityId,
+        deletedAt: event['createdAt'] as String,
+      );
       await (database.update(
         database.tasks,
       )..where((row) => row.id.equals(entityId))).write(
@@ -629,6 +701,10 @@ class SyncEngine {
       )) {
         return;
       }
+      await _cascadeLocalChildren(
+        scheduleId: entityId,
+        deletedAt: event['createdAt'] as String,
+      );
       await (database.update(
         database.calendarEvents,
       )..where((row) => row.id.equals(entityId))).write(
@@ -653,6 +729,15 @@ class SyncEngine {
         existing?.remoteVersion,
         entityVersion,
       )) {
+        if (existing != null &&
+            await _reconcileDerivedCompletionEvent(
+              id,
+              entityVersion,
+              value,
+              existing,
+            )) {
+          return;
+        }
         return;
       }
       await database
@@ -669,6 +754,22 @@ class SyncEngine {
                 (value['reminderMinutes'] as num?)?.toInt(),
               ),
               projectId: Value(value['projectId'] as String?),
+              parentTaskId: Value(
+                _optionalAssociation(
+                  value,
+                  'parent_task_id',
+                  'parentTaskId',
+                  existing?.parentTaskId,
+                ),
+              ),
+              scheduleId: Value(
+                _optionalAssociation(
+                  value,
+                  'schedule_id',
+                  'scheduleId',
+                  existing?.scheduleId,
+                ),
+              ),
               recurrence: Value(_recurrenceJson(value['recurrence'])),
               important: Value(value['important'] as bool?),
               urgent: Value(value['urgent'] as bool?),
@@ -707,6 +808,9 @@ class SyncEngine {
               startAt: value['startAt'] as String,
               endAt: value['endAt'] as String,
               allDay: Value(value['allDay'] as bool? ?? false),
+              important: Value(
+                value['important'] as bool? ?? existing?.important ?? false,
+              ),
               reminderMinutes: Value(
                 (value['reminderMinutes'] as num?)?.toInt(),
               ),
@@ -1073,46 +1177,131 @@ class SyncEngine {
     return true;
   }
 
+  Future<void> _requireTaskCapabilities(
+    List<Task> tasks,
+    OutboxStore outbox,
+  ) async {
+    final required = <String>{};
+    for (final task in tasks) {
+      if (_operationFor(task.syncStatus) == 'delete') continue;
+      final mutation = await outbox.findPendingForEntity('task', task.id);
+      final payload = mutation == null
+          ? _taskPayload(task)
+          : Map<String, dynamic>.from(jsonDecode(mutation.payloadJson) as Map);
+      if (task.parentTaskId != null ||
+          task.scheduleId != null ||
+          _associationFrom(payload, 'parentTaskId', 'parent_task_id') != null ||
+          _associationFrom(payload, 'scheduleId', 'schedule_id') != null ||
+          payload['_requiresTaskChildren'] == true) {
+        required.add('task_children');
+      }
+    }
+    await _requireCapabilities(required);
+  }
+
+  Future<void> _requireScheduleCapabilities(
+    List<CalendarEvent> schedules,
+    OutboxStore outbox,
+  ) async {
+    final required = <String>{};
+    for (final schedule in schedules) {
+      if (_operationFor(schedule.syncStatus) == 'delete') continue;
+      final mutation = await outbox.findPendingForEntity(
+        'schedule',
+        schedule.id,
+      );
+      final payload = mutation == null
+          ? _schedulePayload(schedule)
+          : Map<String, dynamic>.from(jsonDecode(mutation.payloadJson) as Map);
+      if (schedule.important ||
+          payload['important'] == true ||
+          payload['_requiresScheduleImportance'] == true) {
+        required.add('schedule_importance');
+      }
+    }
+    await _requireCapabilities(required);
+  }
+
+  Future<void> _requireCapabilities(Set<String> required) async {
+    if (required.isEmpty) return;
+    var capabilities = _serverCapabilities;
+    if (capabilities == null) {
+      capabilities = await (await _resolveApi()).capabilities();
+      _serverCapabilities = capabilities;
+    }
+    final missing = required
+        .where((item) => !capabilities!.contains(item))
+        .toSet();
+    if (missing.isNotEmpty) {
+      throw StateError(
+        'server does not support required capability: ${missing.join(', ')}',
+      );
+    }
+  }
+
+  String? _associationFrom(
+    Map<String, dynamic> value,
+    String camelKey,
+    String snakeKey,
+  ) => value[camelKey] as String? ?? value[snakeKey] as String?;
+
   Future<void> _pushCalendarEvents(OrialisApiClient api) async {
     final pending = await (database.select(
       database.calendarEvents,
     )..where((row) => row.syncStatus.isNotIn(const ['synced']))).get();
-    final outbox = OutboxStore(database);
+    final outbox = _outboxStore;
+    await _requireScheduleCapabilities(pending, outbox);
     for (final event in pending) {
+      final current = await (database.select(
+        database.calendarEvents,
+      )..where((row) => row.id.equals(event.id))).getSingleOrNull();
+      if (current == null || current.syncStatus == 'synced') continue;
       final mutation =
-          await outbox.findPendingForEntity('schedule', event.id) ??
+          await outbox.findPendingForEntity('schedule', current.id) ??
           await outbox.enqueue(
             entityType: 'schedule',
-            entityId: event.id,
-            operation: _operationFor(event.syncStatus),
-            payloadJson: jsonEncode(_schedulePayload(event)),
+            entityId: current.id,
+            operation: _operationFor(current.syncStatus),
+            payloadJson: jsonEncode(_schedulePayload(current)),
             baseVersion:
-                event.syncStatus == 'pendingUpdate' ||
-                    event.syncStatus == 'pendingDelete'
-                ? event.remoteVersion
+                current.syncStatus == 'pendingUpdate' ||
+                    current.syncStatus == 'pendingDelete'
+                ? current.remoteVersion
                 : null,
-            entityRevision: event.localRevision,
+            entityRevision: current.localRevision,
           );
       await outbox.markInFlight(mutation.mutationId);
-      final payload = jsonDecode(mutation.payloadJson) as Map<String, dynamic>;
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(mutation.payloadJson) as Map,
+      );
+      final outgoingPayload = Map<String, dynamic>.from(payload)
+        ..remove('_requiresScheduleImportance');
       Map<String, dynamic> result;
       try {
         if (mutation.operation == 'create') {
-          result = await api.createSchedule(payload, mutation.mutationId);
+          result = await api.createSchedule(
+            outgoingPayload,
+            mutation.mutationId,
+          );
         } else if (mutation.operation == 'delete') {
           try {
             await api.deleteSchedule(
-              event.id,
+              current.id,
               mutation.baseVersion,
               mutation.mutationId,
             );
           } on DioException catch (error) {
             if (error.response?.statusCode != 404) rethrow;
           }
+          await _cascadeLocalChildren(
+            scheduleId: current.id,
+            deletedAt:
+                current.deletedAt ?? DateTime.now().toUtc().toIso8601String(),
+          );
           result = <String, dynamic>{};
         } else {
-          result = await api.updateSchedule(event.id, {
-            ...payload,
+          result = await api.updateSchedule(current.id, {
+            ...outgoingPayload,
             'baseVersion': mutation.baseVersion,
           }, mutation.mutationId);
         }
@@ -1127,7 +1316,7 @@ class SyncEngine {
             'version':
                 applied['entityVersion'] ??
                 applied['entity_version'] ??
-                event.remoteVersion,
+                current.remoteVersion,
           };
         } else {
           if (_isRetryableTransportError(error)) {
@@ -1139,17 +1328,17 @@ class SyncEngine {
         }
       }
       final remoteVersion =
-          (result['version'] as num?)?.toInt() ?? event.remoteVersion;
+          (result['version'] as num?)?.toInt() ?? current.remoteVersion;
       await outbox.acknowledgeScheduleMutation(
         mutationId: mutation.mutationId,
-        entityId: event.id,
+        entityId: current.id,
         entityRevision: mutation.entityRevision,
         remoteVersion: remoteVersion,
         serverVersion: (result['version'] as num?)?.toInt(),
       );
       await outbox.rebasePendingForEntity(
         entityType: 'schedule',
-        entityId: event.id,
+        entityId: current.id,
         baseVersion: remoteVersion,
       );
     }
@@ -1173,6 +1362,8 @@ class SyncEngine {
     'dueTime': task.dueTime,
     'reminderMinutes': task.reminderMinutes,
     'projectId': task.projectId,
+    'parentTaskId': task.parentTaskId,
+    'scheduleId': task.scheduleId,
     'recurrence': task.recurrence == null ? null : jsonDecode(task.recurrence!),
     'createdAt': task.createdAt,
     'updatedAt': task.updatedAt,
@@ -1188,12 +1379,183 @@ class SyncEngine {
     'startAt': event.startAt,
     'endAt': event.endAt,
     'allDay': event.allDay,
+    'important': event.important,
     'reminderMinutes': event.reminderMinutes,
     'createdAt': event.createdAt,
     'updatedAt': event.updatedAt,
     'deletedAt': event.deletedAt,
     'version': event.version,
   };
+
+  Future<bool> _hasDeletingAssociation(Task task) async {
+    if (task.parentTaskId != null) {
+      final parent = await (database.select(
+        database.tasks,
+      )..where((row) => row.id.equals(task.parentTaskId!))).getSingleOrNull();
+      if (parent != null &&
+          (parent.syncStatus == 'pendingDelete' || parent.deletedAt != null)) {
+        return true;
+      }
+    }
+    if (task.scheduleId != null) {
+      final schedule = await (database.select(
+        database.calendarEvents,
+      )..where((row) => row.id.equals(task.scheduleId!))).getSingleOrNull();
+      if (schedule != null &&
+          (schedule.syncStatus == 'pendingDelete' ||
+              schedule.deletedAt != null)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Future<void> _cascadeLocalChildren({
+    String? parentId,
+    String? scheduleId,
+    required String deletedAt,
+  }) async {
+    final children =
+        await (database.select(database.tasks)..where(
+              (row) => parentId != null
+                  ? row.parentTaskId.equals(parentId)
+                  : row.scheduleId.equals(scheduleId!),
+            ))
+            .get();
+    for (final child in children) {
+      await (database.update(
+        database.tasks,
+      )..where((row) => row.id.equals(child.id))).write(
+        TasksCompanion(
+          deletedAt: Value(deletedAt),
+          updatedAt: Value(deletedAt),
+          syncStatus: const Value('synced'),
+        ),
+      );
+      await (database.update(database.outboxMutations)..where(
+            (row) =>
+                row.entityType.equals('task') &
+                row.entityId.equals(child.id) &
+                row.status.isNotIn(const ['acknowledged']),
+          ))
+          .write(
+            OutboxMutationsCompanion(
+              status: const Value(OutboxStatus.acknowledged),
+              lastError: const Value(null),
+              updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
+            ),
+          );
+    }
+  }
+
+  void _completePendingAssociationPayload(
+    Map<String, dynamic> payload,
+    Task task,
+  ) {
+    _copyAssociationAlias(payload, 'parentTaskId', 'parent_task_id');
+    _copyAssociationAlias(payload, 'scheduleId', 'schedule_id');
+    payload.putIfAbsent('parentTaskId', () => task.parentTaskId);
+    payload.putIfAbsent('scheduleId', () => task.scheduleId);
+  }
+
+  Map<String, dynamic> _taskPayloadForUpload(
+    Map<String, dynamic> payload,
+    String operation,
+  ) {
+    final result = Map<String, dynamic>.from(payload)
+      ..remove('_requiresTaskChildren');
+    final derivedCompletion = result.remove('_derivedCompletionCauseId');
+    if (operation == 'update' && derivedCompletion is String) {
+      result.remove('completed');
+      result.remove('completedAt');
+    }
+    return result;
+  }
+
+  Future<bool> _reconcileDerivedCompletionEvent(
+    String taskId,
+    int remoteVersion,
+    Map<String, dynamic> remote,
+    Task local,
+  ) async {
+    final mutation = await _outboxStore.findPendingForEntity('task', taskId);
+    if (mutation == null) return false;
+    final payload = Map<String, dynamic>.from(
+      jsonDecode(mutation.payloadJson) as Map,
+    );
+    final causeId = payload['_derivedCompletionCauseId'];
+    final remoteParentId = _optionalAssociation(
+      remote,
+      'parentTaskId',
+      'parent_task_id',
+      local.parentTaskId,
+    );
+    final desiredCompleted = payload['completed'];
+    var causalityConfirmed = false;
+    if (causeId is String &&
+        causeId == local.parentTaskId &&
+        causeId == remoteParentId) {
+      causalityConfirmed = true;
+    } else if (causeId is String &&
+        local.parentTaskId == null &&
+        causeId != local.id &&
+        desiredCompleted is bool &&
+        desiredCompleted == remote['completed']) {
+      final causeTask = await (database.select(
+        database.tasks,
+      )..where((row) => row.id.equals(causeId))).getSingleOrNull();
+      causalityConfirmed =
+          causeTask?.parentTaskId == local.id &&
+          causeTask?.completed == desiredCompleted;
+    }
+    if (!causalityConfirmed ||
+        desiredCompleted is! bool ||
+        remote['completed'] != desiredCompleted) {
+      return false;
+    }
+
+    // The event confirms only the derived completion. Preserve every other
+    // local edit and advance the queued write to the server's new version.
+    await (database.update(
+      database.tasks,
+    )..where((row) => row.id.equals(taskId))).write(
+      TasksCompanion(
+        completed: Value(desiredCompleted),
+        completedAt: Value(remote['completedAt'] as String?),
+        updatedAt: Value(remote['updatedAt'] as String? ?? local.updatedAt),
+        version: Value(remoteVersion),
+        remoteVersion: Value(remoteVersion),
+      ),
+    );
+    await _outboxStore.rebasePendingForEntity(
+      entityType: 'task',
+      entityId: taskId,
+      baseVersion: remoteVersion,
+    );
+    return true;
+  }
+
+  void _copyAssociationAlias(
+    Map<String, dynamic> payload,
+    String wireKey,
+    String legacyKey,
+  ) {
+    if (!payload.containsKey(wireKey) && payload.containsKey(legacyKey)) {
+      payload[wireKey] = payload[legacyKey];
+    }
+    payload.remove(legacyKey);
+  }
+
+  String? _optionalAssociation(
+    Map<String, dynamic> value,
+    String wireKey,
+    String legacyKey,
+    String? previous,
+  ) {
+    if (value.containsKey(legacyKey)) return value[legacyKey] as String?;
+    if (value.containsKey(wireKey)) return value[wireKey] as String?;
+    return previous;
+  }
 
   String? _recurrenceJson(Object? value) {
     if (value == null) return null;

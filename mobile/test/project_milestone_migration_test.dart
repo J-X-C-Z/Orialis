@@ -12,7 +12,7 @@ Map<String, Object?> columnValues(Insertable<Object?> row) => row
     .map((key, value) => MapEntry(key, (value as Variable).value));
 
 void main() {
-  test('v6 upgrades to v8 without changing existing data or outbox', () async {
+  test('v6 upgrades to v9 without changing existing data or outbox', () async {
     final fixture = File('test/fixtures/schema_v6.sql').readAsStringSync();
     final database = AppDatabase(
       executor: NativeDatabase.memory(
@@ -26,7 +26,7 @@ void main() {
     final version = await database
         .customSelect('PRAGMA user_version')
         .getSingle();
-    expect(version.read<int>('user_version'), 8);
+    expect(version.read<int>('user_version'), 9);
     final indexes = await database
         .customSelect(
           "PRAGMA index_info('idx_project_milestones_project_position')",

@@ -143,6 +143,17 @@ class OrialisApiClient {
     return response.data ?? <String, dynamic>{};
   }
 
+  Future<Set<String>> capabilities() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/capabilities',
+    );
+    final values = response.data?['capabilities'];
+    if (values is! List || values.any((value) => value is! String)) {
+      throw const FormatException('invalid server capabilities response');
+    }
+    return values.cast<String>().toSet();
+  }
+
   Future<List<Map<String, dynamic>>> listConversations() async {
     final response = await _dio.get<List<dynamic>>('/api/v1/conversations');
     return (response.data ?? const [])
@@ -275,7 +286,7 @@ class OrialisApiClient {
   ) async {
     final response = await _dio.post<Map<String, dynamic>>(
       '/api/v1/tasks',
-      data: payload,
+      data: _canonicalTaskPayload(payload),
       options: Options(headers: {'Idempotency-Key': mutationId}),
     );
     return response.data ?? <String, dynamic>{};
@@ -288,10 +299,25 @@ class OrialisApiClient {
   ) async {
     final response = await _dio.patch<Map<String, dynamic>>(
       '/api/v1/tasks/$id',
-      data: payload,
+      data: _canonicalTaskPayload(payload),
       options: Options(headers: {'Idempotency-Key': mutationId}),
     );
     return response.data ?? <String, dynamic>{};
+  }
+
+  Map<String, dynamic> _canonicalTaskPayload(Map<String, dynamic> payload) {
+    final result = Map<String, dynamic>.from(payload);
+    for (final pair in const {
+      'parent_task_id': 'parentTaskId',
+      'schedule_id': 'scheduleId',
+    }.entries) {
+      if (!result.containsKey(pair.value) && result.containsKey(pair.key)) {
+        result[pair.value] = result[pair.key];
+      }
+      result.remove(pair.key);
+    }
+    result.remove('_requiresTaskChildren');
+    return result;
   }
 
   Future<void> deleteTask(
