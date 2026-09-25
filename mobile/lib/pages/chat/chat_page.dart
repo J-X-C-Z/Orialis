@@ -19,6 +19,7 @@ import '../../features/chat/application/chat_controller.dart';
 import '../../features/chat/domain/agent_event_state.dart';
 import '../../features/chat/presentation/agent_event_cards.dart';
 import '../../features/chat/presentation/safe_markdown.dart';
+import '../shell/orialis_shell.dart';
 
 class ChatPage extends ConsumerStatefulWidget {
   const ChatPage({
@@ -548,6 +549,18 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
 
   Future<void> _chooseAttachment() async {
+    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+      try {
+        final result = await FilePicker.pickFiles();
+        if (result.isNotEmpty) {
+          await _addPaths(result.map((file) => file.path).whereType<String>());
+        }
+      } catch (_) {
+        if (mounted) showLuminaToast(context, '未能添加附件。请重试。');
+      }
+      return;
+    }
+
     final action = await showLuminaSheet<String>(
       context: context,
       builder: (context) => SafeArea(
@@ -795,17 +808,42 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
 
   @override
-  Widget build(BuildContext context) => LuminaBranchTransition(
-    index: _showingConversation ? 1 : 0,
-    children: [
-      _conversationList(),
-      _hasOpenedConversation
-          ? _conversationDetail(context)
-          : const SizedBox.shrink(),
-    ],
-  );
+  Widget build(BuildContext context) {
+    final desktop =
+        MediaQuery.sizeOf(context).width >= OrialisShell.desktopBreakpoint;
+    if (!desktop) {
+      return LuminaBranchTransition(
+        index: _showingConversation ? 1 : 0,
+        children: [
+          _conversationList(),
+          _hasOpenedConversation
+              ? _conversationDetail(context)
+              : const SizedBox.shrink(),
+        ],
+      );
+    }
 
-  Widget _conversationDetail(BuildContext context) {
+    final colors = LuminaTheme.of(context).colors;
+    return ColoredBox(
+      color: colors.paper,
+      child: Row(
+        children: [
+          SizedBox(width: 336, child: _conversationList()),
+          Container(width: 1, color: colors.outline),
+          Expanded(
+            child: _hasOpenedConversation
+                ? _conversationDetail(context, desktop: true)
+                : const OrialisEmptyState(
+                    text: '从左侧选择一个会话，或新建会话开始。',
+                    card: false,
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _conversationDetail(BuildContext context, {bool desktop = false}) {
     final colors = LuminaTheme.of(context).colors;
     final messages = ref.watch(
       chatMessagesProvider((
@@ -830,11 +868,13 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             children: [
               OrialisTopBar(
                 title: _conversationTitle,
-                leading: LuminaIconButton(
-                  onPressed: _closeConversation,
-                  icon: const LuminaIcon(LuminaIcons.back),
-                  tooltip: '返回会话列表',
-                ),
+                leading: desktop
+                    ? null
+                    : LuminaIconButton(
+                        onPressed: _closeConversation,
+                        icon: const LuminaIcon(LuminaIcons.back),
+                        tooltip: '返回会话列表',
+                      ),
                 actions: [
                   LuminaIconButton(
                     onPressed: _showChatOptions,
