@@ -45,6 +45,7 @@ class LuminaIconSize {
 
 class LuminaChatMetrics {
   static const bubbleMaxWidth = 360.0,
+      desktopBubbleMaxWidth = 680.0,
       bubbleHorizontalPadding = 17.0,
       bubbleVerticalPadding = 14.0,
       bubbleBottomGap = 12.0,
