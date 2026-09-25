@@ -838,27 +838,30 @@ class LuminaChatBubble extends StatelessWidget {
   });
   final bool isUser;
   final Widget child;
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) => Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: constraints.maxWidth.isFinite
-              ? (constraints.maxWidth * .80).clamp(
-                  0,
-                  LuminaChatMetrics.bubbleMaxWidth,
-                )
-              : LuminaChatMetrics.bubbleMaxWidth,
+    builder: (context, constraints) {
+      final maxBubbleWidth = constraints.maxWidth >= 900
+          ? LuminaChatMetrics.desktopBubbleMaxWidth
+          : LuminaChatMetrics.bubbleMaxWidth;
+      return Align(
+        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          constraints: BoxConstraints(
+            maxWidth: constraints.maxWidth.isFinite
+                ? (constraints.maxWidth * .80).clamp(0, maxBubbleWidth)
+                : maxBubbleWidth,
+          ),
+          margin: const EdgeInsets.only(bottom: 12),
+          child: LuminaSurface(
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+            color: isUser ? LuminaTheme.of(context).colors.accentSoft : null,
+            radius: 22,
+            child: child,
+          ),
         ),
-        margin: const EdgeInsets.only(bottom: 12),
-        child: LuminaSurface(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-          color: isUser ? LuminaTheme.of(context).colors.accentSoft : null,
-          radius: 22,
-          child: child,
-        ),
-      ),
-    ),
+      );
+    },
   );
 }
