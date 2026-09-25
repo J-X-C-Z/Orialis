@@ -5,6 +5,7 @@ import '../../core/database/app_database.dart';
 import '../../features/projects/data/project_repository.dart';
 import '../../features/events/presentation/task_editor.dart';
 import '../shared/page_parts.dart';
+import '../shell/orialis_shell.dart';
 
 /// Maps the stored project status onto the product wording.
 String _projectStatusLabel(String status) => switch (status) {
@@ -105,6 +106,10 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         if (!snapshot.hasData) return const Center(child: LuminaProgress());
         final projects = snapshot.data!;
         final selected = projects.where((p) => p.id == _selected).firstOrNull;
+        if (MediaQuery.sizeOf(context).width >=
+            OrialisShell.desktopBreakpoint) {
+          return _desktopProjects(projects, selected);
+        }
         return PopScope(
           canPop: selected == null,
           onPopInvokedWithResult: (didPop, _) {
@@ -238,6 +243,144 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
             padding: EdgeInsets.zero,
             body: body,
           );
+  }
+
+  Widget _desktopProjects(List<Project> projects, Project? selected) {
+    final colors = LuminaTheme.of(context).colors;
+    return Row(
+      children: [
+        SizedBox(
+          width: 336,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 12, 16),
+            child: LuminaSurface(
+              depth: LuminaSurfaceDepth.raised,
+              radius: 28,
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 4, 4, 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '项目',
+                            style: LuminaTheme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                        LuminaIconButton(
+                          tooltip: '新建项目',
+                          icon: const LuminaIcon(LuminaIcons.add),
+                          onPressed: () => _editProject(),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: projects.isEmpty
+                        ? const OrialisEmptyState(
+                            text: '还没有项目。',
+                            card: false,
+                          )
+                        : ListView.separated(
+                            itemCount: projects.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (context, index) {
+                              final project = projects[index];
+                              return OrialisListRow(
+                                title: project.name,
+                                subtitle: project.goal ?? '还没有设置目标',
+                                selected: selected?.id == project.id,
+                                onTap: () => _openProject(project),
+                                trailing: LuminaIconButton(
+                                  tooltip: '管理 ${project.name}',
+                                  icon: const LuminaIcon(LuminaIcons.more),
+                                  onPressed: () async {
+                                    final action = await chooseRecordAction(
+                                      context,
+                                    );
+                                    if (!mounted) return;
+                                    if (action == 'edit') {
+                                      await _editProject(project);
+                                    }
+                                    if (action == 'delete' &&
+                                        context.mounted &&
+                                        await confirmDelete(
+                                          context,
+                                          project.name,
+                                        )) {
+                                      await ref
+                                          .read(projectRepositoryProvider)
+                                          .deleteProject(project);
+                                      if (mounted &&
+                                          _selected == project.id) {
+                                        _closeProject();
+                                      }
+                                    }
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Container(width: 1, color: colors.outline),
+        Expanded(
+          child: selected == null
+              ? const OrialisEmptyState(
+                  text: '从左侧选择一个项目，查看里程碑与下一行动。',
+                  card: false,
+                )
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+                  child: LuminaSurface(
+                    depth: LuminaSurfaceDepth.raised,
+                    radius: 28,
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        LuminaCardHeader(
+                          title: selected.name,
+                          trailing: LuminaIconButton(
+                            tooltip: '管理 ${selected.name}',
+                            icon: const LuminaIcon(LuminaIcons.more),
+                            onPressed: () async {
+                              final action = await chooseRecordAction(context);
+                              if (!mounted) return;
+                              if (action == 'edit') {
+                                await _editProject(selected);
+                              }
+                              if (action == 'delete' &&
+                                  context.mounted &&
+                                  await confirmDelete(
+                                    context,
+                                    selected.name,
+                                  )) {
+                                await ref
+                                    .read(projectRepositoryProvider)
+                                    .deleteProject(selected);
+                                if (mounted) _closeProject();
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _details(selected),
+                      ],
+                    ),
+                  ),
+                ),
+        ),
+      ],
+    );
   }
 
   Widget _details(Project project) => Column(
