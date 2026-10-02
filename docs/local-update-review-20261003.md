@@ -23,3 +23,5 @@ Rust workspace regression: 112 tests passed (core 10, server 73, protocol integr
 Flutter component library: 106 passed; showcase: 4 passed. Latest mobile, library and showcase static analysis found no issues. System integration: 11 passed; latest chat/routing/wear targeted checks: 21 passed. Full mobile regression passed 249 and skipped 2, with one test finder ambiguity caused by identical heading/body text; the current News test suite passed all 15 tests separately after correcting that finder.
 
 Final verification results are recorded in the project workspace at `manager/github-push-review-20261003.md` and in the push task record.
+
+Final snapshot follow-up: the three newly added chat-device UI tests passed after isolating offline sync, asserting draft controller contents, and disposing widget/Drift streams before test invariants. Wear nine transport tests also passed in the final snapshot check. Subsequent unreviewed Codex Gateway development remains local and outside this push.

@@ -5,6 +5,9 @@ import 'package:orialis_mobile/app/app.dart';
 import 'package:orialis_mobile/app/design/design_components.dart';
 import 'package:orialis_mobile/core/config/app_config.dart';
 import 'package:orialis_mobile/core/database/app_database.dart';
+import 'package:orialis_mobile/core/realtime/mobile_realtime_client.dart';
+import 'package:orialis_mobile/core/sync/sync_coordinator.dart';
+import 'package:orialis_mobile/core/sync/sync_engine.dart';
 import 'package:orialis_mobile/features/chat/data/agent_chat_service.dart';
 import 'package:orialis_mobile/features/chat/data/chat_repository.dart';
 import 'package:orialis_mobile/pages/chat/chat_page.dart';
@@ -47,9 +50,31 @@ class _Agents extends AgentChatService {
   }
 }
 
+class _OfflineSync extends SyncCoordinator {
+  _OfflineSync(MobileRealtimeClient realtime)
+      : super(realtime: realtime, sync: () async => SyncState.offline);
+  @override
+  Future<void> start() async {}
+  @override
+  Future<SyncState> requestSync() async => SyncState.offline;
+}
+
 Finder _action(String label) => find.byWidgetPredicate(
   (widget) => widget is LuminaIconButton && widget.tooltip == label,
 );
+
+Future<void> _send(WidgetTester tester) async {
+  await tester.tap(_action('发送'));
+  await tester.pumpAndSettle();
+}
+
+String _draft(WidgetTester tester) =>
+    tester.widget<EditableText>(find.byType(EditableText).first).controller.text;
+
+Future<void> _unmount(WidgetTester tester) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pumpAndSettle();
+}
 
 Future<({ChatRepository repo, _Agents agents, String originalId})> _open(
   WidgetTester tester,
@@ -64,11 +89,15 @@ Future<({ChatRepository repo, _Agents agents, String originalId})> _open(
     () => repo.createConversation(title: '原会话'),
   ))!;
   final agents = _Agents();
+  final realtime = MobileRealtimeClient(config: _OfflineConfig());
+  final sync = _OfflineSync(realtime);
   await tester.pumpWidget(ProviderScope(
     overrides: [
       databaseProvider.overrideWithValue(db),
       appConfigProvider.overrideWithValue(_OfflineConfig()),
       agentChatServiceProvider.overrideWithValue(agents),
+      realtimeClientProvider.overrideWithValue(realtime),
+      syncCoordinatorProvider.overrideWithValue(sync),
     ],
     child: const OrialisApp(),
   ));
@@ -78,6 +107,8 @@ Future<({ChatRepository repo, _Agents agents, String originalId})> _open(
   addTearDown(() async {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
+    await sync.dispose();
+    await realtime.dispose();
     await db.close();
   });
   return (repo: repo, agents: agents, originalId: original.id);
@@ -97,8 +128,7 @@ void main() {
     expect(h.agents.created, ['JXCZ_MBA_Hermes']);
     expect(find.text('Mac 电脑 · Mac 电脑'), findsOneWidget);
     await tester.enterText(find.byType(EditableText).first, '只发给 Mac');
-    await tester.tap(_action('发送'));
-    await tester.pumpAndSettle();
+    await _send(tester);
     final macMessages = await tester.runAsync(() => h.repo.watchMessages('remote-1').first);
     expect(macMessages!.single.content, '只发给 Mac');
     expect(await tester.runAsync(() => h.repo.watchMessages(h.originalId).first), isEmpty);
@@ -115,6 +145,7 @@ void main() {
     expect(find.text('只发给 Mac'), findsOneWidget);
     expect(_action('Mac 电脑'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await _unmount(tester);
   });
 
   testWidgets('offline Aozora and cancelling chooser preserve current conversation and draft', (tester) async {
@@ -131,9 +162,10 @@ void main() {
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.text('原会话'), findsOneWidget);
-    expect(find.widgetWithText(EditableText, '保留的草稿'), findsOneWidget);
+    expect(_draft(tester), '保留的草稿');
     expect(await tester.runAsync(() => h.repo.watchConversations().first), hasLength(1));
     expect(tester.takeException(), isNull);
+    await _unmount(tester);
   });
 
   testWidgets('binding failure leaves original draft usable and imports no conversation', (tester) async {
@@ -147,13 +179,13 @@ void main() {
     await tester.tap(find.text('Mac 电脑'));
     await tester.pumpAndSettle();
     expect(find.text('原会话'), findsOneWidget);
-    expect(find.widgetWithText(EditableText, '绑定失败仍保留'), findsOneWidget);
+    expect(_draft(tester), '绑定失败仍保留');
     expect(await tester.runAsync(() => h.repo.watchConversations().first), hasLength(1));
-    await tester.tap(_action('发送'));
-    await tester.pumpAndSettle();
+    await _send(tester);
     final messages = await tester.runAsync(() => h.repo.watchMessages(h.originalId).first);
     expect(messages!.single.content, '绑定失败仍保留');
     await tester.pump(const Duration(seconds: 4));
     expect(tester.takeException(), isNull);
+    await _unmount(tester);
   });
 }
