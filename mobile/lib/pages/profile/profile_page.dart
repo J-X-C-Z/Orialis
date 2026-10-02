@@ -68,12 +68,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       await config.setSessionUsername(session['username'] as String);
     } on DioException catch (error) {
       if (error.response?.statusCode == 401) {
+        await suspendDesktopSync(ref);
         await config.clearSessionToken();
         await config.clearSessionUsername();
+        await reloadDesktopAccount(ref);
       }
       if (mounted) {
         setState(() {
-          _username = cachedUsername;
+          _username = error.response?.statusCode == 401 ? null : cachedUsername;
           _loadingSession = false;
         });
       }
@@ -97,6 +99,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Future<void> _logout() async {
+    await suspendDesktopSync(ref);
     try {
       await (await _api()).logout();
     } catch (_) {
@@ -104,6 +107,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       await ref.read(appConfigProvider).clearSessionToken();
     }
     await ref.read(appConfigProvider).clearSessionUsername();
+    await reloadDesktopAccount(ref);
     if (mounted) setState(() => _username = null);
   }
 
@@ -153,11 +157,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
     controller.dispose();
     if (value == null || value == _serverUrl) return;
+    await suspendDesktopSync(ref);
+    if (ref.read(desktopModeProvider)) {
+      await ref.read(appConfigProvider).clearSessionToken();
+      await ref.read(appConfigProvider).clearSessionUsername();
+    }
     await ref.read(appConfigProvider).setServerUrl(value);
+    await reloadDesktopAccount(ref);
     if (!mounted) return;
     setState(() {
       _serverUrl = value;
       _serverState = '检测中…';
+      if (ref.read(desktopModeProvider)) _username = null;
     });
     _checkServer();
   }
@@ -165,113 +176,179 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   @override
   Widget build(BuildContext context) => OrialisPageScaffold(
     title: '我的',
-    body: ListView(
-      children: [
-        ContentStack(
-          gap: 24,
-          children: [
-            LuminaSurface(
-              child: ContentStack(
-                children: [
-                  Text(
-                    'Orialis',
-                    style: LuminaTheme.of(context).textTheme.headlineMedium,
-                  ),
-                  const QuietLabel('留住想法，安排生活。'),
-                  OrialisListRow(
-                    title: _loadingSession ? '正在检查账户…' : _username ?? '未登录',
-                    subtitle: _username == null ? '本地可用，登录后可跨设备同步' : '已登录',
-                    leading: const LuminaIcon(LuminaIcons.person),
-                    onTap: _loadingSession
-                        ? null
-                        : _username == null
-                        ? _openAuth
-                        : null,
-                  ),
-                  if (_username != null)
-                    LuminaButton(
-                      primary: false,
-                      onPressed: _logout,
-                      child: const Text('退出登录'),
+    body: Builder(
+      builder: (context) => ListView(
+        padding: EdgeInsets.only(
+          top: LuminaPageHeaderInset.of(context) + 12,
+          bottom: MediaQuery.paddingOf(context).bottom + 24,
+        ),
+        children: [
+          ContentStack(
+            gap: 24,
+            children: [
+              LuminaSurface(
+                child: ContentStack(
+                  children: [
+                    Row(
+                      children: [
+                        Image.asset(
+                          'assets/branding/orialis-schedule.png',
+                          width: 44,
+                          height: 44,
+                          excludeFromSemantics: true,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Orialis',
+                            style: LuminaTheme.of(
+                              context,
+                            ).textTheme.headlineMedium,
+                          ),
+                        ),
+                      ],
                     ),
-                ],
-              ),
-            ),
-            OrialisSection(
-              title: '连接与同步',
-              child: ContentStack(
-                children: [
-                  OrialisListRow(
-                    title: '服务器',
-                    subtitle: '$_serverUrl · $_serverState',
-                    leading: const LuminaIcon(LuminaIcons.server),
-                    trailing: const LuminaIcon(LuminaIcons.chevronRight),
-                    onTap: _editServerUrl,
-                  ),
-                  OrialisListRow(
-                    title: _syncState.label,
-                    subtitle: _syncState.message,
-                    leading: const LuminaIcon(LuminaIcons.sync),
-                  ),
-                  if (_syncState == SyncState.conflict)
-                    const Text('本设备的修改仍保存在本地，请检查冲突后再同步。'),
-                  LuminaButton(
-                    onPressed: _syncState == SyncState.syncing
-                        ? null
-                        : () async {
-                            setState(() => _syncState = SyncState.syncing);
-                            final result = await ref
-                                .read(syncCoordinatorProvider)
-                                .requestSync();
-                            if (mounted) {
-                              setState(() {
-                                _syncState = result;
-                                _serverState = result == SyncState.offline
-                                    ? '无法连接'
-                                    : '已检查';
-                              });
-                            }
-                          },
-                    child: Text(
-                      _syncState == SyncState.syncing ? '同步中…' : '检查并同步',
+                    const QuietLabel('留住想法，安排生活。'),
+                    OrialisListRow(
+                      title: _loadingSession ? '正在检查账户…' : _username ?? '未登录',
+                      subtitle: _username == null ? '本地可用，登录后可跨设备同步' : '已登录',
+                      leading: const LuminaIcon(LuminaIcons.person),
+                      onTap: _loadingSession
+                          ? null
+                          : _username == null
+                          ? _openAuth
+                          : null,
                     ),
-                  ),
-                ],
-              ),
-            ),
-            OrialisSection(
-              title: '显示与动效',
-              child: OrialisListRow(
-                title: '高性能模式',
-                subtitle: '减少实时玻璃模糊，保留色彩、阴影与自然动效',
-                trailing: LuminaSwitch(
-                  value: ref.watch(highPerformanceModeProvider),
-                  onChanged: (value) async {
-                    try {
-                      await ref
-                          .read(highPerformanceModeProvider.notifier)
-                          .setEnabled(value);
-                    } catch (_) {
-                      if (context.mounted) {
-                        showLuminaMessage(context, '设置未能保存，请重试');
-                      }
-                    }
-                  },
+                    if (_username != null)
+                      LuminaButton(
+                        primary: false,
+                        onPressed: _logout,
+                        child: const Text('退出登录'),
+                      ),
+                  ],
                 ),
               ),
-            ),
-            FutureBuilder<String>(
-              future: _deviceId,
-              builder: (_, s) => OrialisListRow(
-                title: '当前设备',
-                subtitle: s.data ?? '正在初始化…',
-                leading: const LuminaIcon(LuminaIcons.devices),
+              OrialisSection(
+                title: '连接与同步',
+                child: ContentStack(
+                  children: [
+                    OrialisListRow(
+                      title: '服务器',
+                      subtitle: '$_serverUrl · $_serverState',
+                      leading: const LuminaIcon(LuminaIcons.server),
+                      trailing: const LuminaIcon(LuminaIcons.chevronRight),
+                      onTap: _editServerUrl,
+                    ),
+                    OrialisListRow(
+                      title: _syncState.label,
+                      subtitle: _syncState.message,
+                      leading: const LuminaIcon(LuminaIcons.sync),
+                    ),
+                    if (_syncState == SyncState.conflict)
+                      const Text('本设备的修改仍保存在本地，请检查冲突后再同步。'),
+                    LuminaButton(
+                      onPressed: _syncState == SyncState.syncing
+                          ? null
+                          : () async {
+                              setState(() => _syncState = SyncState.syncing);
+                              final result = await ref
+                                  .read(syncCoordinatorProvider)
+                                  .requestSync();
+                              if (mounted) {
+                                setState(() {
+                                  _syncState = result;
+                                  _serverState = result == SyncState.offline
+                                      ? '无法连接'
+                                      : '已检查';
+                                });
+                              }
+                            },
+                      child: Text(
+                        _syncState == SyncState.syncing ? '同步中…' : '检查并同步',
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const QuietLabel('外观跟随系统 · Lumina 光构'),
-          ],
-        ),
-      ],
+              OrialisSection(
+                title: '显示与动效',
+                child: ContentStack(
+                  children: [
+                    const QuietLabel('外观'),
+                    LuminaThemeModeSelector(
+                      value: ref.watch(appearanceModeProvider),
+                      systemLabel: '跟随系统',
+                      lightLabel: '浅色',
+                      darkLabel: '深色',
+                      onChanged: (mode) async {
+                        try {
+                          await ref
+                              .read(appearanceModeProvider.notifier)
+                              .setMode(mode);
+                        } catch (_) {
+                          if (context.mounted) {
+                            showLuminaMessage(context, '外观设置未能保存');
+                          }
+                        }
+                      },
+                    ),
+                    OrialisListRow(
+                      title: '高性能模式',
+                      subtitle: '减少实时玻璃模糊，保留色彩、阴影与自然动效',
+                      trailing: LuminaSwitch(
+                        value: ref.watch(highPerformanceModeProvider),
+                        onChanged: (value) async {
+                          try {
+                            await ref
+                                .read(highPerformanceModeProvider.notifier)
+                                .setEnabled(value);
+                          } catch (_) {
+                            if (context.mounted) {
+                              showLuminaMessage(context, '设置未能保存，请重试');
+                            }
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              FutureBuilder<String>(
+                future: _deviceId,
+                builder: (_, s) => OrialisListRow(
+                  title: '当前设备',
+                  subtitle: s.data ?? '正在初始化…',
+                  leading: const LuminaIcon(LuminaIcons.devices),
+                ),
+              ),
+              OrialisListRow(
+                title: '设备中心',
+                subtitle: '查看设备、切换当前设备并管理默认设备',
+                leading: const LuminaIcon(LuminaIcons.devices),
+                trailing: const LuminaIcon(LuminaIcons.chevronRight),
+                onTap: () => context.push('/devices'),
+              ),
+              if (!ref.watch(desktopModeProvider))
+                OrialisListRow(
+                  title: '系统提醒与桌面',
+                  subtitle: '任务提醒、今日卡片与小米超级岛',
+                  leading: const LuminaIcon(LuminaIcons.devices),
+                  trailing: const LuminaIcon(LuminaIcons.chevronRight),
+                  onTap: () => context.push('/system'),
+                ),
+              if (!ref.watch(desktopModeProvider))
+                OrialisListRow(
+                  title: '手环连接',
+                  subtitle: '连接状态、互联权限与消息诊断',
+                  leading: const LuminaIcon(LuminaIcons.devices),
+                  trailing: const LuminaIcon(LuminaIcons.chevronRight),
+                  onTap: () => context.push('/wear'),
+                ),
+              const QuietLabel('Lumina 光构'),
+            ],
+          ),
+        ],
+      ),
     ),
   );
 }
@@ -308,7 +385,9 @@ class _AuthPageState extends ConsumerState<AuthPage> {
       _submitting = true;
       _error = null;
     });
+    var authenticated = false;
     try {
+      await suspendDesktopSync(ref);
       final config = ref.read(appConfigProvider);
       final api = OrialisApiClient(
         baseUrl: await config.serverUrl(),
@@ -321,6 +400,8 @@ class _AuthPageState extends ConsumerState<AuthPage> {
         await api.login(username: username, password: password);
       }
       await config.setSessionUsername(username);
+      await reloadDesktopAccount(ref);
+      authenticated = true;
       if (mounted) context.pop(true);
     } on DioException catch (error) {
       final status = error.response?.statusCode;
@@ -330,6 +411,9 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     } catch (_) {
       if (mounted) setState(() => _error = '操作失败，请稍后重试');
     } finally {
+      if (!authenticated && mounted && ref.read(desktopModeProvider)) {
+        await reloadDesktopAccount(ref);
+      }
       if (mounted) setState(() => _submitting = false);
     }
   }
@@ -342,58 +426,70 @@ class _AuthPageState extends ConsumerState<AuthPage> {
       icon: const LuminaIcon(LuminaIcons.back),
       onPressed: () => context.pop(),
     ),
-    body: ListView(
-      children: [
-        ContentStack(
-          gap: 20,
-          children: [
-            const SizedBox(height: 20),
-            Text(
-              _register ? '从这里开始' : '欢迎回来',
-              style: LuminaTheme.of(context).textTheme.headlineMedium,
-            ),
-            const QuietLabel('同步你的任务、日程和消息，本地内容始终保留。'),
-            LuminaTextField(
-              controller: _usernameController,
-              label: '用户名',
-              textInputAction: TextInputAction.next,
-            ),
-            LuminaTextField(
-              controller: _passwordController,
-              label: '密码',
-              obscureText: true,
-              onSubmitted: (_) {
-                if (!_submitting) _submit();
-              },
-            ),
-            if (_error != null)
-              Text(
-                _error!,
-                style: TextStyle(color: LuminaTheme.of(context).colors.danger),
-              ),
-            LuminaButton(
-              onPressed: _submitting ? null : _submit,
-              child: Text(
-                _submitting
-                    ? '处理中…'
-                    : _register
-                    ? '注册并登录'
-                    : '登录',
-              ),
-            ),
-            LuminaButton(
-              primary: false,
-              onPressed: _submitting
-                  ? null
-                  : () => setState(() {
-                      _register = !_register;
-                      _error = null;
-                    }),
-              child: Text(_register ? '已有账户？去登录' : '还没有账户？去注册'),
-            ),
-          ],
+    body: Builder(
+      builder: (context) => ListView(
+        padding: EdgeInsets.only(
+          top: LuminaPageHeaderInset.of(context) + 12,
+          bottom: MediaQuery.paddingOf(context).bottom + 24,
         ),
-      ],
+        children: [
+          ContentStack(
+            gap: 20,
+            children: [
+              const SizedBox(height: 20),
+              Text(
+                _register ? '从这里开始' : '欢迎回来',
+                style: LuminaTheme.of(context).textTheme.headlineMedium,
+              ),
+              QuietLabel(
+                ref.watch(desktopModeProvider)
+                    ? '同步任务、日程和项目。各账户本地内容分别保留。'
+                    : '同步你的任务、日程和消息，本地内容始终保留。',
+              ),
+              LuminaTextField(
+                controller: _usernameController,
+                label: '用户名',
+                textInputAction: TextInputAction.next,
+              ),
+              LuminaTextField(
+                controller: _passwordController,
+                label: '密码',
+                obscureText: true,
+                onSubmitted: (_) {
+                  if (!_submitting) _submit();
+                },
+              ),
+              if (_error != null)
+                Text(
+                  _error!,
+                  style: TextStyle(
+                    color: LuminaTheme.of(context).colors.danger,
+                  ),
+                ),
+              LuminaButton(
+                onPressed: _submitting ? null : _submit,
+                child: Text(
+                  _submitting
+                      ? '处理中…'
+                      : _register
+                      ? '注册并登录'
+                      : '登录',
+                ),
+              ),
+              LuminaButton(
+                primary: false,
+                onPressed: _submitting
+                    ? null
+                    : () => setState(() {
+                        _register = !_register;
+                        _error = null;
+                      }),
+                child: Text(_register ? '已有账户？去登录' : '还没有账户？去注册'),
+              ),
+            ],
+          ),
+        ],
+      ),
     ),
   );
 }

@@ -1,0 +1,33 @@
+
+> orialis-vela-w0@0.1.0 test
+> node --test test/*.test.js
+
+router unavailable
+storage unavailable
+✔ visible details and confirmation are cleared immediately on session revocation (14.127708ms)
+✔ open details refresh from new snapshots and disappear when removed or demo ends (2.818709ms)
+✔ serialized UTF-8 budget counts Chinese and emoji bytes (0.961292ms)
+✔ split, reorder and fully reassemble snapshot before ACK eligibility (11.594542ms)
+✔ rejects over-limit, corrupt and inconsistent input (1.637042ms)
+✔ expires incomplete transfer cache (0.540875ms)
+✔ caps concurrent incomplete transfer cache (10.494625ms)
+✔ ACK only follows exact durable readback and late revision cannot replace cache (28.452ms)
+✔ scope change during async write removes old cache after write finishes and persists guard (2.551417ms)
+✔ restored revocation guard prevents old scoped cache from entering UI (9.435375ms)
+✔ bidirectional ping has correlated Pong and invalid IDs never produce a reply (7.031959ms)
+✔ malformed durable session guard fails closed before loading a previous account cache (3.4515ms)
+✔ startup rejects snapshots until durable revocation guard is restored (2.130583ms)
+✔ guard read failure blocks snapshots while missing guard preserves legacy W0 (1.185ms)
+✔ starts empty, local mock never impersonates real operations (18.217ms)
+✔ mock, explicit stale, absent provenance and empty are conservatively represented (3.112042ms)
+✔ restored live snapshots remain stale and transport never infers target status (6.7735ms)
+✔ late revisions are rejected and local target previews do not change phone target (1.946875ms)
+✔ scope transition requests durable invalidation, rejects wrong session and revocation (3.611834ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 196.42725

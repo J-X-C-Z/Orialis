@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/multidevice-v1/uri.schema.json",
+  "title": "Orialis Node URI v1",
+  "type": "string",
+  "pattern": "^orialis://devices/[^/?#]+/(files|agents)/[^/?#]+$",
+  "examples": ["orialis://devices/dev_opaque_01/files/file_opaque_01"]
+}

@@ -1,0 +1,45 @@
+npm warn Unknown env config "recursive". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> orialis-vela-w0@0.1.0 build
+> aiot build
+
+🔷 [10-02 22:05:28] [toolkit]: start build:  {
+  "projectPath": "/Users/jxcz/Agent Workspace/projects/orialis/repo/band/vela",
+  "options": {
+    "sourceRoot": "./src",
+    "signRoot": "./sign",
+    "releasePath": "./dist",
+    "outputPath": "./build",
+    "enableJsc": false,
+    "enableProtobuf": false,
+    "enableE2e": false,
+    "enableStats": false,
+    "optimizeCssAttr": false,
+    "completeFeature": false,
+    "dropConsole": false,
+    "mode": "development"
+  },
+  "watch": false,
+  "node": "v26.8.1",
+  "platform": "darwin",
+  "arch": "arm64",
+  "toolkit": "2.0.5"
+}
+🔷 [10-02 22:05:29] [toolkit]: afterCompile: undefined
+🔷 [10-02 22:05:29] [toolkit]: afterCompile: Create a soft link to the node_modules folder
+🔷 [10-02 22:05:29] [toolkit]: afterCompile: Compile javascript project
+🔷 [10-02 22:05:29] [toolkit]: webpack complete
+🔷 [10-02 22:05:29] [toolkit]: afterCompile: Copy resource files
+🔷 [10-02 22:05:29] [toolkit]: afterCompile: Compress resource files
+🔷 [10-02 22:05:29] [toolkit]: afterCompile: Generate jsc bytecode
+🔷 [10-02 22:05:29] [toolkit]: afterCompile: Generate protobuf json
+🔷 [10-02 22:05:29] [toolkit]: afterCompile: compile lite card
+🔷 [10-02 22:05:29] [toolkit]: afterCompile: Package the project into an RPK file
+🔷 [10-02 22:05:29] [toolkit]: privatekeyPath is  /Users/jxcz/Agent Workspace/projects/orialis/repo/band/vela/node_modules/@aiot-toolkit/aiotpack/lib/compiler/javascript/vela/utils/signature/pem/private.pem
+certificatePath is  /Users/jxcz/Agent Workspace/projects/orialis/repo/band/vela/node_modules/@aiot-toolkit/aiotpack/lib/compiler/javascript/vela/utils/signature/pem/certificate.pem
+✅ [10-02 22:05:29] [toolkit]: Project build and generate files：/Users/jxcz/Agent Workspace/projects/orialis/repo/band/.temp_vela/dist/top.jxcz.orialis.debug.0.2.1-ui.rpk
+🔷 [10-02 22:05:29] [toolkit]: afterCompile: Generate diff json
+🔷 [10-02 22:05:29] [toolkit]: afterCompile: Migrate temporary project
+🔷 [10-02 22:05:29] [toolkit]: afterCompile: Check resource
+✅ [10-02 22:05:29] [toolkit]: build success: 1374ms
+🟠 [10-02 22:05:29] [toolkit]: please use AIoT-IDE: https://iot.mi.com/vela/quickapp/zh/guide/start/use-ide.html

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "Lumina", "version": "1.0.0",
+  "color": {
+    "light": { "ink": "#152232", "paper": "#E9EEF4", "surface": "#F2F5F8", "accent": "#3978D0", "accentSoft": "#DCE7F5", "muted": "#637183", "danger": "#AC4545", "outline": "#D8E0E5" },
+    "dark": { "ink": "#EEF3FA", "paper": "#101822", "surface": "#192431", "accent": "#8DBBFF", "accentSoft": "#243D5D", "muted": "#A3B3C5", "danger": "#FF8E91", "outline": "#344356" }
+  },
+  "spacing": { "page": 20, "pageTop": 12, "section": 24, "item": 14, "compact": 8, "tight": 6, "emptyState": 24, "controlGap": 8 },
+  "radius": { "card": 24, "control": 18, "attachment": 14, "capsule": 999 },
+  "size": { "minimumControl": 48, "topBarContent": 56, "compactIcon": 17, "controlIcon": 24 },
+  "motionMs": { "fast": 140, "page": 180, "standard": 220, "fluid": 420 },
+  "glass": { "blur": 12, "highPerformanceBlur": 6 }
+}

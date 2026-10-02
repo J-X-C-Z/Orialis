@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/multidevice-v1/event.schema.json",
+  "title": "Orialis Node Event v1",
+  "type": "object",
+  "required": ["protocolVersion", "eventId", "deviceId", "sequence", "occurredAt", "eventType", "requestId", "payload"],
+  "properties": {
+    "protocolVersion": {"const": "1"},
+    "eventId": {"type": "string", "minLength": 1},
+    "deviceId": {"type": "string", "minLength": 1},
+    "sequence": {"type": "integer", "minimum": 1},
+    "occurredAt": {"type": "string", "format": "date-time"},
+    "eventType": {"enum": ["node.presence_changed", "node.revoked", "capability.changed", "approval.updated"]},
+    "requestId": {"type": ["string", "null"]},
+    "payload": {"type": "object"},
+    "cursor": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

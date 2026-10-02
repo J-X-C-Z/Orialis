@@ -14,6 +14,14 @@ final chatMessagesProvider =
       return query.repository.watchMessages(query.conversationId);
     });
 
+final chatLatestMessageProvider =
+    StreamProvider.family<
+      Message?,
+      ({ChatRepository repository, String conversationId})
+    >(
+      (ref, query) => query.repository.watchLatestMessage(query.conversationId),
+    );
+
 final chatConversationsProvider =
     StreamProvider.family<List<Conversation>, ChatRepository>(
       (ref, repository) => repository.watchConversations(),
@@ -26,8 +34,82 @@ class ChatRepository {
 
   final AppDatabase database;
 
+  Future<void> setPinned(Conversation conversation, bool pinned) async {
+    final current =
+        await (database.select(database.conversations)..where(
+              (r) => r.id.equals(conversation.id) & r.deletedAt.isNull(),
+            ))
+            .getSingle();
+    await (database.update(
+      database.conversations,
+    )..where((r) => r.id.equals(current.id))).write(
+      ConversationsCompanion(
+        pinned: Value(pinned),
+        manualPosition: const Value(null),
+        localRevision: Value(current.localRevision + 1),
+        syncStatus: Value(_statusAfterLocalEdit(current.syncStatus)),
+      ),
+    );
+  }
+
+  Future<void> reorderPinnedConversations(List<String> ids) =>
+      _setConversationOrder(ids, false);
+  Future<void> resetConversationOrder() async {
+    final rows = await (database.select(
+      database.conversations,
+    )..where((r) => r.pinned.equals(true) & r.deletedAt.isNull())).get();
+    await _setConversationOrder(rows.map((r) => r.id).toList(), true);
+  }
+
+  Future<void> _setConversationOrder(List<String> ids, bool reset) async {
+    if (ids.toSet().length != ids.length) throw ArgumentError('Duplicate IDs');
+    await database.transaction(() async {
+      for (var i = 0; i < ids.length; i++) {
+        final current =
+            await (database.select(database.conversations)
+                  ..where((r) => r.id.equals(ids[i]) & r.deletedAt.isNull()))
+                .getSingle();
+        if (!current.pinned) {
+          throw StateError('Only pinned conversations can be reordered');
+        }
+        await (database.update(
+          database.conversations,
+        )..where((r) => r.id.equals(current.id))).write(
+          ConversationsCompanion(
+            manualPosition: Value(reset ? null : i),
+            localRevision: Value(current.localRevision + 1),
+            syncStatus: Value(_statusAfterLocalEdit(current.syncStatus)),
+          ),
+        );
+      }
+    });
+  }
+
   Stream<List<Conversation>> watchConversations() =>
       database.watchActiveConversations();
+
+  /// Import a conversation only after the server has confirmed its device binding.
+  Future<Conversation> importDeviceConversation(
+    Map<String, dynamic> remote,
+  ) async {
+    final id = remote['id'] as String;
+    await database
+        .into(database.conversations)
+        .insertOnConflictUpdate(
+          ConversationsCompanion.insert(
+            id: id,
+            title: remote['title'] as String,
+            type: Value(remote['type'] as String? ?? 'normal'),
+            createdAt: remote['createdAt'] as String,
+            updatedAt: remote['updatedAt'] as String,
+            remoteVersion: Value((remote['version'] as num).toInt()),
+            syncStatus: const Value('synced'),
+          ),
+        );
+    return (database.select(
+      database.conversations,
+    )..where((row) => row.id.equals(id))).getSingle();
+  }
 
   Future<Conversation> createConversation({String? title}) async {
     final timestamp = DateTime.now().toUtc().toIso8601String();
@@ -75,6 +157,16 @@ class ChatRepository {
     );
   }
 
+  Stream<Message?> watchLatestMessage(String conversationId) =>
+      (database.select(database.messages)
+            ..where((r) => r.conversationId.equals(conversationId))
+            ..orderBy([
+              (r) => OrderingTerm.desc(r.createdAt),
+              (r) => OrderingTerm.desc(r.id),
+            ])
+            ..limit(1))
+          .watchSingleOrNull();
+
   Stream<List<Message>> watchMessages(String conversationId) {
     return (database.select(database.messages)
           ..where((row) => row.conversationId.equals(conversationId))
@@ -89,6 +181,9 @@ class ChatRepository {
     required String conversationId,
     required String content,
     String attachmentsJson = '[]',
+    String? replyToMessageId,
+    String? replyQuote,
+    String? replyRole,
   }) async {
     final trimmed = content.trim();
     final hasAttachments =
@@ -104,6 +199,9 @@ class ChatRepository {
       content: trimmed,
       createdAt: DateTime.now().toUtc().toIso8601String(),
       attachmentsJson: Value(attachmentsJson),
+      replyToMessageId: Value(replyToMessageId),
+      replyQuote: Value(replyQuote),
+      replyRole: Value(replyRole),
       syncStatus: const Value('pendingCreate'),
     );
     await database.into(database.messages).insert(message);
@@ -153,6 +251,9 @@ class ChatRepository {
             attachmentsJson: Value(
               jsonEncode(payload['attachments'] ?? const []),
             ),
+            replyToMessageId: Value(payload['replyToMessageId'] as String?),
+            replyQuote: Value(payload['replyQuote'] as String?),
+            replyRole: Value(payload['replyRole'] as String?),
             remoteVersion: Value(remoteVersion),
             syncStatus: const Value('synced'),
           ),

@@ -7,6 +7,7 @@ environment:
   sdk: ">=3.9.0 <4.0.0"
 
 dependencies:
+  crypto: ^3.0.6
   lumina_ui:
     path: ../packages/lumina_ui
   dio: ^5.8.0+1
@@ -14,6 +15,8 @@ dependencies:
   drift_flutter: ^0.2.4
   file_picker: ^13.1.0
   flutter:
+    sdk: flutter
+  flutter_localizations:
     sdk: flutter
   flutter_secure_storage: ^10.3.4
   flutter_riverpod: ^2.6.1
@@ -24,13 +27,20 @@ dependencies:
   shared_preferences: ^2.5.3
   uuid: ^4.5.1
   web_socket_channel: ^3.0.3
+  url_launcher: ^6.3.2
 
 dev_dependencies:
+  integration_test:
+    sdk: flutter
   build_runner: ^2.4.15
   drift_dev: ^2.28.1
   flutter_lints: ^6.0.0
   flutter_test:
     sdk: flutter
+  url_launcher_platform_interface: ^2.3.2
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/branding/orialis-schedule.png
+    - assets/branding/orialis-news.png

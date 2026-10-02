@@ -1,0 +1,20 @@
+{
+  "protocolVersion": "1",
+  "deviceId": "dev_opaque_01",
+  "capabilities": [
+    {
+      "name": "files.read",
+      "version": "1.0.0",
+      "available": true,
+      "risk": "medium",
+      "constraints": {
+        "rootIds": [
+          "root_opaque_01"
+        ],
+        "maxBytes": 1048576
+      },
+      "grant": "allow",
+      "grantExpiresAt": "2026-10-02T08:00:00Z"
+    }
+  ]
+}

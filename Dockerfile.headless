@@ -1,0 +1,17 @@
+FROM rust:1.88-bookworm AS build
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY orialis-core ./orialis-core
+COPY orialis-server ./orialis-server
+RUN cargo build --locked --release -p orialis-server
+
+FROM debian:bookworm-slim
+RUN useradd --system --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nologin orialis \
+    && mkdir -p /data \
+    && chown 10001:10001 /data
+COPY --from=build /src/target/release/orialis-server /usr/local/bin/orialis-server
+USER 10001:10001
+ENV ORIALIS_ENV=production ORIALIS_HOST=0.0.0.0 ORIALIS_PORT=18443 \
+    ORIALIS_DATABASE_URL=sqlite:///data/orialis.db?mode=rwc ORIALIS_UPLOAD_DIR=/data/uploads
+EXPOSE 18443
+ENTRYPOINT ["/usr/local/bin/orialis-server"]

@@ -23,3 +23,30 @@ mobile/*.iml
 **/__pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Local tools, signing material and packaged releases
+.DS_Store
+/.paperclip-runtime/
+/runtime-data/
+/band/artifacts/
+/band/vela/.vscode/
+/band/vela/docs/*.zip
+*.rpk
+*.apk
+*.aab
+*.jks
+*.keystore
+*.pem
+
+# Original loose design reference (app assets live under mobile/assets)
+/Codex 图像 2026年9月23日 15_34_58.png
+
+# Local operational readbacks and native acceptance captures
+/news/evidence/
+/desktop/evidence/
+
+# AIoT IDE transient staging
+/band/.temp_vela/
+
+# Kotlin incremental compiler state
+/mobile/android/.kotlin/

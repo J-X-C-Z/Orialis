@@ -1,0 +1,29 @@
+router unavailable
+storage unavailable
+✔ visible details and confirmation are cleared immediately on session revocation (4.912208ms)
+✔ open details refresh from new snapshots and disappear when removed or demo ends (0.747666ms)
+✔ serialized UTF-8 budget counts Chinese and emoji bytes (1.309084ms)
+✔ split, reorder and fully reassemble snapshot before ACK eligibility (22.592375ms)
+✔ rejects over-limit, corrupt and inconsistent input (9.497416ms)
+✔ expires incomplete transfer cache (4.446875ms)
+✔ caps concurrent incomplete transfer cache (4.178083ms)
+✔ ACK only follows exact durable readback and late revision cannot replace cache (24.937ms)
+✔ scope change during async write removes old cache after write finishes and persists guard (3.030125ms)
+✔ restored revocation guard prevents old scoped cache from entering UI (8.129625ms)
+✔ bidirectional ping has correlated Pong and invalid IDs never produce a reply (2.074166ms)
+✔ malformed durable session guard fails closed before loading a previous account cache (0.822792ms)
+✔ startup rejects snapshots until durable revocation guard is restored (83.09325ms)
+✔ guard read failure blocks snapshots while missing guard preserves legacy W0 (19.424667ms)
+✔ starts empty, local mock never impersonates real operations (11.122166ms)
+✔ mock, explicit stale, absent provenance and empty are conservatively represented (10.559917ms)
+✔ restored live snapshots remain stale and transport never infers target status (0.740291ms)
+✔ late revisions are rejected and local target previews do not change phone target (0.993334ms)
+✔ scope transition requests durable invalidation, rejects wrong session and revocation (0.784458ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 329.66725

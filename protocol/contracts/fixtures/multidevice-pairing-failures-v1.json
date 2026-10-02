@@ -1,0 +1,12 @@
+{
+  "failures": [
+    {"case": "complete_before_confirmation", "httpStatus": 409, "errorCode": "PAIRING_NOT_CONFIRMED", "stateAfter": "pending_confirmation"},
+    {"case": "complete_after_rejection", "httpStatus": 409, "errorCode": "PAIRING_REJECTED", "stateAfter": "rejected"},
+    {"case": "confirm_or_complete_after_expiry", "httpStatus": 410, "errorCode": "PAIRING_EXPIRED", "stateAfter": "expired"},
+    {"case": "confirm_again_with_same_decision", "httpStatus": 200, "errorCode": null, "stateAfter": "confirmed_or_rejected_unchanged"},
+    {"case": "confirm_again_with_opposite_decision", "httpStatus": 409, "errorCode": "PAIRING_DECISION_FINAL", "stateAfter": "original_decision_unchanged"},
+    {"case": "complete_again_after_success", "httpStatus": 409, "errorCode": "PAIRING_ALREADY_COMPLETED", "stateAfter": "completed"},
+    {"case": "wrong_confirmation_code", "httpStatus": 400, "errorCode": "INVALID_ARGUMENT", "stateAfter": "pending_confirmation"},
+    {"case": "confirm_from_different_account", "httpStatus": 404, "errorCode": "NOT_FOUND", "stateAfter": "unchanged"}
+  ]
+}

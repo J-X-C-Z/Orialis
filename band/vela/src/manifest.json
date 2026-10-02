@@ -1,0 +1,70 @@
+{
+  "package": "top.jxcz.orialis",
+  "name": "Orialis",
+  "icon": "/common/icon.png",
+  "versionName": "0.5.0-linked",
+  "versionCode": 6,
+  "minPlatformVersion": 1000,
+  "features": [
+    {
+      "name": "system.interconnect"
+    },
+    {
+      "name": "system.storage"
+    },
+    {
+      "name": "system.router"
+    },
+    {
+      "name": "system.vibrator"
+    }
+  ],
+  "config": {
+    "logLevel": "info",
+    "designWidth": 336
+  },
+  "router": {
+    "entry": "pages/home",
+    "pages": {
+      "pages/home": {
+        "component": "home"
+      },
+      "pages/tasks": {
+        "component": "tasks"
+      },
+      "pages/commands": {
+        "component": "commands"
+      },
+      "pages/devices": {
+        "component": "devices"
+      },
+      "pages/settings": {
+        "component": "settings"
+      },
+      "pages/index": {
+        "component": "index"
+      },
+      "pages/menu": {
+        "component": "menu"
+      },
+      "pages/events": {
+        "component": "events"
+      },
+      "pages/calendar": {
+        "component": "calendar"
+      },
+      "pages/projects": {
+        "component": "projects"
+      },
+      "pages/profile": {
+        "component": "profile"
+      }
+    }
+  },
+  "display": {
+    "backgroundColor": "#000000"
+  },
+  "deviceTypeList": [
+    "watch"
+  ]
+}

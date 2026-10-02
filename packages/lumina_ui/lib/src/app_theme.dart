@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import 'design_tokens.dart';
+import 'lumina_tokens_generated.dart';
 
 /// Central overrides; defaults reproduce the original Lumina design.
 @immutable
@@ -11,12 +12,16 @@ class LuminaThemeData {
     this.spacingScale = 1,
     this.radiusScale = 1,
     this.motionScale = 1,
+    this.liquidGlass = false,
   }) : assert(fontScale > 0),
        assert(spacingScale >= .8),
        assert(radiusScale > 0),
        assert(motionScale >= 0 && motionScale <= 1);
   final String? fontFamily;
   final double fontScale, spacingScale, radiusScale, motionScale;
+
+  /// Clear, grain-free surfaces with diffuse shadows. Opt-in per application.
+  final bool liquidGlass;
 }
 
 /// Complete tonal families: raised body, recess, glass accent and text are
@@ -41,28 +46,30 @@ class LuminaColors {
   final Color? tint;
   Color _tone(Color base, double amount) =>
       tint == null ? base : Color.lerp(base, tint, amount)!;
-  Color get ink => dark ? const Color(0xFFECF1F4) : LuminaBaseColors.ink;
-  Color get paper => dark ? const Color(0xFF121B23) : LuminaBaseColors.paper;
+  Color get ink => dark ? LuminaTokenDark.ink : LuminaBaseColors.ink;
+  Color get paper => dark ? LuminaTokenDark.paper : LuminaBaseColors.paper;
   Color get canvas => paper;
   Color get surface =>
-      _tone(dark ? const Color(0xFF202C36) : LuminaBaseColors.surface, .10);
+      _tone(dark ? LuminaTokenDark.surface : LuminaBaseColors.surface, .10);
   Color get raisedSurface =>
-      _tone(dark ? const Color(0xFF2A3944) : const Color(0xFFEDF2F7), .13);
+      _tone(dark ? const Color(0xFF283746) : const Color(0xFFEDF2F7), .13);
   Color get recessedSurface =>
-      _tone(dark ? const Color(0xFF18232C) : const Color(0xFFE1E8F1), .23);
+      _tone(dark ? const Color(0xFF141E2A) : const Color(0xFFE1E8F1), .23);
   Color get accent => tint == null
-      ? (dark ? const Color(0xFF9EC4D5) : LuminaBaseColors.accent)
+      ? (dark ? LuminaTokenDark.accent : LuminaBaseColors.accent)
       : Color.lerp(
           tint,
           dark ? const Color(0xFFFFFFFF) : LuminaBaseColors.ink,
           dark ? .40 : .25,
         )!;
-  Color get accentSoft =>
-      _tone(dark ? const Color(0xFF314B59) : LuminaBaseColors.accentSoft, .30);
-  Color get muted => dark ? const Color(0xFFA6B6C2) : LuminaBaseColors.muted;
-  Color get danger => dark ? const Color(0xFFFFA6A1) : LuminaBaseColors.danger;
+  Color get accentSoft => _tone(
+    dark ? LuminaTokenDark.accentSoft : LuminaBaseColors.accentSoft,
+    .30,
+  );
+  Color get muted => dark ? LuminaTokenDark.muted : LuminaBaseColors.muted;
+  Color get danger => dark ? LuminaTokenDark.danger : LuminaBaseColors.danger;
   Color get outline =>
-      dark ? const Color(0xFF42515F) : LuminaBaseColors.outline;
+      dark ? LuminaTokenDark.outline : LuminaBaseColors.outline;
 }
 
 class LuminaTextTheme {
@@ -73,6 +80,19 @@ class LuminaTextTheme {
   final LuminaColors colors;
   final LuminaThemeData data;
   double _size(double base) => base * data.fontScale;
+  // A restrained rim suggests lettering cut into the glass. The principal
+  // glyph remains fully opaque, including in dark and high-contrast themes.
+  List<Shadow> get _etched => data.liquidGlass
+      ? const []
+      : [
+          Shadow(
+            color: colors.dark
+                ? const Color(0x33000000)
+                : const Color(0x66FFFFFF),
+            offset: const Offset(0, 1),
+            blurRadius: .35,
+          ),
+        ];
   // Android's sans-serif resolves through the OEM font map (MiSans on Xiaomi).
   // Other platforms keep their own system UI font and Chinese fallback.
   TextStyle get bodySmall => TextStyle(
@@ -86,6 +106,7 @@ class LuminaTextTheme {
     fontSize: _size(15),
     height: 1.5,
     color: colors.ink,
+    shadows: _etched,
   );
   TextStyle get bodyLarge => TextStyle(
     fontFamily: data.fontFamily,
@@ -115,6 +136,7 @@ class LuminaTextTheme {
     height: 1.25,
     fontWeight: FontWeight.w600,
     color: colors.ink,
+    shadows: _etched,
   );
   TextStyle get headlineSmall => titleLarge.copyWith(fontSize: _size(28));
   TextStyle get headlineMedium => titleLarge.copyWith(fontSize: _size(36));

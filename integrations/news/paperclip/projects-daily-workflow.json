@@ -1,0 +1,16 @@
+{
+  "workflow": "orialis-news-projects-daily",
+  "schedule": {"kind": "cron", "localTime": "19:00", "timezone": "Asia/Shanghai"},
+  "team": "Orialis/运营部/项目汇报组",
+  "input": {
+    "steps": ["read_received_secretary_reports_only", "validate_protocol", "merge_deduplicate_prioritize", "publish_news_backend"],
+    "runner": "configured-agent-runner",
+    "publishPath": "/api/v1/news/projects/publish",
+    "requiredReportFields": ["project", "date", "completed", "in_progress", "decisions", "issues", "next", "important"],
+    "taskId": "paperclip-generated-stable-run-id",
+    "source": "project-secretary-reports"
+  },
+  "failureBehavior": {"preserveRawSecretaryReports": true, "publishDeterministicAggregation": true},
+  "retry": {"maxAttempts": 3, "sameTaskId": true, "backoffSeconds": [30, 120, 600]},
+  "auditFields": ["taskId", "status", "startedAt", "finishedAt", "source", "result", "error"]
+}

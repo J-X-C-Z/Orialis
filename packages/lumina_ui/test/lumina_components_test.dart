@@ -218,7 +218,7 @@ void main() {
         ),
       ),
     );
-    final lens = find.byType(RawMagnifier);
+    final lens = find.byKey(const ValueKey('lumina-selection-lens'));
     final left = tester.getTopLeft(lens).dx;
     update(() => index = 4);
     await tester.pump();
@@ -285,8 +285,8 @@ void main() {
           ),
         ),
       );
-      final lens = find.byType(RawMagnifier);
-      expect(tester.widget<RawMagnifier>(lens).magnificationScale, 1.08);
+      final lens = find.byKey(const ValueKey('lumina-selection-lens'));
+      expect(find.byType(RawMagnifier), findsNothing);
       final origin = tester.getTopLeft(lens).dx;
       update(() => index = 2);
       await tester.pump();
@@ -326,10 +326,15 @@ void main() {
         reduced: true,
       ),
     );
-    final origin = tester.getTopLeft(find.byType(RawMagnifier)).dx;
+    final origin = tester
+        .getTopLeft(find.byKey(const ValueKey('lumina-selection-lens')))
+        .dx;
     update(() => index = 2);
     await tester.pump();
-    expect(tester.getTopLeft(find.byType(RawMagnifier)).dx, origin + 200);
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('lumina-selection-lens'))).dx,
+      origin + 200,
+    );
     expect(tester.binding.hasScheduledFrame, isFalse);
   });
 
@@ -656,7 +661,7 @@ void main() {
             .textTheme
             .bodyMedium
             .color,
-        const Color(0xFFECF1F4),
+        const Color(0xFFEEF3FA),
       );
     },
   );

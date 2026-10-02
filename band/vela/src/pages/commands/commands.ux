@@ -1,0 +1,15 @@
+<template>
+<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><scroll class="content" scroll-y="true"><div class="stack">
+<div class="header"><div class="back" onclick="goBack"><text class="backText">‹</text></div><text class="title">{{ selectedCommand ? '指令详情' : '指令' }}</text><div class="badge"><text class="badgeText">{{ vm.commands.length }}</text></div></div><text class="sourceLine">{{ vm.sourceShort }}</text>
+<div class="block" if="{{ !vm.commands.length }}"><text class="emptyTitle">暂无快捷指令</text><text class="emptyBody">由手机同步指令，远程执行待接入。</text></div>
+<div class="stack" if="{{ !selectedCommand }}"><div class="listRow {{ vm.compact ? 'compactRow' : '' }}" for="{{ vm.commands }}" onclick="openCommand($item.id)"><div class="glyphCircle blue"><div class="glyph commandGlyph"><div class="commandLine"></div><div class="commandLineLow"></div></div></div><div class="copy"><text class="rowTitle">{{ $item.shortTitle }}</text><text class="rowHint">{{ $item.statusLabel }}</text><text if="{{ !vm.compact }}" class="rowHint">{{ $item.shortSummary }}</text><div class="statusLine {{ $item.tone }}"></div></div><text class="chevron">›</text></div></div>
+<div class="block" if="{{ selectedCommand }}"><text class="body">{{ selectedCommand.title }}</text><text class="stateBadge">{{ selectedCommand.statusLabel }}</text><div class="statusLine {{ selectedCommand.tone }}"></div><text class="emptyBody">{{ selectedCommand.summary }}</text><text class="meta">目标：{{ vm.targetName }}</text><div class="button" if="{{ !confirmCommand }}" onclick="previewConfirmation"><text class="buttonText">查看确认说明</text></div><div class="block" if="{{ confirmCommand }}"><text class="body">执行能力待接入</text><text class="meta">连接、权限与真实执行验证完成后才能发送请求。</text><div class="disabled"><text class="disabledText">确认执行 · 待接入</text></div></div><div class="button" onclick="closeCommand"><text class="buttonText">返回指令列表</text></div></div><div class="block"><text class="provenance">{{ vm.provenance }}</text><text class="meta">{{ vm.syncLabel }}</text><text class="hint">右滑返回上一层</text></div>
+</div></scroll></div>
+</template>
+<script>
+const pages = require('../../services/page')
+export default pages.createPage('commands')
+</script>
+<style>
+@import "../../common/wear.css";
+</style>

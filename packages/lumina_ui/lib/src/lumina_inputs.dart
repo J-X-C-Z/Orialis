@@ -141,76 +141,131 @@ class LuminaCheck extends StatelessWidget {
   final bool value;
   final FutureOr<void> Function(bool)? onChanged;
   @override
-  Widget build(BuildContext context) => Semantics(
-    checked: value,
-    enabled: onChanged != null,
-    child: LuminaIconButton(
-      tooltip: value
-          ? LuminaLocalizations.of(context).deselect
-          : LuminaLocalizations.of(context).select,
-      onPressed: onChanged == null
-          ? null
-          : () {
-              final scope = context
-                  .getInheritedWidgetOfExactType<_CompletionScope>();
-              if (scope != null) {
-                unawaited(scope.run(() => onChanged!(!value), context, !value));
-              } else {
-                onChanged!(!value);
-              }
-            },
-      icon: AnimatedContainer(
-        duration: LuminaTheme.motionReducedOf(context)
-            ? Duration.zero
-            : LuminaMotion.fast,
-        curve: luminaEaseOut,
-        width: LuminaIconSize.control,
-        height: LuminaIconSize.control,
-        decoration: BoxDecoration(
-          color: value
-              ? LuminaTheme.of(context).colors.accentSoft
-              : const Color(0x00000000),
-          border: Border.all(color: LuminaTheme.of(context).colors.muted),
-          shape: BoxShape.circle,
-        ),
-        child: AnimatedOpacity(
-          opacity: value ? 1 : 0,
+  Widget build(BuildContext context) => MergeSemantics(
+    child: Semantics(
+      checked: value,
+      enabled: onChanged != null,
+      child: LuminaIconButton(
+        tooltip: value
+            ? LuminaLocalizations.of(context).deselect
+            : LuminaLocalizations.of(context).select,
+        onPressed: onChanged == null
+            ? null
+            : () {
+                final scope = context
+                    .getInheritedWidgetOfExactType<_CompletionScope>();
+                if (scope != null) {
+                  unawaited(
+                    scope.run(() => onChanged!(!value), context, !value),
+                  );
+                } else {
+                  onChanged!(!value);
+                }
+              },
+        icon: AnimatedContainer(
           duration: LuminaTheme.motionReducedOf(context)
               ? Duration.zero
               : LuminaMotion.fast,
           curve: luminaEaseOut,
-          child: const LuminaIcon(LuminaIcons.check, size: 18),
+          width: LuminaIconSize.control,
+          height: LuminaIconSize.control,
+          decoration: BoxDecoration(
+            color: value
+                ? LuminaTheme.of(context).colors.accentSoft
+                : const Color(0x00000000),
+            border: Border.all(color: LuminaTheme.of(context).colors.muted),
+            shape: BoxShape.circle,
+          ),
+          child: AnimatedOpacity(
+            opacity: value ? 1 : 0,
+            duration: LuminaTheme.motionReducedOf(context)
+                ? Duration.zero
+                : LuminaMotion.fast,
+            curve: luminaEaseOut,
+            child: const LuminaIcon(LuminaIcons.check, size: 18),
+          ),
         ),
       ),
     ),
   );
 }
 
-class LuminaSwitch extends StatelessWidget {
+class LuminaSwitch extends StatefulWidget {
   const LuminaSwitch({required this.value, required this.onChanged, super.key});
   final bool value;
   final ValueChanged<bool>? onChanged;
+
+  @override
+  State<LuminaSwitch> createState() => _LuminaSwitchState();
+}
+
+class _LuminaSwitchState extends State<LuminaSwitch> {
+  bool _showFocus = false;
+
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      toggled: value,
-      enabled: onChanged != null,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onChanged == null ? null : () => onChanged!(!value),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: SizedBox(
-            width: 56,
-            height: 32,
-            child: LuminaSlidingSelection(
-              index: value ? 1 : 0,
-              count: 2,
-              confirmed: value,
-              onDragEnd: onChanged == null
-                  ? null
-                  : (index) => onChanged!(index == 1),
-              child: const SizedBox.expand(),
+    final enabled = widget.onChanged != null;
+    final activate = enabled ? () => widget.onChanged!(!widget.value) : null;
+    return MergeSemantics(
+      child: Semantics(
+        toggled: widget.value,
+        enabled: enabled,
+        onTap: activate,
+        child: FocusableActionDetector(
+          enabled: enabled,
+          mouseCursor: enabled
+              ? SystemMouseCursors.click
+              : SystemMouseCursors.basic,
+          onShowFocusHighlight: (value) => setState(() => _showFocus = value),
+          shortcuts: const {
+            SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+            SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+          },
+          actions: {
+            ActivateIntent: CallbackAction<ActivateIntent>(
+              onInvoke: (_) {
+                activate?.call();
+                return null;
+              },
+            ),
+          },
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            excludeFromSemantics: true,
+            onTap: activate,
+            child: Opacity(
+              opacity: enabled ? 1 : .45,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(
+                      LuminaControlSize.capsuleRadius,
+                    ),
+                    border: Border.all(
+                      color: _showFocus
+                          ? LuminaTheme.of(context).colors.accent
+                          : const Color(0x00000000),
+                      width: 2,
+                    ),
+                  ),
+                  child: SizedBox(
+                    width: 56,
+                    height: 32,
+                    child: ExcludeSemantics(
+                      child: LuminaSlidingSelection(
+                        index: widget.value ? 1 : 0,
+                        count: 2,
+                        confirmed: widget.value,
+                        onDragEnd: enabled
+                            ? (index) => widget.onChanged!(index == 1)
+                            : null,
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -227,6 +282,7 @@ class LuminaSlidingSelection extends StatefulWidget {
     required this.count,
     required this.child,
     this.longTravel = false,
+    this.backdrop = true,
     this.confirmed = false,
     this.onDragEnd,
     super.key,
@@ -234,6 +290,9 @@ class LuminaSlidingSelection extends StatefulWidget {
        assert(index >= 0 && index < count);
   final int index, count;
   final bool longTravel;
+
+  /// Disable when the host already blurs the same stationary well.
+  final bool backdrop;
 
   /// Gives an active binary control a visible confirmation inside its lens.
   final bool confirmed;
@@ -253,6 +312,7 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
   );
   bool _dragging = false;
   double _grabOffset = 0;
+  bool _atEdge = false;
 
   void _startDrag(LongPressStartDetails details) {
     final width = (context.size?.width ?? 0) / widget.count;
@@ -264,7 +324,7 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
     _dragging = true;
     position.stop();
     _grabOffset = details.localPosition.dx - (selected + .5) * width;
-    unawaited(HapticFeedback.selectionClick());
+    unawaited(LuminaHaptics.confirm());
   }
 
   void _moveDrag(Offset local) {
@@ -273,6 +333,9 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
     if (width <= 0) return;
     final raw = (local.dx - _grabOffset) / width - .5;
     final last = (widget.count - 1).toDouble();
+    final edge = raw < 0 || raw > last;
+    if (edge && !_atEdge) unawaited(LuminaHaptics.confirm());
+    _atEdge = edge;
     final damped = raw < 0
         ? (raw * .22).clamp(-.18, 0.0)
         : raw > last
@@ -286,6 +349,7 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
     if (!_dragging) return;
     _moveDrag(local);
     _dragging = false;
+    _atEdge = false;
     final target = position.value.round().clamp(0, widget.count - 1);
     position.settleNavigation(
       target.toDouble(),
@@ -336,10 +400,28 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
     super.dispose();
   }
 
+  Widget _magnifier({
+    required Size size,
+    required double magnificationScale,
+    required MagnifierDecoration decoration,
+    required Widget child,
+  }) {
+    if (LuminaTheme.of(context).highPerformanceMode ||
+        LuminaTheme.motionReducedOf(context)) {
+      return SizedBox.fromSize(size: size, child: child);
+    }
+    return RawMagnifier(
+      size: size,
+      magnificationScale: magnificationScale,
+      decoration: decoration,
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Stack(
     children: [
-      const Positioned.fill(child: _LuminaSelectionWell()),
+      Positioned.fill(child: _LuminaSelectionWell(backdrop: widget.backdrop)),
       if (widget.onDragEnd == null)
         widget.child
       else
@@ -359,7 +441,7 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
               final rtl = Directionality.of(context) == TextDirection.rtl;
               return AnimatedBuilder(
                 animation: position,
-                child: RawMagnifier(
+                child: _magnifier(
                   size: Size(width, constraints.maxHeight),
                   magnificationScale:
                       LuminaTheme.of(context).reduceTransparency ||
@@ -385,11 +467,15 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
                       radius: LuminaControlSize.capsuleRadius,
                       depth: LuminaSurfaceDepth.raised,
                       shoulder: false,
-                      contrast: MediaQuery.highContrastOf(context),
+                      contrast:
+                          MediaQuery.highContrastOf(context) ||
+                          (LuminaTheme.of(context).data.liquidGlass &&
+                              LuminaTheme.of(context).reduceTransparency),
                       focused: false,
                       pressed: false,
                       glass: true,
                       diffuseGlass: false,
+                      liquidGlass: LuminaTheme.of(context).data.liquidGlass,
                       cheapShadow: true,
                     ),
                     child: widget.confirmed
@@ -412,6 +498,12 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
                     -.18,
                     widget.count - 1.0 + .18,
                   );
+                  final overshoot = x < 0
+                      ? -x
+                      : math.max(0.0, x - widget.count + 1);
+                  final squeeze = LuminaTheme.motionReducedOf(context)
+                      ? 0.0
+                      : (overshoot * .7).clamp(0.0, .12);
                   final stretch = LuminaTheme.motionReducedOf(context)
                       ? 0.0
                       : (position.velocity.abs() * .004).clamp(0.0, .035);
@@ -419,12 +511,21 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
                     alignment: Alignment.centerLeft,
                     child: Transform.translate(
                       offset: Offset(
-                        (rtl ? widget.count - 1 - x : x) * width,
+                        (rtl
+                                ? widget.count -
+                                      1 -
+                                      x.clamp(0.0, widget.count - 1.0)
+                                : x.clamp(0.0, widget.count - 1.0)) *
+                            width,
                         0,
                       ),
                       child: Transform.scale(
-                        scaleX: 1 + stretch,
-                        scaleY: 1 - stretch * .5,
+                        key: const ValueKey('lumina-selection-deformation'),
+                        alignment: (x < 0) != rtl
+                            ? Alignment.centerLeft
+                            : Alignment.centerRight,
+                        scaleX: 1 + stretch - squeeze,
+                        scaleY: 1 - stretch * .5 + squeeze * .3,
                         child: SizedBox(
                           width: width,
                           height: constraints.maxHeight,
@@ -446,17 +547,30 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
 /// One clipped, stationary glass well per sliding control. The small fixed
 /// backdrop filter and inner blur are isolated from the moving lens painter.
 class _LuminaSelectionWell extends StatelessWidget {
-  const _LuminaSelectionWell();
+  const _LuminaSelectionWell({required this.backdrop});
+  final bool backdrop;
 
   @override
   Widget build(BuildContext context) {
+    LuminaBlurPolicy.instance.ensureFrameWatcher();
+    return ValueListenableBuilder<LuminaBlurConfig>(
+      valueListenable: LuminaBlurPolicy.instance.chromeListenable,
+      builder: (context, budget, _) => _buildWell(context, budget),
+    );
+  }
+
+  Widget _buildWell(BuildContext context, LuminaBlurConfig budget) {
     final theme = LuminaTheme.of(context);
     final opaque =
         theme.reduceTransparency || MediaQuery.highContrastOf(context);
-    final config = theme.highPerformanceMode
-        ? const LuminaBlurConfig(level: LuminaBlurLevel.blurS)
-        : const LuminaBlurConfig(level: LuminaBlurLevel.blurM);
-    final filter = opaque ? null : LuminaBlurFilters.forConfig(config);
+    final config =
+        theme.highPerformanceMode &&
+            budget.level.index > LuminaBlurLevel.blurS.index
+        ? budget.copyWith(level: LuminaBlurLevel.blurS)
+        : budget;
+    final filter = opaque || !backdrop
+        ? null
+        : LuminaBlurFilters.forConfig(config);
     return IgnorePointer(
       child: RepaintBoundary(
         child: Stack(
@@ -477,17 +591,20 @@ class _LuminaSelectionWell extends StatelessWidget {
               painter: _LuminaMaterial(
                 colors: theme.colors,
                 tint: theme.colors.recessedSurface.withValues(
-                  alpha: opaque ? 1 : .72,
+                  alpha: opaque ? 1 : .36,
                 ),
                 radius: LuminaControlSize.capsuleRadius,
                 depth: LuminaSurfaceDepth.recessed,
                 shoulder: false,
-                contrast: MediaQuery.highContrastOf(context),
+                contrast:
+                    MediaQuery.highContrastOf(context) ||
+                    (theme.data.liquidGlass && opaque),
                 focused: false,
                 pressed: false,
                 glass: !opaque,
                 diffuseGlass: true,
-                cheapShadow: false,
+                liquidGlass: theme.data.liquidGlass,
+                cheapShadow: theme.highPerformanceMode,
                 blurCompensation: opaque ? 0 : config.compensation,
               ),
             ),

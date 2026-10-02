@@ -7,6 +7,12 @@ class TaskRepository {
   TaskRepository({required EventRepository delegate}) : _delegate = delegate;
 
   final EventRepository _delegate;
+  Future<void> reorderTasks(List<String> ids) => _delegate.reorderTasks(ids);
+  Future<void> resetTaskOrder(List<String> ids) =>
+      _delegate.resetTaskOrder(ids);
+
+  Future<Task> setQuadrant(String id, {bool? important, bool? urgent}) =>
+      _delegate.setTaskQuadrant(id, important: important, urgent: urgent);
 
   Stream<List<Task>> watchTasks() => _delegate.watchTasks();
 

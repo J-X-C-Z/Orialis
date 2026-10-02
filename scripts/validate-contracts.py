@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from jsonschema import Draft202012Validator, FormatChecker, RefResolver
+    from jsonschema import Draft202012Validator, FormatChecker
+    from referencing import Registry, Resource
 except ImportError as exc:  # pragma: no cover - exercised by the CLI error path
     raise SystemExit(
         "jsonschema is required; install scripts/requirements-contracts.txt first"
@@ -24,6 +25,10 @@ FIXTURES = CONTRACTS / "fixtures"
 HERMES_FIXTURES = ROOT / "integrations" / "hermes" / "orialis" / "tests" / "fixtures"
 
 FIXTURE_SCHEMAS = {
+    "multidevice-pairing-start-request-v1.json": "multidevice-v1/http.schema.json",
+    "multidevice-nodes-response-v1.json": "multidevice-v1/http.schema.json",
+    "multidevice-capabilities-response-v1.json": "multidevice-v1/http.schema.json",
+    "multidevice-events-response-v1.json": "multidevice-v1/http.schema.json",
     "task-unclassified.json": "task.schema.json",
     "schedule-v1.json": "schedule.schema.json",
     "mutation-request-v1.json": "mutation-request.schema.json",
@@ -38,6 +43,15 @@ FIXTURE_SCHEMAS = {
     "http-error-v1.json": "http/error.schema.json",
     "mobile-realtime-v1.json": "realtime/mobile.schema.json",
     "agent-gateway-v1.json": "agent-gateway/schema-v1.schema.json",
+    "multidevice-device-v1.json": "multidevice-v1/device.schema.json",
+    "multidevice-event-v1.json": "multidevice-v1/event.schema.json",
+    "multidevice-uri-v1.json": "multidevice-v1/uri.schema.json",
+    "multidevice-pairing-start-v1.json": "multidevice-v1/pairing.schema.json",
+    "multidevice-pairing-confirm-request-v1.json": "multidevice-v1/pairing.schema.json",
+    "multidevice-pairing-confirm-response-v1.json": "multidevice-v1/pairing.schema.json",
+    "multidevice-pairing-complete-request-v1.json": "multidevice-v1/pairing.schema.json",
+    "multidevice-pairing-complete-response-v1.json": "multidevice-v1/pairing.schema.json",
+    "multidevice-pairing-failures-v1.json": "multidevice-v1/pairing.schema.json",
 }
 
 
@@ -50,15 +64,23 @@ def load_json(path: Path) -> Any:
 
 def validate_fixture(fixture: Path, schema_path: Path) -> None:
     schema = load_json(schema_path)
-    # The registry uses stable example HTTPS IDs for documentation.  Local
-    # validation must resolve relative references from the checked-out file,
-    # never by making a network request to that example domain.
-    schema.pop("$id", None)
-    resolver = RefResolver(schema_path.as_uri(), schema)
+    # Published example IDs are resolved only from this checkout. A closed
+    # registry also supports nested $refs without a mutable resolver scope.
+    resources = []
+    for local_path in CONTRACTS.rglob("*.schema.json"):
+        local_schema = load_json(local_path)
+        published_id = local_schema.get("$id")
+        # Existing domain $ids include a version in the filename while their
+        # relative refs use local filenames. Localize the resolution base.
+        local_schema["$id"] = local_path.as_uri()
+        resource = Resource.from_contents(local_schema)
+        resources.append((local_path.as_uri(), resource))
+        if isinstance(published_id, str):
+            resources.append((published_id, resource))
+    registry = Registry().with_resources(resources)
+    schema["$id"] = schema_path.as_uri()
     validator = Draft202012Validator(
-        schema,
-        resolver=resolver,
-        format_checker=FormatChecker(),
+        schema, registry=registry, format_checker=FormatChecker(),
     )
     errors = sorted(validator.iter_errors(load_json(fixture)), key=lambda error: list(error.path))
     if errors:
@@ -79,6 +101,21 @@ def validate_semantics() -> None:
     if mutation["tombstone"] is not event["tombstone"]:
         raise SystemExit("mutation and sync fixtures must preserve tombstone semantics")
 
+    pairing = load_json(FIXTURES / "multidevice-pairing-failures-v1.json")["failures"]
+    observed = {case["case"]: (case["httpStatus"], case["errorCode"], case["stateAfter"]) for case in pairing}
+    expected = {
+        "complete_before_confirmation": (409, "PAIRING_NOT_CONFIRMED", "pending_confirmation"),
+        "complete_after_rejection": (409, "PAIRING_REJECTED", "rejected"),
+        "confirm_or_complete_after_expiry": (410, "PAIRING_EXPIRED", "expired"),
+        "confirm_again_with_same_decision": (200, None, "confirmed_or_rejected_unchanged"),
+        "confirm_again_with_opposite_decision": (409, "PAIRING_DECISION_FINAL", "original_decision_unchanged"),
+        "complete_again_after_success": (409, "PAIRING_ALREADY_COMPLETED", "completed"),
+        "wrong_confirmation_code": (400, "INVALID_ARGUMENT", "pending_confirmation"),
+        "confirm_from_different_account": (404, "NOT_FOUND", "unchanged"),
+    }
+    if observed != expected:
+        raise SystemExit(f"pairing failure matrix mismatch: expected {expected!r}, got {observed!r}")
+
 
 def fixture_path(fixture_name: str) -> Path:
     path = FIXTURES / fixture_name
@@ -96,7 +133,7 @@ def main() -> int:
         schema_path = CONTRACTS / schema_name if "/" in schema_name else SCHEMAS / schema_name
         validate_fixture(fixture_path(fixture_name), schema_path)
     validate_semantics()
-    print(f"validated {len(FIXTURE_SCHEMAS)} contract fixtures against {len(list(SCHEMAS.glob('*.schema.json')))} schemas")
+    print(f"validated {len(FIXTURE_SCHEMAS)} contract fixtures against {len(list(SCHEMAS.glob('*.schema.json')))} schemas and multidevice schemas")
     return 0
 
 

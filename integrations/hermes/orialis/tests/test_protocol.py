@@ -146,7 +146,7 @@ class ProtocolTests(unittest.TestCase):
         schedule = json.loads((CONTRACT_FIXTURES / "schedule-v1.json").read_text(encoding="utf-8"))
         self.assertEqual(
             set(schedule),
-            {"id", "title", "description", "location", "startAt", "endAt", "allDay",
+            {"id", "title", "description", "location", "startAt", "endAt", "allDay", "important",
              "reminderMinutes", "createdAt", "updatedAt", "version", "deletedAt"},
         )
         for deferred_field in ("taskId", "projectId", "source", "externalId"):

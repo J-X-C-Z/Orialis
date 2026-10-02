@@ -1,0 +1,16 @@
+{
+  "workflow": "orialis-news-github-weekly",
+  "schedule": {"kind": "cron", "localTime": "18:15", "weekday": "Monday", "timezone": "Asia/Shanghai"},
+  "team": "Orialis/运营部/GitHub情报组",
+  "input": {
+    "period": "weekly",
+    "steps": ["fetch_fresh_weekly_ranking", "collect_metadata_and_readme", "analyze_grounded_briefs", "publish_news_backend"],
+    "runner": "configured-agent-runner",
+    "publishPath": "/api/v1/news/publish/github/weekly",
+    "taskId": "paperclip-generated-stable-run-id",
+    "source": "github-trending:weekly",
+    "mustFetchFreshRanking": true
+  },
+  "retry": {"maxAttempts": 3, "sameTaskId": true, "backoffSeconds": [30, 120, 600]},
+  "auditFields": ["taskId", "status", "startedAt", "finishedAt", "source", "result", "error"]
+}

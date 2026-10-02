@@ -154,6 +154,29 @@ class OrialisApiClient {
     return values.cast<String>().toSet();
   }
 
+  Future<List<Map<String, dynamic>>> listAgentDevices() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/agent/devices',
+    );
+    return (response.data?['devices'] as List? ?? const [])
+        .map((value) => Map<String, dynamic>.from(value as Map))
+        .toList();
+  }
+
+  Future<String?> conversationAgentDevice(String id) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/conversations/${Uri.encodeComponent(id)}/agent-device',
+    );
+    return response.data?['deviceId'] as String?;
+  }
+
+  Future<void> bindConversationAgentDevice(String id, String deviceId) async {
+    await _dio.put<Map<String, dynamic>>(
+      '/api/v1/conversations/${Uri.encodeComponent(id)}/agent-device',
+      data: {'deviceId': deviceId},
+    );
+  }
+
   Future<List<Map<String, dynamic>>> listConversations() async {
     final response = await _dio.get<List<dynamic>>('/api/v1/conversations');
     return (response.data ?? const [])
@@ -165,11 +188,15 @@ class OrialisApiClient {
     required String title,
     String? id,
     String? mutationId,
+    int? manualPosition,
+    bool pinned = false,
   }) async {
     final response = await _dio.post<Map<String, dynamic>>(
       '/api/v1/conversations',
       data: {
         'title': title,
+        'manualPosition': manualPosition,
+        'pinned': pinned,
         ...?id == null ? null : {'id': id},
       },
       options: mutationId == null
@@ -183,11 +210,18 @@ class OrialisApiClient {
     String id,
     String title,
     int baseVersion,
-    String mutationId,
-  ) async {
+    String mutationId, {
+    int? manualPosition,
+    bool pinned = false,
+  }) async {
     final response = await _dio.patch<Map<String, dynamic>>(
       '/api/v1/conversations/${Uri.encodeComponent(id)}',
-      data: {'title': title, 'baseVersion': baseVersion},
+      data: {
+        'title': title,
+        'baseVersion': baseVersion,
+        'manualPosition': manualPosition,
+        'pinned': pinned,
+      },
       options: Options(headers: {'Idempotency-Key': mutationId}),
     );
     return response.data ?? <String, dynamic>{};
@@ -574,10 +608,20 @@ class OrialisApiClient {
     required String id,
     required String content,
     List<Map<String, dynamic>> attachments = const [],
+    String? replyToMessageId,
+    String? replyQuote,
+    String? replyRole,
   }) async {
     final response = await _dio.post<Map<String, dynamic>>(
       '/api/v1/conversations/${Uri.encodeComponent(conversationId)}/messages',
-      data: {'id': id, 'content': content, 'attachments': attachments},
+      data: {
+        'id': id,
+        'content': content,
+        'attachments': attachments,
+        'replyToMessageId': replyToMessageId,
+        'replyQuote': replyQuote,
+        'replyRole': replyRole,
+      },
       options: Options(headers: {'Idempotency-Key': id}),
     );
     return response.data ?? <String, dynamic>{};

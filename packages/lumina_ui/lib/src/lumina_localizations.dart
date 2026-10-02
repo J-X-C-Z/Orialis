@@ -11,10 +11,18 @@ class LuminaLocalizations {
   static LuminaLocalizations of(BuildContext context) =>
       Localizations.of<LuminaLocalizations>(context, LuminaLocalizations) ??
       const LuminaLocalizations(Locale('zh'));
+  String get cancelReply => _zh ? '取消引用' : 'Cancel reply';
   String get close => _zh ? '关闭' : 'Close';
   String get closeSheet => _zh ? '关闭面板' : 'Close sheet';
   String get selectDate => _zh ? '选择日期' : 'Select date';
   String get selectTime => _zh ? '选择时间' : 'Select time';
+  String get cancel => _zh ? '取消' : 'Cancel';
+  String get previousMonth => _zh ? '上个月' : 'Previous month';
+  String get nextMonth => _zh ? '下个月' : 'Next month';
+  String get increaseHour => _zh ? '增加小时' : 'Increase hour';
+  String get decreaseHour => _zh ? '减少小时' : 'Decrease hour';
+  String get increaseMinute => _zh ? '增加分钟' : 'Increase minute';
+  String get decreaseMinute => _zh ? '减少分钟' : 'Decrease minute';
   String get confirm => _zh ? '确定' : 'Confirm';
   String get copy => _zh ? '复制' : 'Copy';
   String get loading => _zh ? '加载中' : 'Loading';

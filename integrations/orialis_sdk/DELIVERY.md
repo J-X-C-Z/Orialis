@@ -1,57 +1,57 @@
-# ORI-63 SDK/MCP framework delivery record
+# TASK-028 SDK delivery record
 
-Date: 2026-10-01
-Contract baseline: `protocol/contracts/multidevice-v1/README.md`, wire major 1,
-contract 1.0.0.
-Implementation boundary: local Python SDK + MCP-neutral adapter and isolated
-fixtures only; no production service was called.
+Date: 2026-10-02. Scope: `integrations/orialis_sdk/**` only.
 
 ## Delivered
 
-- Injectable transport API with the frozen Node v1 route paths for list/get,
-  per-device capabilities, and revoke.
-- Explicit `deviceId` on every per-node operation; URL path segment encoding,
-  dot-segment rejection, and identity check on get response.
-- Fail-closed capability helper (`available` and explicit `grant: allow` both
-  required; `deny`, `ask`, absent and unconfigured grants stop locally).
-- MCP-neutral declaration/dispatcher limited to read-only list/get/capabilities.
-- Migration and return-to-integration checklist in `README.md`.
+- Standard-library HTTPS/loopback HTTP transport with explicit Session or Node
+  auth scheme, request deadlines, JSON parsing, no redirects, bounded response
+  size, and stable sanitized errors.
+- Fail-closed capability discovery requiring the exact server capability
+  string `multidevice.v1` before Node/event API requests.
+- Client operations for pairing start, explicit confirm/reject, one-time
+  completion, paginated list/events, get/capabilities, heartbeat, and revoke.
+- `python3 -m integrations.orialis_sdk.cli` pairing, account management,
+  heartbeat, and node-own-configuration commands. Node credentials are stored
+  with owner-only POSIX permissions and omitted from CLI output.
+- Explicit Node credential restriction in the CLI: only heartbeat and that
+  node's own configuration reads use `Authorization: Node`; account operations
+  require `Authorization: Session`.
+- Pairing secrets and Node credentials require their pinned service URL and
+  never fall back to a new ambient URL. POSIX credential reads reject a
+  symlink, unowned, or non-private credential directory.
+- Continuous `run` retries retryable network/service failures on a 10-second
+  cadence; non-retryable authentication, revocation, and contract failures stop
+  the process. Retry output contains only a stable error code.
+- Pair-confirm responses must use wire major 1, and list/event cursors must be
+  strings or null as declared by the HTTP schema.
 
-## Verification evidence
+## Verification
 
-Command from repository root:
+`python3 -m unittest integrations.orialis_sdk.tests.test_multidevice
+integrations.orialis_sdk.tests.test_http -v` passed 18 tests, including a real
+HTTP round trip against a local isolated responder for pairing, auth headers,
+heartbeat, and listing. This demonstrates SDK transport interoperability with
+the selected HTTP shapes only; it is not evidence of production server state,
+authorization, durability, or multi-device E2E.
 
-```sh
-python3 -m unittest integrations.orialis_sdk.tests.test_multidevice -v
-```
+`uv run --no-project --with-requirements scripts/requirements-contracts.txt
+python scripts/validate-contracts.py` validated 27 fixtures against 12 schemas.
 
-Result: 5 tests passed (0.002s). Coverage includes required/isolated device
-routing, encoded IDs, cursor encoding, safe MCP exposure, revoke route selection,
-and allow/deny/ask/unconfigured/unavailable capability cases. Fixtures are
-in-process and local; no HTTP request was made.
+`python3 -m integrations.orialis_sdk.cli --help` renders the CLI entry point.
+An initial test invocation contained a misspelled import path and failed before
+loading tests; the corrected invocation above passed.
 
-The initial invocation with `python` failed because this environment has no
-`python` executable; `python3` is available and the command above is the
-reproducible command.
+## Real local integration and remaining joint acceptance
 
-## Deferred integration and evidence limits
-
-- Confirm deployed capability advertisement and actual endpoint/response
-  envelopes with Node/Control owners; the v1 contract states routes but leaves
-  list and capability wrapper JSON underspecified.
-- Inject the approved real Session transport only after Node/Control deployment;
-  verify authorization, account ownership, revocation and stable errors.
-- Register declarations with the chosen MCP host and test actual host behavior.
-- Coordinate any wire-contract changes with the protocol owners. Keep Hermes
-  Gateway and legacy `agent-devices` distinct.
-- Files, writes, agents, pairing, heartbeat, event streaming, Mac/Windows/NAS,
-  authentication and end-to-end behavior are outside this fixture result.
-
-## Assignment and resource note
-
-The wake exposes no authorized team-member directory or task-assignment control
-tool in this run, so member ownership could not be assigned here. Implementation
-was kept within the new `integrations/orialis_sdk/` tree; the shared checkout
-already contains extensive pre-existing changes. No existing source files or
-migration records were rewritten. This delivery is ready for the designated
-development-minister review once attached to ORI-63.
+The independent SDK review is recorded in `manager/TASK-033-review.md`; its
+local code findings have been addressed in the SDK. Against the local real
+Node/Control service, a redacted smoke passed pairing, Session confirmation,
+completion, Node heartbeat/own reads, second-account isolation, advancing and
+empty event cursors, 31-second offline transition/event, heartbeat recovery,
+Session revocation, and rejected revoked-node heartbeat. A controlled service
+restart occurred during the lease wait; subsequent reads and operations passed.
+The separate parent runner has the strict database/PID restart readback. The
+isolated HTTP responder tests still demonstrate transport shapes only. This
+local smoke does not prove production release, native phone/macOS acceptance,
+or full multi-device product completion.

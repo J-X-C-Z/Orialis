@@ -8,22 +8,35 @@ import '../../pages/chat/chat_page.dart';
 import '../../pages/events/events_page.dart';
 import '../../pages/profile/profile_page.dart';
 import '../../pages/shell/orialis_shell.dart';
+import '../../pages/shell/desktop_shell.dart';
 import '../../pages/today/today_page.dart';
 import '../../pages/projects/projects_page.dart';
+import '../../features/devices/presentation/device_center_page.dart';
+import '../../features/wear/wear_connection_page.dart';
+import '../../pages/profile/system_settings_page.dart';
+import '../../news/news_app.dart';
 
-GoRouter buildRouter() {
+GoRouter buildRouter({bool desktop = false}) {
   return GoRouter(
     initialLocation: '/today',
     routes: [
       GoRoute(path: '/auth', builder: (_, _) => const AuthPage()),
+      if (!desktop)
+        GoRoute(path: '/system', builder: (_, _) => const SystemSettingsPage()),
+      if (!desktop)
+        GoRoute(path: '/wear', builder: (_, _) => const WearConnectionPage()),
+      GoRoute(path: '/devices', builder: (_, _) => const DeviceCenterPage()),
+      if (!desktop)
+        GoRoute(path: '/projects', builder: (_, _) => const ProjectsPage()),
       StatefulShellRoute(
         navigatorContainerBuilder: (context, shell, children) =>
             LuminaBranchTransition(
               index: shell.currentIndex,
               children: children,
             ),
-        builder: (context, state, navigationShell) =>
-            OrialisShell(navigationShell: navigationShell),
+        builder: (context, state, navigationShell) => desktop
+            ? DesktopShell(navigationShell: navigationShell)
+            : OrialisShell(navigationShell: navigationShell),
         branches: [
           StatefulShellBranch(
             routes: [
@@ -35,17 +48,27 @@ GoRouter buildRouter() {
               GoRoute(path: '/events', builder: (_, _) => const EventsPage()),
             ],
           ),
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: '/chat',
-                builder: (_, _) => Consumer(
-                  builder: (context, ref, _) =>
-                      ChatPage(repository: ref.watch(chatRepositoryProvider)),
+          if (desktop)
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/projects',
+                  builder: (_, _) => const ProjectsPage(),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          if (!desktop)
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/chat',
+                  builder: (_, _) => Consumer(
+                    builder: (context, ref, _) =>
+                        ChatPage(repository: ref.watch(chatRepositoryProvider)),
+                  ),
+                ),
+              ],
+            ),
           StatefulShellBranch(
             routes: [
               GoRoute(
@@ -68,12 +91,38 @@ GoRouter buildRouter() {
           StatefulShellBranch(
             routes: [
               GoRoute(path: '/profile', builder: (_, _) => const ProfilePage()),
-              GoRoute(
-                path: '/projects',
-                builder: (_, _) => const ProjectsPage(),
-              ),
             ],
           ),
+          if (desktop) ...[
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/news/aihot',
+                  builder: (_, _) =>
+                      const DesktopNewsPage(section: DesktopNewsSection.aiHot),
+                ),
+              ],
+            ),
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/news/github',
+                  builder: (_, _) =>
+                      const DesktopNewsPage(section: DesktopNewsSection.github),
+                ),
+              ],
+            ),
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/news/project',
+                  builder: (_, _) => const DesktopNewsPage(
+                    section: DesktopNewsSection.project,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     ],

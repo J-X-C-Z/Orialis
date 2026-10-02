@@ -1,0 +1,300 @@
+INFO    | Android emulator version 32.1.15.0 (build_id 20241222) (CL:N/A)
+INFO    | Found systemPath /Users/jxcz/.vela/sdk/system-images/vela-pre-4.0
+ERR WARNING | encryption is off
+ERR WARNING | hvf is not enabled on this aarch64 host.
+ERR WARNING | Unknown Image type 3
+ERR WARNING | Unknown Image type 5
+ERR WARNING | Unknown Image type 4
+ERR WARNING | Unknown Image type 1
+ERR WARNING | cannot add library /Users/jxcz/.vela/sdk/emulator/darwin-aarch64/qemu/darwin-aarch64/lib64/vulkan/libvulkan.dylib: failed
+INFO    | Storing crashdata in: /tmp/android-jxcz/emu-crash.db, detection is enabled
+INFO    | Duplicate loglines will be removed, if you wish to see each indiviudal line launch with the -log-nofilter flag.
+INFO    | Warning: QMetaObject::connectSlotsByName: No matching signal for on_new_posture_requested(int) ((null):0, (null))
+INFO    | Warning: QMetaObject::connectSlotsByName: No matching signal for on_dismiss_posture_selection_dialog() ((null):0, (null))
+INFO    | Warning: QMetaObject::connectSlotsByName: No matching signal for on_new_resizable_requested(PresetEmulatorSizeType) ((null):0, (null))
+INFO    | Warning: QMetaObject::connectSlotsByName: No matching signal for on_dismiss_resizable_dialog() ((null):0, (null))
+INFO    | added library /Users/jxcz/.vela/sdk/emulator/darwin-aarch64/lib64/vulkan/libvulkan.dylib
+Warning: Allowing host microphone input.
+ERR qemu-system-armel: qemu_mprotect__osdep: mprotect failed: Permission denied
+ERR WARNING | *** No gRPC protection active, consider launching with the -grpc-use-jwt flag.***
+INFO    | Started GRPC server at 127.0.0.1:8556, security: Local, auth: none
+INFO    | Advertising in: /Users/jxcz/Library/Caches/TemporaryItems/avd/running/pid_91635.ini
+INFO    | Connecting to bluetooth mesh: localhost:8554
+INFO    | Setting display: 0 configuration to: 336x480, dpi: 360x360
+[10/02 14:44:19] [ 3] [ap] coredump_initialize: /dev/virtblk2 Coredump device not found
+[10/02 14:44:19] [ 7] [ap] NuttX  0.0.0 e0c65f1fdd Feb 25 2025 05:15:15 arm miwear
+uorb [12:255]
+[10/02 14:44:19] [12] [ap] nsh_child: BG uorb
+nsh: uorb: command not found
+[10/02 14:44:19] [12] [ap] nsh_child: BG uorb complete
+kvdbd [13:100]
+bluetoothd [14:100]
+[10/02 14:44:22] [14] [ap] bluetoothd main 34
+[10/02 14:44:22] [14] [ap] /data/misc/bt folder create: 0
+[10/02 14:44:22] [14] [ap] Framework log level: 7, Stack:0, mask:00000000, Snoop: 0
+[10/02 14:44:22] [14] [ap] [195][storage]: bt_storage_init successed
+[10/02 14:44:22] [14] [ap] [113][service_manager]: A2DP-Sink service register success
+[10/02 14:44:22] [14] [ap] [113][service_manager]: A2DP-Src service register success
+[10/02 14:44:22] [14] [ap] [113][service_manager]: AVRCP-TG service register success
+[10/02 14:44:22] [14] [ap] [113][service_manager]: AVRCP-CT service register success
+[10/02 14:44:22] [14] [ap] [113][service_manager]: HFP-HF service register success
+[10/02 14:44:22] [14] [ap] [113][service_manager]: HFP-AG service register success
+[10/02 14:44:22] [14] [ap] [113][service_manager]: SPP service register success
+[10/02 14:44:22] [14] [ap] [113][service_manager]: HID-DEV service register success
+[10/02 14:44:22] [14] [ap] [113][service_manager]: GATTC service register success
+[10/02 14:44:22] [14] [ap] [113][service_manager]: GATTS service register success
+[10/02 14:44:22] [14] [ap] [201][adapter-stm]: Enter, PrevState=(null) ---> NewState=Off
+[10/02 14:44:22] [14] [ap] [316][audio_transport]: audio_transport_open path{4}[sco_ctrl] success
+[10/02 14:44:22] [14] [ap] [303][audio_transport]: bind error: address already in use
+[10/02 14:44:22] [14] [ap] [236][audio_control]: fail to open audio transport
+[10/02 14:44:22] [14] [ap] [402][hfp_ag]: hfp_ag_init: failed to start audio control channel
+[10/02 14:44:22] [14] [ap] [72][h4]: bt_sal_hci_transport_init: g_tlfd = -1
+[10/02 14:44:22] [14] [ap] [53][stack_manager]: stack_manager_cleanup done
+[10/02 14:44:22] [14] [ap] [202][storage]: bt_storage_cleanup
+[10/02 14:44:22] [14] [ap] [269][bt_service]: bt_service_cleanup done
+miwear_activity_service [19:100]
+mediad [24:245]
+rild [25:100]
+dbusdaemon [26:100]
+ofonod [27:100]
+adbd [28:100]
+servicemanager [30:100]
+opteed [31:100]
+qemuprop [35:100]
+[10/02 14:44:22] [24] [ap] media_graph_load, loadgraph from file: /etc/media/graph.conf
+[10/02 14:44:22] [24] [ap]  /dev/video path is no exist!
+[10/02 14:44:22] [24] [ap] media_graph_load, loadgraph succeed
+[10/02 14:44:22] [27] [ap] oFono version 1.34
+[10/02 14:44:22] [27] [ap] Unable to hop onto D-Bus: Failed to connect to socket /var/run/dbus/system_bus_socket: Unknown error 2
+[10/02 14:44:22] [31] [ap] D/TC:0 31 call_initcalls:40 level 1 register_time_source()
+[10/02 14:44:22] [31] [ap] D/TC:0 31 call_initcalls:40 level 3 tee_cryp_init()
+[10/02 14:44:22] [31] [ap] D/TC:0 31 call_initcalls:40 level 3 verify_pseudo_tas_conformance()
+[10/02 14:44:22] [31] [ap] D/TC:0 31 call_initcalls:40 level 4 host_fs_init()
+connected to "boot-properties" qemud service.
+key = ro.product.device.screenshape | value = rect
+[10/02 14:44:22] [24] [ap] pfw domain:SpeakerDomain switch to conf:music
+[10/02 14:44:22] [24] [ap] process adevsink@pcm0p set_parameter set_scenario=music
+[10/02 14:44:22] [24] [ap] process amix@MixSpeaker weights 1 1 1 1 1 1 1 0
+[10/02 14:44:22] [24] [ap] pfw domain:SCOrxDomain switch to conf:disable
+[10/02 14:44:22] [24] [ap] process astreamselect@SelSCO map -1
+[10/02 14:44:22] [24] [ap] pfw domain:PlayDomain switch to conf:speaker
+[10/02 14:44:22] [24] [ap] process astreamselect@SelPlay0 map 0 -1
+[10/02 14:44:22] [24] [ap] astreamselect@SelPlay0 set graph reconfig
+[10/02 14:44:22] [24] [ap] process astreamselect@SelPlay1 map 0 -1
+[10/02 14:44:22] [24] [ap] astreamselect@SelPlay1 set graph reconfig
+[10/02 14:44:22] [24] [ap] process astreamselect@SelPlay2 map 0 -1
+[10/02 14:44:22] [24] [ap] astreamselect@SelPlay2 set graph reconfig
+[10/02 14:44:22] [24] [ap] process astreamselect@SelPlay3 map 0 -1
+[10/02 14:44:22] [24] [ap] astreamselect@SelPlay3 set graph reconfig
+[10/02 14:44:22] [24] [ap] pfw domain:AlarmDomain switch to conf:speaker
+[10/02 14:44:22] [24] [ap] process astreamselect@SelAlarm0 map 0 -1
+[10/02 14:44:22] [24] [ap] astreamselect@SelAlarm0 set graph reconfig
+[10/02 14:44:22] [24] [ap] pfw domain:SCOtxDomain switch to conf:default
+[10/02 14:44:22] [24] [ap] process amoviesink_async@SCOtx stop _
+[10/02 14:44:22] [24] [ap] moviesink_process_command filter amoviesink_async@SCOtx stop. pos 0
+[10/02 14:44:22] [24] [ap] pfw domain:MicDomain switch to conf:capture
+[10/02 14:44:22] [24] [ap] process adevsrc@pcm0c start _
+[10/02 14:44:22] [24] [ap] adevsrc@pcm0c set graph reconfig
+[10/02 14:44:22] [24] [ap] process astreamselect@SelCap map 0 0 -1
+[10/02 14:44:22] [24] [ap] astreamselect@SelCap set graph reconfig
+[10/02 14:44:22] [24] [ap] pfw domain:IncallVolumeDomain switch to conf:X
+[10/02 14:44:22] [24] [ap] pfw domain:TTSVolumeDomain switch to conf:index-5
+[10/02 14:44:22] [24] [ap] process volume@VolSCO volume 10^(-4*(10-5)/20)
+[10/02 14:44:22] [24] [ap] pfw domain:RingVolumeDomain switch to conf:index-5
+[10/02 14:44:22] [24] [ap] process volume@VolRing0 volume 10^(-4*(10-5)/20)
+[10/02 14:44:22] [24] [ap] pfw domain:MediaVolumeDomain switch to conf:index-5
+[10/02 14:44:22] [24] [ap] process volume@VolMedia1 volume 10^(-4*(10-5)/20)
+[10/02 14:44:22] [24] [ap] process volume@VolMedia2 volume 10^(-4*(10-5)/20)
+[10/02 14:44:22] [24] [ap] process volume@VolMedia2 volume 10^(-4*(10-5)/20)
+[10/02 14:44:22] [24] [ap] pfw domain:MusicVolumeDomain switch to conf:index-5
+[10/02 14:44:22] [24] [ap] process volume@VolMusic volume 10^(-4*(10-5)/20)
+[10/02 14:44:22] [24] [ap] pfw domain:AlarmVolumeDomain switch to conf:index-5
+[10/02 14:44:22] [24] [ap] process volume@VolAlarm0 volume 10^(-4*(10-5)/20)
+[10/02 14:44:22] [26] [ap] listening on unix socket /var/run/dbus/system_bus_socket abstract=0
+[10/02 14:44:22] [26] [ap] Successfully listen to unix socket /var/run/dbus/system_bus_socket
+key = ro.product.device.devicetype | value = band
+[10/02 14:44:22] [27] [ap] Successfully connected to unix socket /var/run/dbus/system_bus_socket
+key = ro.opengles.version | value = 131072
+[10/02 14:44:22] [27] [ap] update_record_modem_time flag:0 status:0, target status:0
+[10/02 14:44:22] [27] [ap] driver: 0x140f4cc, name: hfpmodem
+[10/02 14:44:22] [27] [ap] driver: 0x13f7f94, name: atmodem
+[10/02 14:44:22] [27] [ap] driver: 0x140f94c, name: rilmodem
+[10/02 14:44:22] [27] [ap] RILDEV detected modem type ril, 1 SIM slot(s)
+[10/02 14:44:22] [27] [ap] update_record_modem_time flag:0 status:0, target status:0
+[10/02 14:44:22] [31] [ap] D/TC:0 31 call_initcalls:40 level 4 tee_fs_init_key_manager()
+[10/02 14:44:22] [31] [ap] D/TC:0 31 call_initcalls:40 level 6 default_mobj_init()
+[10/02 14:44:22] [31] [ap] D/TC:0 31 optee_bind:70 socket address: --family=unix --path=optee
+[10/02 14:44:22] [31] [ap] D/TC:0 31 optee_server:258 waiting tee client...
+[10/02 14:44:22] [27] [ap] Using /dev/socket/rild as socket for slot 0.
+[10/02 14:44:22] [27] [ap] create_ril: setegid(1001) failed: Unknown error 22 (22)
+[10/02 14:44:22] [27] [ap] create_ril: seteuid(1001) failed: Unknown error 22 (22)
+[10/02 14:44:22] [27] [ap] ofono_modem_reset , err : -115
+telnetd [43:100]
+
+NuttShell (NSH)
+miwear> [Kkey = qemu.sf.fake_camera | value = none
+key = dalvik.vm.heapsize | value = 256m
+key = qemu.hw.mainkeys | value = 0
+key = qemu.sf.lcd_density | value = 360
+key = qemu.timezone | value = Asia/Shanghai
+[10/02 14:44:22] [19] [ap] [btmsg] start_btmsg_client: started, server: btserver
+[10/02 14:44:22] [19] [ap] [btmsg] uv_miwear_message_recv_cb: failed to connect server.
+[10/02 14:44:22] [27] [ap] [0,UNSOL]< UNSOL_RIL_CONNECTED
+[10/02 14:44:22] [27] [ap] [0,0001]> RIL_REQUEST_GET_MODEM_STATUS
+[10/02 14:44:23] [27] [ap] [0,UNSOL]< UNSOL_RESPONSE_RADIO_STATE_CHANGED (state: OFF)
+[10/02 14:44:23] [25] [ap] response RIL_REQUEST_GET_MODEM_STATUS, status is [0]
+[10/02 14:44:23] [27] [ap] [0,0001]< RIL_REQUEST_GET_MODEM_STATUS
+[10/02 14:44:23] [27] [ap] modem_change_state, old state: 0, new state: 1
+[10/02 14:44:23] [28] [ap] adb_register_service (338): id=1, peer=2018
+[10/02 14:44:23] [28] [ap] adb_register_service (338): id=2, peer=2021
+[10/02 14:44:23] [28] [ap] on_child_exit (104): shell 2<->2021 exited with status 255, signal 0, flag 0
+[10/02 14:44:23] [28] [ap] adb_register_service (338): id=3, peer=2024
+[10/02 14:44:24] [28] [ap] on_child_exit (104): shell 3<->2024 exited with status 0, signal 0, flag 0
+[10/02 14:44:24] [28] [ap] adb_register_service (338): id=4, peer=2027
+[10/02 14:44:24] [49] [ap] [AIOTJS] [vapp_main:88] Starting...
+[10/02 14:44:24] [49] [ap] [AIOTJS] [cli_parse_options:511] Parsing args...
+[10/02 14:44:24] [49] [ap] [AIOTJS] [init:140] Initializing framework...
+[10/02 14:44:24] [49] [ap] [LVGL] [User] check_stack_size: tid: 49, Stack size : 131008 lv_nuttx_entry.c:237
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_image_cache_init: heap info: lv_nuttx_image_cache.c:84
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_image_cache_init:   heap: 0x40761040 lv_nuttx_image_cache.c:85
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_image_cache_init:   mem: 0x40761040 lv_nuttx_image_cache.c:86
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_image_cache_init:   mem_size: 10485760 lv_nuttx_image_cache.c:87
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_image_cache_init:   arena: 10485756 lv_nuttx_image_cache.c:88
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_image_cache_init:   ordblks: 2 lv_nuttx_image_cache.c:89
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_image_cache_init:   aordblks: 4 lv_nuttx_image_cache.c:90
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_image_cache_init:   mxordblk: 10350592 lv_nuttx_image_cache.c:91
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_image_cache_init:   uordblks: 5804 lv_nuttx_image_cache.c:92
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_image_cache_init:   fordblks: 10479952 lv_nuttx_image_cache.c:93
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_fbdev_set_file: The framebuffer device was opened successfully lv_nuttx_fbdev.c:104
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_fbdev_set_file: VideoInfo: lv_nuttx_fbdev.c:112
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_fbdev_set_file:       fmt: 11 lv_nuttx_fbdev.c:113
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_fbdev_set_file:      xres: 336 lv_nuttx_fbdev.c:114
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_fbdev_set_file:      yres: 480 lv_nuttx_fbdev.c:115
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_fbdev_set_file:   nplanes: 1 lv_nuttx_fbdev.c:116
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_get_pinfo: PlaneInfo (plane 0): lv_nuttx_fbdev.c:307
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_get_pinfo:     mem: 0x404b6038 lv_nuttx_fbdev.c:308
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_get_pinfo:     fblen: 645120 lv_nuttx_fbdev.c:309
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_get_pinfo:    stride: 672 lv_nuttx_fbdev.c:310
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_get_pinfo:   display: 0 lv_nuttx_fbdev.c:311
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_get_pinfo:       bpp: 16 lv_nuttx_fbdev.c:312
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_get_pinfo: PlaneInfo (plane 0): lv_nuttx_fbdev.c:307
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_get_pinfo:     mem: 0x404b6038 lv_nuttx_fbdev.c:308
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_get_pinfo:     fblen: 645120 lv_nuttx_fbdev.c:309
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_get_pinfo:    stride: 672 lv_nuttx_fbdev.c:310
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_get_pinfo:   display: 0 lv_nuttx_fbdev.c:311
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_get_pinfo:       bpp: 16 lv_nuttx_fbdev.c:312
+[10/02 14:44:24] [49] [ap] [LVGL] [User] fbdev_init_mem2: Use consecutive mem2 = 0x40504c38, yoffset = 480 lv_nuttx_fbdev.c:358
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_fbdev_set_file: Resolution is set to 336x480 at 130dpi lv_nuttx_fbdev.c:158
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_touchscreen_create: touchscreen /dev/input0 opening lv_nuttx_touchscreen.c:69
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_touchscreen_create: touchscreen /dev/input0 open success lv_nuttx_touchscreen.c:76
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_touchscreen_create: touchscreen /dev/utouch opening lv_nuttx_touchscreen.c:69
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_touchscreen_create: touchscreen /dev/utouch open success lv_nuttx_touchscreen.c:76
+[10/02 14:44:24] [49] [ap] [LVGL] [User] font_manager_create: success font_manager.c:104
+[10/02 14:44:24] [49] [ap] [LVGL] [User] font_manager_set_base_path: //font font_manager.c:141
+[10/02 14:44:24] [49] [ap] [LVGL] [Warn] lvx_font_load_config_file: CONFIG_FONT_USE_FONT_FAMILY is not enabled lvx_font_manager.c:89
+[10/02 14:44:24] [49] [ap] [Animation] [registerProperty:357]  repeat registration, name: width , property type: 3
+[10/02 14:44:24] [49] [ap] [Animation] [registerProperty:357]  repeat registration, name: height , property type: 4
+[10/02 14:44:24] [49] [ap] [Animation] [registerProperty:357]  repeat registration, name: rotate , property type: 8
+[10/02 14:44:24] [49] [ap] [Animation] [registerProperty:357]  repeat registration, name: scale , property type: 7
+[10/02 14:44:24] [49] [ap] [Animation] [registerProperty:357]  repeat registration, name: x , property type: 1
+[10/02 14:44:24] [49] [ap] [Animation] [registerProperty:357]  repeat registration, name: y , property type: 2
+[10/02 14:44:24] [49] [ap] [Animation] [registerProperty:357]  repeat registration, name: opacity , property type: 9
+[10/02 14:44:24] [49] [ap] [AIOTJS] [run:341] Running (Async Mode)...
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_uv_fb_init: lvgl fb loop start OK lv_nuttx_libuv.c:384
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_uv_input_init: lvgl input loop start OK lv_nuttx_libuv.c:450
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_uv_uinput_init: skip uv uinput init. lv_nuttx_libuv.c:484
+[10/02 14:44:24] [49] [ap] [LVGL] [User] lv_nuttx_uv_vsync_init: lvgl vsync start OK lv_nuttx_libuv.c:177
+[10/02 14:44:24] [49] [ap] [AIOTJS] [run:436] Wait pImpl->render_.sem(0x406e7ad8)...
+[10/02 14:44:24] [50] [ap] [AIOTJS] [init:366] Initializing App - hap://app/top.jxcz.orialis ...
+[10/02 14:44:24] [50] [ap] [AIOTJS] [runtime_bootstrap_internal:312] Bootstaping...
+[10/02 14:44:24] [50] [ap] [AIOTJS] [bootstrap_globals:105] Bootstaping globals...
+[10/02 14:44:24] [50] [ap] [AIOTJS] [add_builtins:165] Loading buildin modules...
+[10/02 14:44:24] [50] [ap] [AIOTJS] [runtime_bootstrap_internal:323] Bootstaping finished
+[10/02 14:44:24] [50] [ap] [AIOTJS] [run:563] Launching App - hap://app/top.jxcz.orialis ...
+[10/02 14:44:24] [50] [ap] [AIOTJS] [jse_starts_with:1486] ### AIOTJS ### jse_starts_with, str=hap://app/top.jxcz.orialis prefix=hap://app/
+[10/02 14:44:24] [50] [ap] [AIOTJS] [__loadApplication:113] app.jsc not found, load app.js instead...
+[10/02 14:44:25] [50] [ap] [AIOTJS] [findFiles:344] Failed to open dir '/data/quickapp/app/top.jxcz.orialis/i18n
+[10/02 14:44:25] [50] [ap] [AIOTJS] [__miwear_create:101] [interconnect] create
+[10/02 14:44:25] [50] [ap] [AIOTJS] [__miwear_connect:200] [interconnect] call connect
+[10/02 14:44:25] [50] [ap] [quickapp] ===Info:=== app's lifecycle hook function onCreate executed!
+[10/02 14:44:25] [50] [ap] [quickapp] ===Info:=== app's versionName 0.2.1-ui, app's versionCode 3!
+[10/02 14:44:25] [50] [ap] [AIOTJS] [__miwear_listen:350] [interconnect] listen conneced event
+[10/02 14:44:25] [50] [ap] [AIOTJS] [__miwear_listen:355] [interconnect] listen disconneced event
+[10/02 14:44:25] [50] [ap] [AIOTJS] [__miwear_listen:360] [interconnect] listen connection error event
+[10/02 14:44:25] [50] [ap] [AIOTJS] [__miwear_listen:344] [interconnect] listen recv event
+[10/02 14:44:25] [50] [ap] [quickapp] ===Info:=== app's lifecycle hook function onShow executed!
+[10/02 14:44:25] [50] [ap] [AIOTJS] [operator():237] render sem(0x406e7ad8) post...
+[10/02 14:44:25] [50] [ap] [AIOTJS] [operator():239] render sem post OK
+[10/02 14:44:25] [50] [ap] [AIOTJS] [operator():243] Start App loop...
+[10/02 14:44:25] [49] [ap] [AIOTJS] [run:438] Wait pImpl->render_.sem OK
+[10/02 14:44:25] [49] [ap] [AIOTJS] [run:441] Start UI loop...
+[10/02 14:44:25] [49] [ap] [AIOTJS] [__uiloop_event:114] Failed to notify event  - no target : 1
+[10/02 14:44:26] [50] [ap] [quickapp] ===Info:=== js 端：new Page pages/home 执行完成 id 1
+[10/02 14:44:26] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderLeftStyle
+[10/02 14:44:26] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderLeftStyle
+[10/02 14:44:26] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderBottomStyle
+[10/02 14:44:26] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderTopStyle
+[10/02 14:44:26] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderTopStyle
+[10/02 14:44:26] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderBottomStyle
+[10/02 14:44:26] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderBottomStyle
+[10/02 14:44:26] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderBottomStyle
+[10/02 14:44:26] [50] [ap] [AIOTJS] [processOnShowLifecycle:766] wait show_event_sem_(0x4148ccf0)
+[10/02 14:44:27] [49] [ap] [AIOTJS] [operator():738] show_event_sem_(0x4148ccf0) post...
+[10/02 14:44:27] [49] [ap] [AIOTJS] [operator():740] show_event_sem_ post OK
+[10/02 14:44:27] [50] [ap] [AIOTJS] [processOnShowLifecycle:770] wait show_event_sem_ OK
+[10/02 14:44:27] [50] [ap] [quickapp] ===Info:=== lifecycle hook function onShow executed!
+[10/02 14:44:27] [50] [ap] [AIOTJS] [printFrmTraceInfo:46] ### AIOTJS ### ================== framework trace ==================
+[10/02 14:44:27] [50] [ap] [AIOTJS] [printFrmTraceInfo:47] STAGE                COUNT      TOTAL TIME(μs)        AVG TIME(μs)
+[10/02 14:44:27] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] Framework                1                47900             47900.00
+[10/02 14:44:27] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] AppInit                  1                41500             41500.00
+[10/02 14:44:27] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] AppRun                   1               752500            752500.00
+[10/02 14:44:27] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] PageLoad                 1               578100            578100.00
+[10/02 14:44:27] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] PageInit                 1              1505700           1505700.00
+[10/02 14:44:27] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] PageCreate               1              1463300           1463300.00
+[10/02 14:44:27] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] PageDestroy              0                    0                 0.00
+[10/02 14:44:27] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] GC                       1                41600             41600.00
+[10/02 14:44:27] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] JsCall                  74              1866500             25222.97
+[10/02 14:44:27] [50] [ap] [AIOTJS] [printFrmTraceInfo:57] ### AIOTJS ### ================== framework trace ==================
+
+[10/02 14:44:27] [50] [ap] [AIOTJS] [__miwear_connect_cb:134] [interconnect] msg type:2
+[10/02 14:44:27] [50] [ap] [AIOTJS] [__miwear_connect_cb:138] [interconnect] connection failed!
+INFO    | Boot completed in 15423 ms
+INFO    | Increasing screen off timeout, logcat buffer size to 2M.
+INFO    | Not revoking microphone permissions for Google App.
+[10/02 14:44:28] [28] [ap] adb_register_service (338): id=5, peer=2031
+[10/02 14:44:28] [28] [ap] on_child_exit (104): shell 5<->2031 exited with status 255, signal 0, flag 0
+[10/02 14:44:28] [28] [ap] adb_register_service (338): id=6, peer=2035
+[10/02 14:44:28] [28] [ap] on_child_exit (104): shell 6<->2035 exited with status 255, signal 0, flag 0
+[10/02 14:44:28] [50] [ap] [quickapp] ===Error:=== top.jxcz.orialis's interconnect connection failed: undefined
+[10/02 14:44:29] [50] [ap] [quickapp] ===Info:=== js 端：new Page pages/devices 执行完成 id 2
+[10/02 14:44:29] [50] [ap] [quickapp] ===Info:=== lifecycle hook function onHide executed!
+[10/02 14:44:29] [50] [ap] [quickapp] ===Info:=== page pages/home's onDestroyed is called, vmId: 1
+[10/02 14:44:29] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderLeftStyle
+[10/02 14:44:29] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderLeftStyle
+[10/02 14:44:29] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderBottomStyle
+[10/02 14:44:29] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderTopStyle
+[10/02 14:44:29] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderTopStyle
+[10/02 14:44:29] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderBottomStyle
+[10/02 14:44:29] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderBottomStyle
+[10/02 14:44:29] [50] [ap] [AIOTJS] [to_css_key:153] Unknown style - borderBottomStyle
+[10/02 14:44:29] [50] [ap] [AIOTJS] [processOnShowLifecycle:766] wait show_event_sem_(0x413c79e0)
+input: center tap sent
+[10/02 14:44:30] [49] [ap] [AIOTJS] [operator():738] show_event_sem_(0x413c79e0) post...
+[10/02 14:44:30] [49] [ap] [AIOTJS] [operator():740] show_event_sem_ post OK
+[10/02 14:44:30] [50] [ap] [AIOTJS] [processOnShowLifecycle:770] wait show_event_sem_ OK
+[10/02 14:44:30] [50] [ap] [quickapp] ===Info:=== lifecycle hook function onShow executed!
+[10/02 14:44:30] [50] [ap] [AIOTJS] [printFrmTraceInfo:46] ### AIOTJS ### ================== framework trace ==================
+[10/02 14:44:30] [50] [ap] [AIOTJS] [printFrmTraceInfo:47] STAGE                COUNT      TOTAL TIME(μs)        AVG TIME(μs)
+[10/02 14:44:30] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] Framework                1                47900             47900.00
+[10/02 14:44:30] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] AppInit                  1                41500             41500.00
+[10/02 14:44:30] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] AppRun                   1               752500            752500.00
+[10/02 14:44:30] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] PageLoad                 2               965300            482650.00
+[10/02 14:44:30] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] PageInit                 2              2285700           1142850.00
+[10/02 14:44:30] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] PageCreate               2              2221500           1110750.00
+[10/02 14:44:30] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] PageDestroy              2               243200            121600.00
+[10/02 14:44:30] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] GC                       2                61300             30650.00
+[10/02 14:44:30] [50] [ap] [AIOTJS] [printFrmTraceInfo:51] JsCall                 160              5410000             33812.50
+[10/02 14:44:30] [50] [ap] [AIOTJS] [printFrmTraceInfo:57] ### AIOTJS ### ================== framework trace ==================
+
+input: horizontal left swipe sent at y=240
+input: horizontal right swipe sent at y=240

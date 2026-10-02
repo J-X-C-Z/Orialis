@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:lumina_ui/lumina_ui.dart';
 
+import 'catalog_showcase.dart';
+
 void main() => runApp(const LuminaShowcaseApp());
 
 class LuminaShowcaseApp extends StatefulWidget {
@@ -12,14 +14,17 @@ class LuminaShowcaseApp extends StatefulWidget {
 }
 
 class _LuminaShowcaseAppState extends State<LuminaShowcaseApp> {
-  bool dark = false;
+  bool dark = Uri.base.queryParameters['dark'] == '1';
+  bool liquidGlass = Uri.base.queryParameters['liquid'] == '1';
   bool reducedMotion = false;
   bool highPerformance = true;
   double textScale = 1;
   LuminaCardPalette palette = LuminaCardPalette.mist;
   int segment = 0;
   bool completed = false;
-  Locale locale = const Locale('en');
+  Locale locale =
+      Locale(Uri.base.queryParameters['locale'] == 'zh' ? 'zh' : 'en');
+  DateTime date = DateTime(2026, 10, 2);
   final controller = TextEditingController(text: 'A little room to think.');
 
   @override
@@ -45,6 +50,7 @@ class _LuminaShowcaseAppState extends State<LuminaShowcaseApp> {
         brightness: brightness,
         scaffoldBackgroundColor: palette.colors(dark: dark).paper,
         useMaterial3: true,
+        fontFamily: 'LuminaShowcaseSans',
       ),
       home: Builder(
           builder: (context) => MediaQuery(
@@ -55,15 +61,20 @@ class _LuminaShowcaseAppState extends State<LuminaShowcaseApp> {
                 child: LuminaTheme(
                   brightness: brightness,
                   highPerformanceMode: highPerformance,
-                  data: const LuminaThemeData(
+                  data: LuminaThemeData(
+                    liquidGlass: liquidGlass,
                     fontScale: 1,
-                    fontFamily: 'sans-serif',
+                    fontFamily: 'LuminaShowcaseSans',
                     spacingScale: 1,
                     radiusScale: 1,
                     motionScale: 1,
                   ),
                   child: _ShowcasePage(
                     dark: dark,
+                    liquidGlass: liquidGlass,
+                    catalogOnly: Uri.base.queryParameters['catalog'] == '1',
+                    onLiquidGlass: (value) =>
+                        setState(() => liquidGlass = value),
                     reducedMotion: reducedMotion,
                     highPerformance: highPerformance,
                     textScale: textScale,
@@ -72,6 +83,8 @@ class _LuminaShowcaseAppState extends State<LuminaShowcaseApp> {
                     completed: completed,
                     controller: controller,
                     locale: locale,
+                    date: date,
+                    onDate: (value) => setState(() => date = value),
                     onLocale: (value) => setState(() => locale = value),
                     onDark: (value) => setState(() => dark = value),
                     onReducedMotion: (value) =>
@@ -92,6 +105,9 @@ class _LuminaShowcaseAppState extends State<LuminaShowcaseApp> {
 class _ShowcasePage extends StatelessWidget {
   const _ShowcasePage(
       {required this.dark,
+      required this.liquidGlass,
+      required this.onLiquidGlass,
+      this.catalogOnly = false,
       required this.reducedMotion,
       required this.highPerformance,
       required this.textScale,
@@ -100,6 +116,8 @@ class _ShowcasePage extends StatelessWidget {
       required this.completed,
       required this.controller,
       required this.locale,
+      required this.date,
+      required this.onDate,
       required this.onLocale,
       required this.onDark,
       required this.onReducedMotion,
@@ -109,14 +127,22 @@ class _ShowcasePage extends StatelessWidget {
       required this.onSegment,
       required this.onCompleted});
 
-  final bool dark, reducedMotion, highPerformance, completed;
+  final bool dark,
+      reducedMotion,
+      highPerformance,
+      completed,
+      liquidGlass,
+      catalogOnly;
   final double textScale;
   final LuminaCardPalette palette;
   final int segment;
   final TextEditingController controller;
   final Locale locale;
+  final DateTime date;
+  final ValueChanged<DateTime> onDate;
   final ValueChanged<Locale> onLocale;
   final ValueChanged<bool> onDark,
+      onLiquidGlass,
       onReducedMotion,
       onHighPerformance,
       onCompleted;
@@ -139,153 +165,200 @@ class _ShowcasePage extends StatelessWidget {
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(22, 28, 22, 48),
                   sliver: SliverList.list(children: [
-                    Text(tr('LUMINA UI / FIELD NOTES', 'LUMINA UI / 设计手记'),
-                        style: text.labelSmall.copyWith(letterSpacing: 1.6)),
-                    const SizedBox(height: 12),
-                    Text(tr('Quietly capable.', '安静，自有力量。'),
-                        style: text.headlineSmall),
-                    const SizedBox(height: 8),
-                    Text(
-                        tr('A tactile component study in soft materials, clear hierarchy, and calm motion.',
-                            '以柔和材质、清晰层次与从容动效，探索细腻的界面体验。'),
-                        style: text.bodyMedium),
-                    const SizedBox(height: 24),
-                    _section(
-                        context,
-                        tr('Color families', '色彩家族'),
-                        tr('Six tonal palettes, each tuned for both light and dark surfaces.',
-                            '六组色调，为明暗界面分别细致调校。')),
-                    Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: LuminaCardPalette.values
-                            .map((item) => ChoiceChip(
-                                  label: Text(item.name[0].toUpperCase() +
-                                      item.name.substring(1)),
-                                  selected: palette == item,
-                                  onSelected: (_) => onPalette(item),
-                                ))
-                            .toList()),
-                    const SizedBox(height: 18),
-                    LuminaPalette(
-                        palette: palette,
-                        child: LuminaSurface(
-                          depth: LuminaSurfaceDepth.raised,
-                          shoulder: true,
-                          shoulderTitle: tr('A considered surface', '经过斟酌的表面'),
+                    if (!catalogOnly) ...[
+                      Text(tr('LUMINA UI / FIELD NOTES', 'LUMINA UI / 设计手记'),
+                          style: text.labelSmall.copyWith(letterSpacing: 1.6)),
+                      const SizedBox(height: 12),
+                      Text(tr('Quietly capable.', '安静，自有力量。'),
+                          style: text.headlineSmall),
+                      const SizedBox(height: 8),
+                      Text(
+                          tr('A tactile component study in soft materials, clear hierarchy, and calm motion.',
+                              '以柔和材质、清晰层次与从容动效，探索细腻的界面体验。'),
+                          style: text.bodyMedium),
+                      const SizedBox(height: 24),
+                      _section(
+                          context,
+                          tr('Color families', '色彩家族'),
+                          tr('Six tonal palettes, each tuned for both light and dark surfaces.',
+                              '六组色调，为明暗界面分别细致调校。')),
+                      Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: LuminaCardPalette.values
+                              .map((item) => LuminaChip(
+                                    label: Text(item.name[0].toUpperCase() +
+                                        item.name.substring(1)),
+                                    selected: palette == item,
+                                    onSelected: (_) => onPalette(item),
+                                  ))
+                              .toList()),
+                      const SizedBox(height: 18),
+                      LuminaPalette(
+                          palette: palette,
+                          child: LuminaSurface(
+                            depth: LuminaSurfaceDepth.raised,
+                            shoulder: true,
+                            shoulderTitle:
+                                tr('A considered surface', '经过斟酌的表面'),
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                      tr('Light catches the edge, then settles.',
+                                          '光线掠过边缘，轻轻停驻。'),
+                                      style: text.titleSmall),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                      tr('Raised, recessed, and glass materials inherit the selected tint as one coherent family.',
+                                          '凸起、内嵌与玻璃材质共享所选色调，构成统一的色彩家族。'),
+                                      style: text.bodyMedium),
+                                  const SizedBox(height: 18),
+                                  Row(children: [
+                                    Expanded(
+                                        child: LuminaSurface(
+                                            depth: LuminaSurfaceDepth.recessed,
+                                            radius: 18,
+                                            child: Text(
+                                                tr('Recessed detail', '内嵌细节'),
+                                                style: text.bodySmall))),
+                                    const SizedBox(width: 12),
+                                    LuminaButton(
+                                        onPressed: () => showLuminaToast(
+                                            context,
+                                            tr('Surface acknowledged',
+                                                '已确认表面交互')),
+                                        child:
+                                            Text(tr('Try a button', '试试按钮'))),
+                                  ]),
+                                ]),
+                          )),
+                      const SizedBox(height: 28),
+                      _section(
+                          context,
+                          tr('Controls', '交互控件'),
+                          tr('Compact controls with direct, familiar feedback.',
+                              '简洁控件，带来直觉而熟悉的反馈。')),
+                      LuminaSegmented<int>(
+                          items: locale.languageCode == 'zh'
+                              ? const {0: '今天', 1: '即将', 2: '完成'}
+                              : const {0: 'Today', 1: 'Upcoming', 2: 'Done'},
+                          value: segment,
+                          onChanged: onSegment),
+                      const SizedBox(height: 16),
+                      const _ReorderExample(),
+                      const SizedBox(height: 16),
+                      LuminaQuotePreview(
+                          title: tr('Replying to assistant', '回复助手'),
+                          text: tr('Keep the next step small and actionable.',
+                              '把下一步保持简单且可执行。'),
+                          onTap: () => showLuminaToast(
+                              context, tr('Source message', '原消息')),
+                          onDismiss: () => showLuminaToast(
+                              context, tr('Reply cleared', '已取消引用'))),
+                      const SizedBox(height: 16),
+                      LuminaTextField(
+                          controller: controller,
+                          label: tr('A small note', '随手记下'),
+                          hint: tr('Write something…', '写点什么…')),
+                      const SizedBox(height: 16),
+                      LuminaSlidingSelection(
+                          index: segment,
+                          count: 3,
+                          onDragEnd: onSegment,
+                          child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: const [
+                                Text('01'),
+                                Text('02'),
+                                Text('03')
+                              ])),
+                      const SizedBox(height: 26),
+                      _section(
+                          context,
+                          tr('Expandable card', '可折叠卡片'),
+                          tr('Tap the title to fold the contents while preserving their state.',
+                              '轻点标题即可收起内容，同时保留内部状态。')),
+                      LuminaDateNavigator(
+                        label: MaterialLocalizations.of(context)
+                            .formatMediumDate(date),
+                        previousLabel: tr('Previous day', '前一天'),
+                        nextLabel: tr('Next day', '后一天'),
+                        onPrevious: () =>
+                            onDate(date.subtract(const Duration(days: 1))),
+                        onNext: () => onDate(date.add(const Duration(days: 1))),
+                        onSelectDate: () async {
+                          final selected = await showLuminaDatePicker(
+                            context: context,
+                            initialDate: date,
+                            firstDate: DateTime(2020),
+                            lastDate: DateTime(2040, 12, 31),
+                          );
+                          if (selected != null) onDate(selected);
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      LuminaTitledContentCard(
+                        title: tr('Schedules', '当日日程'),
+                        emptyText: tr('No schedules', '这一天没有日程'),
+                        children: [
+                          LuminaCalendarSummary(
+                              title: tr('Design review', '设计评审')),
+                          LuminaCalendarSummary(
+                              title: tr('Send draft', '提交草稿'), deadline: true),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      LuminaCollapsibleCard(
+                          storageId: 'showcase-example',
+                          title: tr('A slower kind of progress', '慢一点，也在前进'),
+                          summary: tr('Three small steps, kept in view.',
+                              '三个小步骤，进度一目了然。'),
                           child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                    tr('Light catches the edge, then settles.',
-                                        '光线掠过边缘，轻轻停驻。'),
-                                    style: text.titleSmall),
-                                const SizedBox(height: 8),
-                                Text(
-                                    tr('Raised, recessed, and glass materials inherit the selected tint as one coherent family.',
-                                        '凸起、内嵌与玻璃材质共享所选色调，构成统一的色彩家族。'),
+                                    tr('Notice what has already moved forward.',
+                                        '看看已经向前迈出的每一步。'),
                                     style: text.bodyMedium),
-                                const SizedBox(height: 18),
-                                Row(children: [
-                                  Expanded(
-                                      child: LuminaSurface(
-                                          depth: LuminaSurfaceDepth.recessed,
-                                          radius: 18,
+                                const SizedBox(height: 12),
+                                LuminaProgress(value: completed ? 1 : .62),
+                                const SizedBox(height: 12),
+                                LuminaButton(
+                                    onPressed: () => onCompleted(!completed),
+                                    child: Text(completed
+                                        ? tr('Reset progress', '重置进度')
+                                        : tr('Complete this step', '完成此步骤'))),
+                              ])),
+                      const SizedBox(height: 26),
+                      _section(
+                          context,
+                          tr('Completion', '完成反馈'),
+                          tr('Completion feedback stays local to this example.',
+                              '完成状态仅保存在此示例中。')),
+                      LuminaCompletionList(
+                        empty: LuminaSurface(
+                            child: Text(tr('Everything is complete.', '全部完成。'),
+                                style: text.bodyMedium)),
+                        children: completed
+                            ? const []
+                            : [
+                                LuminaSurface(
+                                    key: const ValueKey('completion-row'),
+                                    child: Row(children: [
+                                      Expanded(
                                           child: Text(
-                                              tr('Recessed detail', '内嵌细节'),
-                                              style: text.bodySmall))),
-                                  const SizedBox(width: 12),
-                                  LuminaButton(
-                                      onPressed: () => showLuminaToast(
-                                          context, 'Surface acknowledged'),
-                                      child: Text(tr('Try a button', '试试按钮'))),
-                                ]),
-                              ]),
-                        )),
-                    const SizedBox(height: 28),
-                    _section(
-                        context,
-                        tr('Controls', '交互控件'),
-                        tr('Compact controls with direct, familiar feedback.',
-                            '简洁控件，带来直觉而熟悉的反馈。')),
-                    LuminaSegmented<int>(
-                        items: locale.languageCode == 'zh'
-                            ? const {0: '今天', 1: '即将', 2: '完成'}
-                            : const {0: 'Today', 1: 'Upcoming', 2: 'Done'},
-                        value: segment,
-                        onChanged: onSegment),
-                    const SizedBox(height: 16),
-                    LuminaTextField(
-                        controller: controller,
-                        label: tr('A small note', '随手记下'),
-                        hint: tr('Write something…', '写点什么…')),
-                    const SizedBox(height: 16),
-                    LuminaSlidingSelection(
-                        index: segment,
-                        count: 3,
-                        onDragEnd: onSegment,
-                        child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceAround,
-                            children: const [
-                              Text('01'),
-                              Text('02'),
-                              Text('03')
-                            ])),
-                    const SizedBox(height: 26),
-                    _section(
-                        context,
-                        tr('Expandable card', '可折叠卡片'),
-                        tr('Tap the title to fold the contents while preserving their state.',
-                            '轻点标题即可收起内容，同时保留内部状态。')),
-                    LuminaCollapsibleCard(
-                        storageId: 'showcase-example',
-                        title: tr('A slower kind of progress', '慢一点，也在前进'),
-                        summary: tr('Three small steps, kept in view.',
-                            '三个小步骤，进度一目了然。'),
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                  tr('Notice what has already moved forward.',
-                                      '看看已经向前迈出的每一步。'),
-                                  style: text.bodyMedium),
-                              const SizedBox(height: 12),
-                              LuminaProgress(value: completed ? 1 : .62),
-                              const SizedBox(height: 12),
-                              LuminaButton(
-                                  onPressed: () => onCompleted(!completed),
-                                  child: Text(completed
-                                      ? tr('Reset progress', '重置进度')
-                                      : tr('Complete this step', '完成此步骤'))),
-                            ])),
-                    const SizedBox(height: 26),
-                    _section(
-                        context,
-                        tr('Completion', '完成反馈'),
-                        tr('Completion feedback stays local to this example.',
-                            '完成状态仅保存在此示例中。')),
-                    LuminaCompletionList(
-                      empty: LuminaSurface(
-                          child: Text(tr('Everything is complete.', '全部完成。'),
-                              style: text.bodyMedium)),
-                      children: completed
-                          ? const []
-                          : [
-                              LuminaSurface(
-                                  key: const ValueKey('completion-row'),
-                                  child: Row(children: [
-                                    Expanded(
-                                        child: Text(
-                                            tr('Review the first draft',
-                                                '检查初稿'),
-                                            style: text.bodyMedium)),
-                                    LuminaButton(
-                                        onPressed: () => onCompleted(true),
-                                        child: Text(tr('Complete', '完成'))),
-                                  ])),
-                            ],
-                    ),
-                    const SizedBox(height: 26),
+                                              tr('Review the first draft',
+                                                  '检查初稿'),
+                                              style: text.bodyMedium)),
+                                      LuminaButton(
+                                          onPressed: () => onCompleted(true),
+                                          child: Text(tr('Complete', '完成'))),
+                                    ])),
+                              ],
+                      ),
+                      const SizedBox(height: 26),
+                    ],
                     _section(
                         context,
                         tr('Preferences', '偏好设置'),
@@ -296,19 +369,19 @@ class _ShowcasePage extends StatelessWidget {
                           child: Text(
                               locale.languageCode == 'zh' ? '语言' : 'Language',
                               style: text.bodyMedium)),
-                      SegmentedButton<String>(
-                        segments: const [
-                          ButtonSegment(value: 'en', label: Text('EN')),
-                          ButtonSegment(value: 'zh', label: Text('中文')),
-                        ],
-                        selected: {locale.languageCode},
-                        onSelectionChanged: (values) =>
-                            onLocale(Locale(values.first)),
-                      ),
+                      SizedBox(
+                          width: 180,
+                          child: LuminaSegmented<String>(
+                            items: const {'en': 'EN', 'zh': '中文'},
+                            value: locale.languageCode,
+                            onChanged: (value) => onLocale(Locale(value)),
+                          )),
                     ]),
                     const SizedBox(height: 8),
                     _toggle(
                         context, tr('Dark appearance', '深色外观'), dark, onDark),
+                    _toggle(context, tr('Liquid glass', '液态玻璃'), liquidGlass,
+                        onLiquidGlass),
                     _toggle(context, tr('Reduced motion', '减少动态效果'),
                         reducedMotion, onReducedMotion),
                     _toggle(context, tr('High performance', '高性能模式'),
@@ -357,6 +430,8 @@ class _ShowcasePage extends StatelessWidget {
                                     ])),
                         child: Text(tr('Open a bottom sheet', '打开底部面板'))),
                     const SizedBox(height: 28),
+                    const LuminaCatalogShowcase(),
+                    const SizedBox(height: 28),
                     LuminaSelectableText(
                         tr('Select this sentence to preview the package selection controls. The showcase has no backend and stores no personal data.',
                             '选中这段文字，预览组件包的文本选择控件。此展示应用没有后端，也不会保存个人数据。'),
@@ -397,4 +472,38 @@ class _ShowcasePage extends StatelessWidget {
                     style: LuminaTheme.of(context).textTheme.bodyMedium)),
             LuminaSwitch(value: value, onChanged: onChanged),
           ]));
+}
+
+class _ReorderExample extends StatefulWidget {
+  const _ReorderExample();
+  @override
+  State<_ReorderExample> createState() => _ReorderExampleState();
+}
+
+class _ReorderExampleState extends State<_ReorderExample> {
+  final items = ['Plan', 'Create', 'Review'];
+  @override
+  Widget build(BuildContext context) {
+    final chinese = Localizations.localeOf(context).languageCode == 'zh';
+    String label(String item) => chinese
+        ? const {'Plan': '计划', 'Create': '创作', 'Review': '检查'}[item]!
+        : item;
+    return LuminaStack(children: [
+      Text(chinese ? '长按排序' : 'Long press to reorder'),
+      for (final item in items)
+        LuminaLongPressOrderable<String>(
+          key: ValueKey(item),
+          item: item,
+          group: 'showcase',
+          feedback: SizedBox(
+              width: 220, child: LuminaSurface(child: Text(label(item)))),
+          onReorder: (dragged, target) => setState(() {
+            final index = items.indexOf(target);
+            items.remove(dragged);
+            items.insert(index, dragged);
+          }),
+          child: LuminaListRow(title: label(item)),
+        ),
+    ]);
+  }
 }

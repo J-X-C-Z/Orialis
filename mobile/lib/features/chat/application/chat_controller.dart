@@ -15,6 +15,9 @@ class ChatController {
     required String conversationId,
     required String content,
     String attachmentsJson = '[]',
+    String? replyToMessageId,
+    String? replyQuote,
+    String? replyRole,
   }) async {
     state = ChatSendState.sending;
     lastError = null;
@@ -23,6 +26,9 @@ class ChatController {
         conversationId: conversationId,
         content: content,
         attachmentsJson: attachmentsJson,
+        replyToMessageId: replyToMessageId,
+        replyQuote: replyQuote,
+        replyRole: replyRole,
       );
       lastMessageId = message.id;
       await flush();

@@ -213,7 +213,7 @@ void main() {
     'attachment permission refusal returns to the same conversation',
     (tester) async {
       await openChat(tester);
-      await tester.tap(iconAction('添加照片或文件'));
+      await tester.tap(iconAction('附件与快捷指令'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('拍照'));
       await tester.pumpAndSettle();
@@ -280,7 +280,7 @@ void main() {
       );
       expect(tester.takeException(), isNull);
       expect(MarkdownBlock.parse('| 标题 |\n| --- |'), hasLength(1));
-      await tester.tap(iconAction('添加照片或文件'));
+      await tester.tap(iconAction('附件与快捷指令'));
       await tester.pumpAndSettle();
       expect(find.text('选择文件'), findsOneWidget);
       expect(tester.takeException(), isNull);

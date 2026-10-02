@@ -222,6 +222,23 @@ async fn handle_agent_event(
         .unwrap_or(&conversation_id)
         .to_owned();
 
+    let target_device_id = if matches!(kind, "clarify.response" | "approval.response") {
+        match crate::conversation_agent_device(&state.pool, user_id, &conversation_id).await {
+            Ok(device_id) => device_id,
+            Err(error) => {
+                return send_error(
+                    socket,
+                    Some(request_id),
+                    "agent_unavailable",
+                    &format!("conversation routing unavailable: {error:?}"),
+                )
+                .await
+            }
+        }
+    } else {
+        None
+    };
+
     let result = match kind {
         "clarify.response" => {
             let answer = envelope
@@ -239,7 +256,7 @@ async fn handle_agent_event(
             };
             state
                 .agent
-                .send_event_for_user(user_id, None, message)
+                .send_event_for_user(user_id, target_device_id.as_deref(), message)
                 .await
                 .map(|_| ())
                 .map_err(registry_error_message)
@@ -280,7 +297,7 @@ async fn handle_agent_event(
             };
             state
                 .agent
-                .send_event_for_user(user_id, None, message)
+                .send_event_for_user(user_id, target_device_id.as_deref(), message)
                 .await
                 .map(|_| ())
                 .map_err(registry_error_message)
@@ -308,14 +325,8 @@ async fn handle_agent_event(
             } else {
                 format!("/{command}")
             };
-            let response = run_session_command(
-                &state.agent,
-                user_id,
-                &conversation_id,
-                &message_id,
-                &content,
-            )
-            .await;
+            let response =
+                run_session_command(state, user_id, &conversation_id, &message_id, &content).await;
             let payload = match response {
                 Ok(output) => {
                     serde_json::json!({
@@ -370,7 +381,7 @@ async fn handle_agent_event(
                 _ => unreachable!(),
             };
             return match run_session_command(
-                &state.agent,
+                state,
                 user_id,
                 &conversation_id,
                 &request_id,
@@ -418,10 +429,11 @@ async fn handle_agent_event(
 async fn send_agent_request(
     agent: &AgentRegistry,
     user_id: &str,
+    device_id: Option<&str>,
     message: protocol::GatewayMessage,
 ) -> Result<protocol::GatewayMessage, String> {
     let receiver = agent
-        .send_request_for_user(user_id, None, message)
+        .send_request_for_user(user_id, device_id, message)
         .await
         .map_err(registry_error_message)?;
     tokio::time::timeout(Duration::from_secs(60), receiver)
@@ -439,12 +451,15 @@ fn looks_like_slash_confirm(content: &str) -> bool {
 }
 
 async fn run_session_command(
-    agent: &AgentRegistry,
+    state: &AppState,
     user_id: &str,
     conversation_id: &str,
     request_id: &str,
     command: &str,
 ) -> Result<String, String> {
+    let device_id = crate::conversation_agent_device(&state.pool, user_id, conversation_id)
+        .await
+        .map_err(|error| format!("conversation routing unavailable: {error:?}"))?;
     let send = |message_id: String, content: String| protocol::GatewayMessage::MessageSend {
         version: protocol::PROTOCOL_VERSION,
         message_id,
@@ -453,8 +468,9 @@ async fn run_session_command(
         attachments: vec![],
     };
     let first = send_agent_request(
-        agent,
+        &state.agent,
         user_id,
+        device_id.as_deref(),
         send(format!("{request_id}"), command.to_owned()),
     )
     .await?;
@@ -467,8 +483,9 @@ async fn run_session_command(
     }
     // Complete the pending destructive confirm that Hermes just raised.
     let approved = send_agent_request(
-        agent,
+        &state.agent,
         user_id,
+        device_id.as_deref(),
         send(format!("{request_id}-approve"), "/approve".to_owned()),
     )
     .await?;
@@ -515,6 +532,80 @@ async fn send_envelope(socket: &mut WebSocket, envelope: MobileEnvelope) -> Resu
 #[cfg(test)]
 mod session_control_tests {
     use super::looks_like_slash_confirm;
+
+    #[tokio::test]
+    async fn conversation_command_and_confirm_stay_on_bound_device() {
+        use crate::agent_gateway::{protocol::GatewayMessage, AgentCommand};
+        use crate::conversation_routing_tests::{bind, memory_state};
+        use tokio::sync::mpsc;
+        let state = memory_state().await;
+        let _ = bind(&state, "mac-chat", "mac").await.unwrap();
+        let (mac_tx, mut mac_rx) = mpsc::channel(4);
+        let (ao_tx, mut ao_rx) = mpsc::channel(4);
+        state
+            .agent
+            .register_connection(
+                "cm".into(),
+                "u1".into(),
+                "mac".into(),
+                "macos".into(),
+                mac_tx,
+            )
+            .await;
+        state
+            .agent
+            .register_connection(
+                "ca".into(),
+                "u1".into(),
+                "aozora".into(),
+                "linux".into(),
+                ao_tx,
+            )
+            .await;
+        let command_state = state.clone();
+        let task = tokio::spawn(async move {
+            super::run_session_command(&command_state, "u1", "mac-chat", "command-1", "/new").await
+        });
+        for (expected, content) in [
+            ("/new", "Confirm /new approve cancel"),
+            ("/approve", "Done"),
+        ] {
+            let command = tokio::time::timeout(std::time::Duration::from_secs(2), mac_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let AgentCommand::Send(GatewayMessage::MessageSend {
+                message_id,
+                conversation_id,
+                content: sent,
+                ..
+            }) = command
+            else {
+                panic!("wrong command")
+            };
+            assert_eq!(sent, expected);
+            assert!(ao_rx.try_recv().is_err());
+            state
+                .agent
+                .resolve_reply(GatewayMessage::MessageReply {
+                    version: 1,
+                    message_id: format!("reply-{expected}"),
+                    reply_to: message_id,
+                    conversation_id,
+                    content: content.into(),
+                    attachments: vec![],
+                })
+                .await;
+        }
+        assert_eq!(task.await.unwrap().unwrap(), "Done");
+        state.agent.remove_connection("cm").await;
+        assert!(
+            super::run_session_command(&state, "u1", "mac-chat", "command-offline", "/status")
+                .await
+                .is_err()
+        );
+        assert!(ao_rx.try_recv().is_err());
+    }
 
     #[test]
     fn detects_destructive_slash_confirm_prompts() {

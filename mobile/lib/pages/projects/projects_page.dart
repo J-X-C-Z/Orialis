@@ -4,6 +4,7 @@ import '../../app/design/design_components.dart';
 import '../../core/database/app_database.dart';
 import '../../features/projects/data/project_repository.dart';
 import '../../features/events/presentation/task_editor.dart';
+import '../../features/events/presentation/long_press_orderable.dart';
 import '../shared/page_parts.dart';
 
 /// Maps the stored project status onto the product wording.
@@ -14,8 +15,15 @@ String _projectStatusLabel(String status) => switch (status) {
 };
 
 class ProjectsPage extends ConsumerStatefulWidget {
-  const ProjectsPage({this.embedded = false, super.key});
+  const ProjectsPage({
+    this.embedded = false,
+    this.active = true,
+    this.topInset = 0,
+    super.key,
+  });
   final bool embedded;
+  final bool active;
+  final double topInset;
   @override
   ConsumerState<ProjectsPage> createState() => _ProjectsPageState();
 }
@@ -80,7 +88,12 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   }
 
   final _scroll = ScrollController();
+  final _projectListScroll = ScrollController();
+  final _projectDetailScroll = ScrollController();
   void _openProject(Project p) {
+    if (_selected != p.id && _projectDetailScroll.hasClients) {
+      _projectDetailScroll.jumpTo(0);
+    }
     setState(() => _selected = p.id);
     LuminaCardMemory.selectProject(p.id);
   }
@@ -93,11 +106,14 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   @override
   void dispose() {
     _scroll.dispose();
+    _projectListScroll.dispose();
+    _projectDetailScroll.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final desktop = ref.watch(desktopModeProvider);
     final body = StreamBuilder<List<Project>>(
       stream: ref.watch(projectRepositoryProvider).watchProjects(),
       builder: (context, snapshot) {
@@ -105,128 +121,182 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         if (!snapshot.hasData) return const Center(child: LuminaProgress());
         final projects = snapshot.data!;
         final selected = projects.where((p) => p.id == _selected).firstOrNull;
-        return PopScope(
-          canPop: selected == null,
-          onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) _closeProject();
+        return BackButtonListener(
+          onBackButtonPressed: () async {
+            if (!widget.active ||
+                selected == null ||
+                !TickerMode.valuesOf(context).enabled ||
+                ModalRoute.of(context)?.isCurrent == false ||
+                (widget.embedded &&
+                    Navigator.of(context, rootNavigator: true).canPop())) {
+              return false;
+            }
+            _closeProject();
+            return true;
           },
-          child: ListView(
-            controller: _scroll,
-            padding: EdgeInsets.fromLTRB(
-              20,
-              4,
-              20,
-              24 +
-                  LuminaNavigationInset.of(context) +
-                  MediaQuery.paddingOf(context).bottom,
-            ),
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(bottom: 20),
-                child: Row(
+          child: PopScope(
+            canPop: !widget.active || selected == null,
+            onPopInvokedWithResult: (didPop, _) {
+              if (!didPop) _closeProject();
+            },
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                if (desktop &&
+                    constraints.maxWidth >= 840 &&
+                    LuminaNavigationInset.of(context) == 0) {
+                  return _desktopProjects(projects, selected);
+                }
+                return ListView(
+                  controller: _scroll,
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    4 +
+                        widget.topInset +
+                        (widget.embedded
+                            ? 0
+                            : LuminaPageHeaderInset.of(context)),
+                    20,
+                    24 +
+                        LuminaNavigationInset.of(context) +
+                        MediaQuery.paddingOf(context).bottom,
+                  ),
                   children: [
-                    Expanded(
-                      child: Text(
-                        '把想法，逐步实现',
-                        style: LuminaTheme.of(context).textTheme.titleLarge,
-                      ),
-                    ),
-                    LuminaIconButton(
-                      tooltip: '新建项目',
-                      icon: const LuminaIcon(LuminaIcons.add),
-                      onPressed: () => _editProject(),
-                    ),
-                  ],
-                ),
-              ),
-              if (projects.isEmpty)
-                const OrialisEmptyState(text: '为一个稍长的目标建立项目，再拆成可完成的里程碑。'),
-              for (final p in projects)
-                LuminaReveal(
-                  key: ValueKey(p.id),
-                  visible: true,
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 20),
-                    child: LuminaExpandableCard(
-                      expanded: selected?.id == p.id,
-                      onExpand: () => _openProject(p),
-                      header: LuminaCardHeader(
-                        title: p.name,
-                        expanded: selected?.id == p.id,
-                        onTitleTap: () => selected?.id == p.id
-                            ? _closeProject()
-                            : _openProject(p),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            LuminaIconButton(
-                              tooltip: '管理 ${p.name}',
-                              icon: const LuminaIcon(LuminaIcons.more),
-                              onPressed: () async {
-                                final action = await chooseRecordAction(
-                                  context,
-                                );
-                                if (!mounted) return;
-                                if (action == 'edit') await _editProject(p);
-                                if (action == 'delete' &&
-                                    context.mounted &&
-                                    await confirmDelete(context, p.name)) {
-                                  await ref
-                                      .read(projectRepositoryProvider)
-                                      .deleteProject(p);
-                                }
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                      summary: LuminaStack(
-                        gap: 6,
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 20),
+                      child: Row(
                         children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: QuietLabel(
-                                  p.goal ?? '还没有设置目标',
-                                ),
-                              ),
-                              QuietLabel(_projectStatusLabel(p.status)),
-                            ],
+                          Expanded(
+                            child: Text(
+                              '把想法，逐步实现',
+                              style: LuminaTheme.of(
+                                context,
+                              ).textTheme.titleLarge,
+                            ),
                           ),
-                          StreamBuilder<List<ProjectMilestone>>(
-                            stream: ref
-                                .watch(projectRepositoryProvider)
-                                .watchMilestones(p.id),
-                            builder: (_, snapshot) {
-                              final items =
-                                  snapshot.data ?? const <ProjectMilestone>[];
-                              final next = items
-                                  .where((m) => !m.completed)
-                                  .firstOrNull;
-                              return LuminaStack(
-                                gap: 6,
-                                children: [
-                                  QuietLabel(
-                                    '${items.where((m) => m.completed).length} / ${items.length} 里程碑',
-                                  ),
-                                  Text(
-                                    next == null
-                                        ? (items.isEmpty
-                                              ? '下一步：添加里程碑'
-                                              : '全部里程碑已完成')
-                                        : '下一步：${next.title}',
-                                  ),
-                                ],
-                              );
-                            },
+                          LuminaIconButton(
+                            tooltip: '恢复项目默认排序',
+                            icon: const LuminaIcon(LuminaIcons.sync),
+                            onPressed: () => ref
+                                .read(projectRepositoryProvider)
+                                .resetProjectOrder(),
+                          ),
+                          LuminaIconButton(
+                            tooltip: '新建项目',
+                            icon: const LuminaIcon(LuminaIcons.add),
+                            onPressed: () => _editProject(),
                           ),
                         ],
                       ),
-                      detailBuilder: (_) => _details(p),
                     ),
-                  ),
-                ),
-            ],
+                    if (projects.isEmpty)
+                      const OrialisEmptyState(text: '为一个稍长的目标建立项目，再拆成可完成的里程碑。'),
+                    for (final p in projects)
+                      LongPressOrderable<Project>(
+                        key: ValueKey('order:projects:${p.id}'),
+                        item: p,
+                        group: 'projects',
+                        onReorder: (dragged, target) =>
+                            _reorderProjects(projects, dragged, target),
+                        feedback: SizedBox(
+                          width: 320,
+                          child: LuminaSurface(
+                            glass: true,
+                            child: Text(p.name),
+                          ),
+                        ),
+                        child: LuminaReveal(
+                          key: ValueKey(p.id),
+                          visible: true,
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 20),
+                            child: LuminaExpandableCard(
+                              expanded: selected?.id == p.id,
+                              onExpand: () => _openProject(p),
+                              header: LuminaCardHeader(
+                                title: p.name,
+                                expanded: selected?.id == p.id,
+                                onTitleTap: () => selected?.id == p.id
+                                    ? _closeProject()
+                                    : _openProject(p),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    LuminaIconButton(
+                                      tooltip: '管理 ${p.name}',
+                                      icon: const LuminaIcon(LuminaIcons.more),
+                                      onPressed: () async {
+                                        final action = await chooseRecordAction(
+                                          context,
+                                        );
+                                        if (!mounted) return;
+                                        if (action == 'edit') {
+                                          await _editProject(p);
+                                        }
+                                        if (action == 'delete' &&
+                                            context.mounted &&
+                                            await confirmDelete(
+                                              context,
+                                              p.name,
+                                            )) {
+                                          await ref
+                                              .read(projectRepositoryProvider)
+                                              .deleteProject(p);
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              summary: LuminaStack(
+                                gap: 6,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: QuietLabel(p.goal ?? '还没有设置目标'),
+                                      ),
+                                      QuietLabel(_projectStatusLabel(p.status)),
+                                    ],
+                                  ),
+                                  StreamBuilder<List<ProjectMilestone>>(
+                                    stream: ref
+                                        .watch(projectRepositoryProvider)
+                                        .watchMilestones(p.id),
+                                    builder: (_, snapshot) {
+                                      final items =
+                                          snapshot.data ??
+                                          const <ProjectMilestone>[];
+                                      final next = items
+                                          .where((m) => !m.completed)
+                                          .firstOrNull;
+                                      return LuminaStack(
+                                        gap: 6,
+                                        children: [
+                                          QuietLabel(
+                                            '${items.where((m) => m.completed).length} / ${items.length} 里程碑',
+                                          ),
+                                          Text(
+                                            next == null
+                                                ? (items.isEmpty
+                                                      ? '下一步：添加里程碑'
+                                                      : '全部里程碑已完成')
+                                                : '下一步：${next.title}',
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                              detailBuilder: (_) => _details(p),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
           ),
         );
       },
@@ -235,9 +305,303 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         ? body
         : OrialisPageScaffold(
             title: '项目',
+            leading: desktop
+                ? null
+                : LuminaIconButton(
+                    tooltip: '返回',
+                    icon: const LuminaIcon(LuminaIcons.back),
+                    onPressed: () {
+                      if (_selected != null) {
+                        _closeProject();
+                      } else {
+                        Navigator.of(context).maybePop();
+                      }
+                    },
+                  ),
             padding: EdgeInsets.zero,
             body: body,
           );
+  }
+
+  Widget _desktopProjects(List<Project> projects, Project? selected) {
+    final theme = LuminaTheme.of(context);
+    return Padding(
+      key: const ValueKey('desktop-projects-workspace'),
+      padding: EdgeInsets.fromLTRB(
+        24,
+        16 +
+            widget.topInset +
+            (widget.embedded ? 0 : LuminaPageHeaderInset.of(context)),
+        24,
+        24,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('项目工作区', style: theme.textTheme.titleLarge),
+                    const SizedBox(height: 4),
+                    QuietLabel('${projects.length} 个项目，逐步推进每一个目标'),
+                  ],
+                ),
+              ),
+              LuminaButton(
+                icon: const LuminaIcon(LuminaIcons.add),
+                onPressed: () => _editProject(),
+                child: const Text('新建项目'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  width: 280,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(left: 12, bottom: 8),
+                        child: Row(
+                          children: [
+                            const Expanded(child: QuietLabel('全部项目')),
+                            LuminaIconButton(
+                              tooltip: '恢复项目默认排序',
+                              icon: const LuminaIcon(LuminaIcons.sync),
+                              onPressed: () => ref
+                                  .read(projectRepositoryProvider)
+                                  .resetProjectOrder(),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: projects.isEmpty
+                            ? const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: QuietLabel('新建一个项目，把目标拆成具体步骤。'),
+                              )
+                            : ListView.separated(
+                                key: const ValueKey('desktop-project-list'),
+                                controller: _projectListScroll,
+                                padding: const EdgeInsets.fromLTRB(
+                                  2,
+                                  2,
+                                  10,
+                                  16,
+                                ),
+                                itemCount: projects.length,
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(height: 6),
+                                itemBuilder: (_, index) {
+                                  final project = projects[index];
+                                  final isSelected = selected?.id == project.id;
+                                  return LongPressOrderable<Project>(
+                                    key: ValueKey(
+                                      'order:projects:${project.id}',
+                                    ),
+                                    item: project,
+                                    group: 'projects',
+                                    onReorder: (dragged, target) =>
+                                        _reorderProjects(
+                                          projects,
+                                          dragged,
+                                          target,
+                                        ),
+                                    feedback: SizedBox(
+                                      width: 260,
+                                      child: LuminaSurface(
+                                        child: Text(project.name),
+                                      ),
+                                    ),
+                                    child: Semantics(
+                                      selected: isSelected,
+                                      button: true,
+                                      child: LuminaSurface(
+                                        key: ValueKey(
+                                          'desktop-project:${project.id}',
+                                        ),
+                                        radius: 12,
+                                        color: isSelected
+                                            ? theme.colors.accentSoft
+                                            : const Color(0x00000000),
+                                        padding: const EdgeInsets.all(14),
+                                        onTap: () => _openProject(project),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              project.name,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style:
+                                                  theme.textTheme.labelMedium,
+                                            ),
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              project.goal ?? '添加目标，规划下一步',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.bodySmall,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            QuietLabel(
+                                              _projectStatusLabel(
+                                                project.status,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 18),
+                Expanded(
+                  child: LuminaSurface(
+                    key: const ValueKey('desktop-project-detail'),
+                    radius: 18,
+                    padding: EdgeInsets.zero,
+                    child: selected == null
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(32),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    projects.isEmpty ? '从一个目标开始' : '选择一个项目',
+                                    style: theme.textTheme.titleLarge,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    projects.isEmpty
+                                        ? '建立项目，再用里程碑和关联事件把想法变成进展。'
+                                        : '在左侧选择项目，查看目标、里程碑和下一行动。',
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  24,
+                                  20,
+                                  16,
+                                  16,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            selected.name,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.titleLarge,
+                                          ),
+                                          const SizedBox(height: 6),
+                                          QuietLabel(
+                                            _projectStatusLabel(
+                                              selected.status,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    LuminaButton(
+                                      primary: false,
+                                      onPressed: () => _editProject(selected),
+                                      child: const Text('编辑项目'),
+                                    ),
+                                    LuminaIconButton(
+                                      tooltip: '管理 ${selected.name}',
+                                      icon: const LuminaIcon(LuminaIcons.more),
+                                      onPressed: () async {
+                                        final action = await chooseRecordAction(
+                                          context,
+                                        );
+                                        if (!mounted) return;
+                                        if (action == 'edit') {
+                                          await _editProject(selected);
+                                        }
+                                        if (action == 'delete' &&
+                                            mounted &&
+                                            await confirmDelete(
+                                              context,
+                                              selected.name,
+                                            )) {
+                                          await ref
+                                              .read(projectRepositoryProvider)
+                                              .deleteProject(selected);
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const LuminaEngravedDivider(),
+                              Expanded(
+                                child: ListView(
+                                  key: ValueKey(
+                                    'desktop-project-body:${selected.id}',
+                                  ),
+                                  controller: _projectDetailScroll,
+                                  padding: const EdgeInsets.fromLTRB(
+                                    24,
+                                    8,
+                                    24,
+                                    24,
+                                  ),
+                                  children: [_details(selected)],
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _reorderProjects(
+    List<Project> current,
+    Project dragged,
+    Project target,
+  ) async {
+    final ordered = List<Project>.of(current);
+    final from = ordered.indexWhere((project) => project.id == dragged.id);
+    final to = ordered.indexWhere((project) => project.id == target.id);
+    if (from < 0 || to < 0 || from == to) return;
+    final project = ordered.removeAt(from);
+    ordered.insert(to, project);
+    await ref
+        .read(projectRepositoryProvider)
+        .reorderProjects(ordered.map((project) => project.id).toList());
   }
 
   Widget _details(Project project) => Column(

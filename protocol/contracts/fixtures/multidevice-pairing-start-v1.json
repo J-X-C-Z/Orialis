@@ -1,0 +1,12 @@
+{
+  "protocolVersion": "1",
+  "pairingId": "pair_opaque_01",
+  "pairingSecret": "secret_from_target_node_0123456789abcdef",
+  "confirmationCode": "381204",
+  "targetNode": {
+    "displayName": "Office Node",
+    "platform": "linux-x86_64",
+    "nodeVersion": "1.0.0"
+  },
+  "expiresAt": "2026-10-01T09:05:00Z"
+}

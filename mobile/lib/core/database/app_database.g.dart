@@ -8,6 +8,17 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $TasksTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _manualPositionMeta = const VerificationMeta(
+    'manualPosition',
+  );
+  @override
+  late final GeneratedColumn<int> manualPosition = GeneratedColumn<int>(
+    'manual_position',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
@@ -245,6 +256,7 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
   );
   @override
   List<GeneratedColumn> get $columns => [
+    manualPosition,
     id,
     title,
     notes,
@@ -279,6 +291,15 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('manual_position')) {
+      context.handle(
+        _manualPositionMeta,
+        manualPosition.isAcceptableOrUnknown(
+          data['manual_position']!,
+          _manualPositionMeta,
+        ),
+      );
+    }
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
@@ -434,6 +455,10 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
   Task map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return Task(
+      manualPosition: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}manual_position'],
+      ),
       id: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}id'],
@@ -528,6 +553,7 @@ class $TasksTable extends Tasks with TableInfo<$TasksTable, Task> {
 }
 
 class Task extends DataClass implements Insertable<Task> {
+  final int? manualPosition;
   final String id;
   final String title;
   final String? notes;
@@ -550,6 +576,7 @@ class Task extends DataClass implements Insertable<Task> {
   final String? deletedAt;
   final String syncStatus;
   const Task({
+    this.manualPosition,
     required this.id,
     required this.title,
     this.notes,
@@ -575,6 +602,9 @@ class Task extends DataClass implements Insertable<Task> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (!nullToAbsent || manualPosition != null) {
+      map['manual_position'] = Variable<int>(manualPosition);
+    }
     map['id'] = Variable<String>(id);
     map['title'] = Variable<String>(title);
     if (!nullToAbsent || notes != null) {
@@ -625,6 +655,9 @@ class Task extends DataClass implements Insertable<Task> {
 
   TasksCompanion toCompanion(bool nullToAbsent) {
     return TasksCompanion(
+      manualPosition: manualPosition == null && nullToAbsent
+          ? const Value.absent()
+          : Value(manualPosition),
       id: Value(id),
       title: Value(title),
       notes: notes == null && nullToAbsent
@@ -677,6 +710,7 @@ class Task extends DataClass implements Insertable<Task> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return Task(
+      manualPosition: serializer.fromJson<int?>(json['manualPosition']),
       id: serializer.fromJson<String>(json['id']),
       title: serializer.fromJson<String>(json['title']),
       notes: serializer.fromJson<String?>(json['notes']),
@@ -704,6 +738,7 @@ class Task extends DataClass implements Insertable<Task> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'manualPosition': serializer.toJson<int?>(manualPosition),
       'id': serializer.toJson<String>(id),
       'title': serializer.toJson<String>(title),
       'notes': serializer.toJson<String?>(notes),
@@ -729,6 +764,7 @@ class Task extends DataClass implements Insertable<Task> {
   }
 
   Task copyWith({
+    Value<int?> manualPosition = const Value.absent(),
     String? id,
     String? title,
     Value<String?> notes = const Value.absent(),
@@ -751,6 +787,9 @@ class Task extends DataClass implements Insertable<Task> {
     Value<String?> deletedAt = const Value.absent(),
     String? syncStatus,
   }) => Task(
+    manualPosition: manualPosition.present
+        ? manualPosition.value
+        : this.manualPosition,
     id: id ?? this.id,
     title: title ?? this.title,
     notes: notes.present ? notes.value : this.notes,
@@ -777,6 +816,9 @@ class Task extends DataClass implements Insertable<Task> {
   );
   Task copyWithCompanion(TasksCompanion data) {
     return Task(
+      manualPosition: data.manualPosition.present
+          ? data.manualPosition.value
+          : this.manualPosition,
       id: data.id.present ? data.id.value : this.id,
       title: data.title.present ? data.title.value : this.title,
       notes: data.notes.present ? data.notes.value : this.notes,
@@ -820,6 +862,7 @@ class Task extends DataClass implements Insertable<Task> {
   @override
   String toString() {
     return (StringBuffer('Task(')
+          ..write('manualPosition: $manualPosition, ')
           ..write('id: $id, ')
           ..write('title: $title, ')
           ..write('notes: $notes, ')
@@ -847,6 +890,7 @@ class Task extends DataClass implements Insertable<Task> {
 
   @override
   int get hashCode => Object.hashAll([
+    manualPosition,
     id,
     title,
     notes,
@@ -873,6 +917,7 @@ class Task extends DataClass implements Insertable<Task> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is Task &&
+          other.manualPosition == this.manualPosition &&
           other.id == this.id &&
           other.title == this.title &&
           other.notes == this.notes &&
@@ -897,6 +942,7 @@ class Task extends DataClass implements Insertable<Task> {
 }
 
 class TasksCompanion extends UpdateCompanion<Task> {
+  final Value<int?> manualPosition;
   final Value<String> id;
   final Value<String> title;
   final Value<String?> notes;
@@ -920,6 +966,7 @@ class TasksCompanion extends UpdateCompanion<Task> {
   final Value<String> syncStatus;
   final Value<int> rowid;
   const TasksCompanion({
+    this.manualPosition = const Value.absent(),
     this.id = const Value.absent(),
     this.title = const Value.absent(),
     this.notes = const Value.absent(),
@@ -944,6 +991,7 @@ class TasksCompanion extends UpdateCompanion<Task> {
     this.rowid = const Value.absent(),
   });
   TasksCompanion.insert({
+    this.manualPosition = const Value.absent(),
     required String id,
     required String title,
     this.notes = const Value.absent(),
@@ -971,6 +1019,7 @@ class TasksCompanion extends UpdateCompanion<Task> {
        createdAt = Value(createdAt),
        updatedAt = Value(updatedAt);
   static Insertable<Task> custom({
+    Expression<int>? manualPosition,
     Expression<String>? id,
     Expression<String>? title,
     Expression<String>? notes,
@@ -995,6 +1044,7 @@ class TasksCompanion extends UpdateCompanion<Task> {
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
+      if (manualPosition != null) 'manual_position': manualPosition,
       if (id != null) 'id': id,
       if (title != null) 'title': title,
       if (notes != null) 'notes': notes,
@@ -1021,6 +1071,7 @@ class TasksCompanion extends UpdateCompanion<Task> {
   }
 
   TasksCompanion copyWith({
+    Value<int?>? manualPosition,
     Value<String>? id,
     Value<String>? title,
     Value<String?>? notes,
@@ -1045,6 +1096,7 @@ class TasksCompanion extends UpdateCompanion<Task> {
     Value<int>? rowid,
   }) {
     return TasksCompanion(
+      manualPosition: manualPosition ?? this.manualPosition,
       id: id ?? this.id,
       title: title ?? this.title,
       notes: notes ?? this.notes,
@@ -1073,6 +1125,9 @@ class TasksCompanion extends UpdateCompanion<Task> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (manualPosition.present) {
+      map['manual_position'] = Variable<int>(manualPosition.value);
+    }
     if (id.present) {
       map['id'] = Variable<String>(id.value);
     }
@@ -1145,6 +1200,7 @@ class TasksCompanion extends UpdateCompanion<Task> {
   @override
   String toString() {
     return (StringBuffer('TasksCompanion(')
+          ..write('manualPosition: $manualPosition, ')
           ..write('id: $id, ')
           ..write('title: $title, ')
           ..write('notes: $notes, ')
@@ -2089,6 +2145,39 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $MessagesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _replyToMessageIdMeta = const VerificationMeta(
+    'replyToMessageId',
+  );
+  @override
+  late final GeneratedColumn<String> replyToMessageId = GeneratedColumn<String>(
+    'reply_to_message_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _replyQuoteMeta = const VerificationMeta(
+    'replyQuote',
+  );
+  @override
+  late final GeneratedColumn<String> replyQuote = GeneratedColumn<String>(
+    'reply_quote',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _replyRoleMeta = const VerificationMeta(
+    'replyRole',
+  );
+  @override
+  late final GeneratedColumn<String> replyRole = GeneratedColumn<String>(
+    'reply_role',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _conversationIdMeta = const VerificationMeta(
     'conversationId',
   );
@@ -2178,6 +2267,9 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
   );
   @override
   List<GeneratedColumn> get $columns => [
+    replyToMessageId,
+    replyQuote,
+    replyRole,
     conversationId,
     id,
     role,
@@ -2199,6 +2291,27 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('reply_to_message_id')) {
+      context.handle(
+        _replyToMessageIdMeta,
+        replyToMessageId.isAcceptableOrUnknown(
+          data['reply_to_message_id']!,
+          _replyToMessageIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('reply_quote')) {
+      context.handle(
+        _replyQuoteMeta,
+        replyQuote.isAcceptableOrUnknown(data['reply_quote']!, _replyQuoteMeta),
+      );
+    }
+    if (data.containsKey('reply_role')) {
+      context.handle(
+        _replyRoleMeta,
+        replyRole.isAcceptableOrUnknown(data['reply_role']!, _replyRoleMeta),
+      );
+    }
     if (data.containsKey('conversation_id')) {
       context.handle(
         _conversationIdMeta,
@@ -2272,6 +2385,18 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
   Message map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return Message(
+      replyToMessageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}reply_to_message_id'],
+      ),
+      replyQuote: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}reply_quote'],
+      ),
+      replyRole: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}reply_role'],
+      ),
       conversationId: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}conversation_id'],
@@ -2314,6 +2439,9 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
 }
 
 class Message extends DataClass implements Insertable<Message> {
+  final String? replyToMessageId;
+  final String? replyQuote;
+  final String? replyRole;
   final String conversationId;
   final String id;
   final String role;
@@ -2323,6 +2451,9 @@ class Message extends DataClass implements Insertable<Message> {
   final String syncStatus;
   final int remoteVersion;
   const Message({
+    this.replyToMessageId,
+    this.replyQuote,
+    this.replyRole,
     required this.conversationId,
     required this.id,
     required this.role,
@@ -2335,6 +2466,15 @@ class Message extends DataClass implements Insertable<Message> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (!nullToAbsent || replyToMessageId != null) {
+      map['reply_to_message_id'] = Variable<String>(replyToMessageId);
+    }
+    if (!nullToAbsent || replyQuote != null) {
+      map['reply_quote'] = Variable<String>(replyQuote);
+    }
+    if (!nullToAbsent || replyRole != null) {
+      map['reply_role'] = Variable<String>(replyRole);
+    }
     map['conversation_id'] = Variable<String>(conversationId);
     map['id'] = Variable<String>(id);
     map['role'] = Variable<String>(role);
@@ -2348,6 +2488,15 @@ class Message extends DataClass implements Insertable<Message> {
 
   MessagesCompanion toCompanion(bool nullToAbsent) {
     return MessagesCompanion(
+      replyToMessageId: replyToMessageId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(replyToMessageId),
+      replyQuote: replyQuote == null && nullToAbsent
+          ? const Value.absent()
+          : Value(replyQuote),
+      replyRole: replyRole == null && nullToAbsent
+          ? const Value.absent()
+          : Value(replyRole),
       conversationId: Value(conversationId),
       id: Value(id),
       role: Value(role),
@@ -2365,6 +2514,9 @@ class Message extends DataClass implements Insertable<Message> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return Message(
+      replyToMessageId: serializer.fromJson<String?>(json['replyToMessageId']),
+      replyQuote: serializer.fromJson<String?>(json['replyQuote']),
+      replyRole: serializer.fromJson<String?>(json['replyRole']),
       conversationId: serializer.fromJson<String>(json['conversationId']),
       id: serializer.fromJson<String>(json['id']),
       role: serializer.fromJson<String>(json['role']),
@@ -2379,6 +2531,9 @@ class Message extends DataClass implements Insertable<Message> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'replyToMessageId': serializer.toJson<String?>(replyToMessageId),
+      'replyQuote': serializer.toJson<String?>(replyQuote),
+      'replyRole': serializer.toJson<String?>(replyRole),
       'conversationId': serializer.toJson<String>(conversationId),
       'id': serializer.toJson<String>(id),
       'role': serializer.toJson<String>(role),
@@ -2391,6 +2546,9 @@ class Message extends DataClass implements Insertable<Message> {
   }
 
   Message copyWith({
+    Value<String?> replyToMessageId = const Value.absent(),
+    Value<String?> replyQuote = const Value.absent(),
+    Value<String?> replyRole = const Value.absent(),
     String? conversationId,
     String? id,
     String? role,
@@ -2400,6 +2558,11 @@ class Message extends DataClass implements Insertable<Message> {
     String? syncStatus,
     int? remoteVersion,
   }) => Message(
+    replyToMessageId: replyToMessageId.present
+        ? replyToMessageId.value
+        : this.replyToMessageId,
+    replyQuote: replyQuote.present ? replyQuote.value : this.replyQuote,
+    replyRole: replyRole.present ? replyRole.value : this.replyRole,
     conversationId: conversationId ?? this.conversationId,
     id: id ?? this.id,
     role: role ?? this.role,
@@ -2411,6 +2574,13 @@ class Message extends DataClass implements Insertable<Message> {
   );
   Message copyWithCompanion(MessagesCompanion data) {
     return Message(
+      replyToMessageId: data.replyToMessageId.present
+          ? data.replyToMessageId.value
+          : this.replyToMessageId,
+      replyQuote: data.replyQuote.present
+          ? data.replyQuote.value
+          : this.replyQuote,
+      replyRole: data.replyRole.present ? data.replyRole.value : this.replyRole,
       conversationId: data.conversationId.present
           ? data.conversationId.value
           : this.conversationId,
@@ -2433,6 +2603,9 @@ class Message extends DataClass implements Insertable<Message> {
   @override
   String toString() {
     return (StringBuffer('Message(')
+          ..write('replyToMessageId: $replyToMessageId, ')
+          ..write('replyQuote: $replyQuote, ')
+          ..write('replyRole: $replyRole, ')
           ..write('conversationId: $conversationId, ')
           ..write('id: $id, ')
           ..write('role: $role, ')
@@ -2447,6 +2620,9 @@ class Message extends DataClass implements Insertable<Message> {
 
   @override
   int get hashCode => Object.hash(
+    replyToMessageId,
+    replyQuote,
+    replyRole,
     conversationId,
     id,
     role,
@@ -2460,6 +2636,9 @@ class Message extends DataClass implements Insertable<Message> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is Message &&
+          other.replyToMessageId == this.replyToMessageId &&
+          other.replyQuote == this.replyQuote &&
+          other.replyRole == this.replyRole &&
           other.conversationId == this.conversationId &&
           other.id == this.id &&
           other.role == this.role &&
@@ -2471,6 +2650,9 @@ class Message extends DataClass implements Insertable<Message> {
 }
 
 class MessagesCompanion extends UpdateCompanion<Message> {
+  final Value<String?> replyToMessageId;
+  final Value<String?> replyQuote;
+  final Value<String?> replyRole;
   final Value<String> conversationId;
   final Value<String> id;
   final Value<String> role;
@@ -2481,6 +2663,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   final Value<int> remoteVersion;
   final Value<int> rowid;
   const MessagesCompanion({
+    this.replyToMessageId = const Value.absent(),
+    this.replyQuote = const Value.absent(),
+    this.replyRole = const Value.absent(),
     this.conversationId = const Value.absent(),
     this.id = const Value.absent(),
     this.role = const Value.absent(),
@@ -2492,6 +2677,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.rowid = const Value.absent(),
   });
   MessagesCompanion.insert({
+    this.replyToMessageId = const Value.absent(),
+    this.replyQuote = const Value.absent(),
+    this.replyRole = const Value.absent(),
     required String conversationId,
     required String id,
     required String role,
@@ -2507,6 +2695,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
        content = Value(content),
        createdAt = Value(createdAt);
   static Insertable<Message> custom({
+    Expression<String>? replyToMessageId,
+    Expression<String>? replyQuote,
+    Expression<String>? replyRole,
     Expression<String>? conversationId,
     Expression<String>? id,
     Expression<String>? role,
@@ -2518,6 +2709,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
+      if (replyToMessageId != null) 'reply_to_message_id': replyToMessageId,
+      if (replyQuote != null) 'reply_quote': replyQuote,
+      if (replyRole != null) 'reply_role': replyRole,
       if (conversationId != null) 'conversation_id': conversationId,
       if (id != null) 'id': id,
       if (role != null) 'role': role,
@@ -2531,6 +2725,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   }
 
   MessagesCompanion copyWith({
+    Value<String?>? replyToMessageId,
+    Value<String?>? replyQuote,
+    Value<String?>? replyRole,
     Value<String>? conversationId,
     Value<String>? id,
     Value<String>? role,
@@ -2542,6 +2739,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Value<int>? rowid,
   }) {
     return MessagesCompanion(
+      replyToMessageId: replyToMessageId ?? this.replyToMessageId,
+      replyQuote: replyQuote ?? this.replyQuote,
+      replyRole: replyRole ?? this.replyRole,
       conversationId: conversationId ?? this.conversationId,
       id: id ?? this.id,
       role: role ?? this.role,
@@ -2557,6 +2757,15 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (replyToMessageId.present) {
+      map['reply_to_message_id'] = Variable<String>(replyToMessageId.value);
+    }
+    if (replyQuote.present) {
+      map['reply_quote'] = Variable<String>(replyQuote.value);
+    }
+    if (replyRole.present) {
+      map['reply_role'] = Variable<String>(replyRole.value);
+    }
     if (conversationId.present) {
       map['conversation_id'] = Variable<String>(conversationId.value);
     }
@@ -2590,6 +2799,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   @override
   String toString() {
     return (StringBuffer('MessagesCompanion(')
+          ..write('replyToMessageId: $replyToMessageId, ')
+          ..write('replyQuote: $replyQuote, ')
+          ..write('replyRole: $replyRole, ')
           ..write('conversationId: $conversationId, ')
           ..write('id: $id, ')
           ..write('role: $role, ')
@@ -2610,6 +2822,30 @@ class $ConversationsTable extends Conversations
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $ConversationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _pinnedMeta = const VerificationMeta('pinned');
+  @override
+  late final GeneratedColumn<bool> pinned = GeneratedColumn<bool>(
+    'pinned',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("pinned" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _manualPositionMeta = const VerificationMeta(
+    'manualPosition',
+  );
+  @override
+  late final GeneratedColumn<int> manualPosition = GeneratedColumn<int>(
+    'manual_position',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
@@ -2721,6 +2957,8 @@ class $ConversationsTable extends Conversations
   );
   @override
   List<GeneratedColumn> get $columns => [
+    pinned,
+    manualPosition,
     id,
     title,
     type,
@@ -2744,6 +2982,21 @@ class $ConversationsTable extends Conversations
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('pinned')) {
+      context.handle(
+        _pinnedMeta,
+        pinned.isAcceptableOrUnknown(data['pinned']!, _pinnedMeta),
+      );
+    }
+    if (data.containsKey('manual_position')) {
+      context.handle(
+        _manualPositionMeta,
+        manualPosition.isAcceptableOrUnknown(
+          data['manual_position']!,
+          _manualPositionMeta,
+        ),
+      );
+    }
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
@@ -2824,6 +3077,14 @@ class $ConversationsTable extends Conversations
   Conversation map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return Conversation(
+      pinned: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}pinned'],
+      )!,
+      manualPosition: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}manual_position'],
+      ),
       id: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}id'],
@@ -2874,6 +3135,8 @@ class $ConversationsTable extends Conversations
 }
 
 class Conversation extends DataClass implements Insertable<Conversation> {
+  final bool pinned;
+  final int? manualPosition;
   final String id;
   final String title;
   final String type;
@@ -2885,6 +3148,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   final String? deletedAt;
   final String syncStatus;
   const Conversation({
+    required this.pinned,
+    this.manualPosition,
     required this.id,
     required this.title,
     required this.type,
@@ -2899,6 +3164,10 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    map['pinned'] = Variable<bool>(pinned);
+    if (!nullToAbsent || manualPosition != null) {
+      map['manual_position'] = Variable<int>(manualPosition);
+    }
     map['id'] = Variable<String>(id);
     map['title'] = Variable<String>(title);
     map['type'] = Variable<String>(type);
@@ -2916,6 +3185,10 @@ class Conversation extends DataClass implements Insertable<Conversation> {
 
   ConversationsCompanion toCompanion(bool nullToAbsent) {
     return ConversationsCompanion(
+      pinned: Value(pinned),
+      manualPosition: manualPosition == null && nullToAbsent
+          ? const Value.absent()
+          : Value(manualPosition),
       id: Value(id),
       title: Value(title),
       type: Value(type),
@@ -2937,6 +3210,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return Conversation(
+      pinned: serializer.fromJson<bool>(json['pinned']),
+      manualPosition: serializer.fromJson<int?>(json['manualPosition']),
       id: serializer.fromJson<String>(json['id']),
       title: serializer.fromJson<String>(json['title']),
       type: serializer.fromJson<String>(json['type']),
@@ -2953,6 +3228,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'pinned': serializer.toJson<bool>(pinned),
+      'manualPosition': serializer.toJson<int?>(manualPosition),
       'id': serializer.toJson<String>(id),
       'title': serializer.toJson<String>(title),
       'type': serializer.toJson<String>(type),
@@ -2967,6 +3244,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   }
 
   Conversation copyWith({
+    bool? pinned,
+    Value<int?> manualPosition = const Value.absent(),
     String? id,
     String? title,
     String? type,
@@ -2978,6 +3257,10 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     Value<String?> deletedAt = const Value.absent(),
     String? syncStatus,
   }) => Conversation(
+    pinned: pinned ?? this.pinned,
+    manualPosition: manualPosition.present
+        ? manualPosition.value
+        : this.manualPosition,
     id: id ?? this.id,
     title: title ?? this.title,
     type: type ?? this.type,
@@ -2991,6 +3274,10 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   );
   Conversation copyWithCompanion(ConversationsCompanion data) {
     return Conversation(
+      pinned: data.pinned.present ? data.pinned.value : this.pinned,
+      manualPosition: data.manualPosition.present
+          ? data.manualPosition.value
+          : this.manualPosition,
       id: data.id.present ? data.id.value : this.id,
       title: data.title.present ? data.title.value : this.title,
       type: data.type.present ? data.type.value : this.type,
@@ -3013,6 +3300,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   @override
   String toString() {
     return (StringBuffer('Conversation(')
+          ..write('pinned: $pinned, ')
+          ..write('manualPosition: $manualPosition, ')
           ..write('id: $id, ')
           ..write('title: $title, ')
           ..write('type: $type, ')
@@ -3029,6 +3318,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
 
   @override
   int get hashCode => Object.hash(
+    pinned,
+    manualPosition,
     id,
     title,
     type,
@@ -3044,6 +3335,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is Conversation &&
+          other.pinned == this.pinned &&
+          other.manualPosition == this.manualPosition &&
           other.id == this.id &&
           other.title == this.title &&
           other.type == this.type &&
@@ -3057,6 +3350,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
 }
 
 class ConversationsCompanion extends UpdateCompanion<Conversation> {
+  final Value<bool> pinned;
+  final Value<int?> manualPosition;
   final Value<String> id;
   final Value<String> title;
   final Value<String> type;
@@ -3069,6 +3364,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
   final Value<String> syncStatus;
   final Value<int> rowid;
   const ConversationsCompanion({
+    this.pinned = const Value.absent(),
+    this.manualPosition = const Value.absent(),
     this.id = const Value.absent(),
     this.title = const Value.absent(),
     this.type = const Value.absent(),
@@ -3082,6 +3379,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     this.rowid = const Value.absent(),
   });
   ConversationsCompanion.insert({
+    this.pinned = const Value.absent(),
+    this.manualPosition = const Value.absent(),
     required String id,
     required String title,
     this.type = const Value.absent(),
@@ -3098,6 +3397,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
        createdAt = Value(createdAt),
        updatedAt = Value(updatedAt);
   static Insertable<Conversation> custom({
+    Expression<bool>? pinned,
+    Expression<int>? manualPosition,
     Expression<String>? id,
     Expression<String>? title,
     Expression<String>? type,
@@ -3111,6 +3412,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
+      if (pinned != null) 'pinned': pinned,
+      if (manualPosition != null) 'manual_position': manualPosition,
       if (id != null) 'id': id,
       if (title != null) 'title': title,
       if (type != null) 'type': type,
@@ -3126,6 +3429,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
   }
 
   ConversationsCompanion copyWith({
+    Value<bool>? pinned,
+    Value<int?>? manualPosition,
     Value<String>? id,
     Value<String>? title,
     Value<String>? type,
@@ -3139,6 +3444,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Value<int>? rowid,
   }) {
     return ConversationsCompanion(
+      pinned: pinned ?? this.pinned,
+      manualPosition: manualPosition ?? this.manualPosition,
       id: id ?? this.id,
       title: title ?? this.title,
       type: type ?? this.type,
@@ -3156,6 +3463,12 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (pinned.present) {
+      map['pinned'] = Variable<bool>(pinned.value);
+    }
+    if (manualPosition.present) {
+      map['manual_position'] = Variable<int>(manualPosition.value);
+    }
     if (id.present) {
       map['id'] = Variable<String>(id.value);
     }
@@ -3195,6 +3508,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
   @override
   String toString() {
     return (StringBuffer('ConversationsCompanion(')
+          ..write('pinned: $pinned, ')
+          ..write('manualPosition: $manualPosition, ')
           ..write('id: $id, ')
           ..write('title: $title, ')
           ..write('type: $type, ')
@@ -4186,6 +4501,17 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $ProjectsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _manualPositionMeta = const VerificationMeta(
+    'manualPosition',
+  );
+  @override
+  late final GeneratedColumn<int> manualPosition = GeneratedColumn<int>(
+    'manual_position',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
@@ -4357,6 +4683,7 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
   );
   @override
   List<GeneratedColumn> get $columns => [
+    manualPosition,
     id,
     name,
     goal,
@@ -4386,6 +4713,15 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('manual_position')) {
+      context.handle(
+        _manualPositionMeta,
+        manualPosition.isAcceptableOrUnknown(
+          data['manual_position']!,
+          _manualPositionMeta,
+        ),
+      );
+    }
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
@@ -4508,6 +4844,10 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
   Project map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return Project(
+      manualPosition: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}manual_position'],
+      ),
       id: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}id'],
@@ -4582,6 +4922,7 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
 }
 
 class Project extends DataClass implements Insertable<Project> {
+  final int? manualPosition;
   final String id;
   final String name;
   final String? goal;
@@ -4599,6 +4940,7 @@ class Project extends DataClass implements Insertable<Project> {
   final String? deletedAt;
   final String syncStatus;
   const Project({
+    this.manualPosition,
     required this.id,
     required this.name,
     this.goal,
@@ -4619,6 +4961,9 @@ class Project extends DataClass implements Insertable<Project> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (!nullToAbsent || manualPosition != null) {
+      map['manual_position'] = Variable<int>(manualPosition);
+    }
     map['id'] = Variable<String>(id);
     map['name'] = Variable<String>(name);
     if (!nullToAbsent || goal != null) {
@@ -4654,6 +4999,9 @@ class Project extends DataClass implements Insertable<Project> {
 
   ProjectsCompanion toCompanion(bool nullToAbsent) {
     return ProjectsCompanion(
+      manualPosition: manualPosition == null && nullToAbsent
+          ? const Value.absent()
+          : Value(manualPosition),
       id: Value(id),
       name: Value(name),
       goal: goal == null && nullToAbsent ? const Value.absent() : Value(goal),
@@ -4689,6 +5037,7 @@ class Project extends DataClass implements Insertable<Project> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return Project(
+      manualPosition: serializer.fromJson<int?>(json['manualPosition']),
       id: serializer.fromJson<String>(json['id']),
       name: serializer.fromJson<String>(json['name']),
       goal: serializer.fromJson<String?>(json['goal']),
@@ -4711,6 +5060,7 @@ class Project extends DataClass implements Insertable<Project> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'manualPosition': serializer.toJson<int?>(manualPosition),
       'id': serializer.toJson<String>(id),
       'name': serializer.toJson<String>(name),
       'goal': serializer.toJson<String?>(goal),
@@ -4731,6 +5081,7 @@ class Project extends DataClass implements Insertable<Project> {
   }
 
   Project copyWith({
+    Value<int?> manualPosition = const Value.absent(),
     String? id,
     String? name,
     Value<String?> goal = const Value.absent(),
@@ -4748,6 +5099,9 @@ class Project extends DataClass implements Insertable<Project> {
     Value<String?> deletedAt = const Value.absent(),
     String? syncStatus,
   }) => Project(
+    manualPosition: manualPosition.present
+        ? manualPosition.value
+        : this.manualPosition,
     id: id ?? this.id,
     name: name ?? this.name,
     goal: goal.present ? goal.value : this.goal,
@@ -4769,6 +5123,9 @@ class Project extends DataClass implements Insertable<Project> {
   );
   Project copyWithCompanion(ProjectsCompanion data) {
     return Project(
+      manualPosition: data.manualPosition.present
+          ? data.manualPosition.value
+          : this.manualPosition,
       id: data.id.present ? data.id.value : this.id,
       name: data.name.present ? data.name.value : this.name,
       goal: data.goal.present ? data.goal.value : this.goal,
@@ -4801,6 +5158,7 @@ class Project extends DataClass implements Insertable<Project> {
   @override
   String toString() {
     return (StringBuffer('Project(')
+          ..write('manualPosition: $manualPosition, ')
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('goal: $goal, ')
@@ -4823,6 +5181,7 @@ class Project extends DataClass implements Insertable<Project> {
 
   @override
   int get hashCode => Object.hash(
+    manualPosition,
     id,
     name,
     goal,
@@ -4844,6 +5203,7 @@ class Project extends DataClass implements Insertable<Project> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is Project &&
+          other.manualPosition == this.manualPosition &&
           other.id == this.id &&
           other.name == this.name &&
           other.goal == this.goal &&
@@ -4863,6 +5223,7 @@ class Project extends DataClass implements Insertable<Project> {
 }
 
 class ProjectsCompanion extends UpdateCompanion<Project> {
+  final Value<int?> manualPosition;
   final Value<String> id;
   final Value<String> name;
   final Value<String?> goal;
@@ -4881,6 +5242,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
   final Value<String> syncStatus;
   final Value<int> rowid;
   const ProjectsCompanion({
+    this.manualPosition = const Value.absent(),
     this.id = const Value.absent(),
     this.name = const Value.absent(),
     this.goal = const Value.absent(),
@@ -4900,6 +5262,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     this.rowid = const Value.absent(),
   });
   ProjectsCompanion.insert({
+    this.manualPosition = const Value.absent(),
     required String id,
     required String name,
     this.goal = const Value.absent(),
@@ -4922,6 +5285,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
        createdAt = Value(createdAt),
        updatedAt = Value(updatedAt);
   static Insertable<Project> custom({
+    Expression<int>? manualPosition,
     Expression<String>? id,
     Expression<String>? name,
     Expression<String>? goal,
@@ -4941,6 +5305,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
+      if (manualPosition != null) 'manual_position': manualPosition,
       if (id != null) 'id': id,
       if (name != null) 'name': name,
       if (goal != null) 'goal': goal,
@@ -4962,6 +5327,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
   }
 
   ProjectsCompanion copyWith({
+    Value<int?>? manualPosition,
     Value<String>? id,
     Value<String>? name,
     Value<String?>? goal,
@@ -4981,6 +5347,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     Value<int>? rowid,
   }) {
     return ProjectsCompanion(
+      manualPosition: manualPosition ?? this.manualPosition,
       id: id ?? this.id,
       name: name ?? this.name,
       goal: goal ?? this.goal,
@@ -5004,6 +5371,9 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (manualPosition.present) {
+      map['manual_position'] = Variable<int>(manualPosition.value);
+    }
     if (id.present) {
       map['id'] = Variable<String>(id.value);
     }
@@ -5061,6 +5431,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
   @override
   String toString() {
     return (StringBuffer('ProjectsCompanion(')
+          ..write('manualPosition: $manualPosition, ')
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('goal: $goal, ')
@@ -5903,6 +6274,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ProjectsTable projects = $ProjectsTable(this);
   late final $ProjectMilestonesTable projectMilestones =
       $ProjectMilestonesTable(this);
+  late final Index idxMessagesConversationCreated = Index(
+    'idx_messages_conversation_created',
+    'CREATE INDEX idx_messages_conversation_created ON messages (conversation_id, created_at, id)',
+  );
   late final Index idxProjectMilestonesProjectPosition = Index(
     'idx_project_milestones_project_position',
     'CREATE INDEX idx_project_milestones_project_position ON project_milestones (project_id, deleted_at, position, id)',
@@ -5920,12 +6295,14 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     outboxMutations,
     projects,
     projectMilestones,
+    idxMessagesConversationCreated,
     idxProjectMilestonesProjectPosition,
   ];
 }
 
 typedef $$TasksTableCreateCompanionBuilder =
     TasksCompanion Function({
+      Value<int?> manualPosition,
       required String id,
       required String title,
       Value<String?> notes,
@@ -5951,6 +6328,7 @@ typedef $$TasksTableCreateCompanionBuilder =
     });
 typedef $$TasksTableUpdateCompanionBuilder =
     TasksCompanion Function({
+      Value<int?> manualPosition,
       Value<String> id,
       Value<String> title,
       Value<String?> notes,
@@ -5983,6 +6361,11 @@ class $$TasksTableFilterComposer extends Composer<_$AppDatabase, $TasksTable> {
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<int> get manualPosition => $composableBuilder(
+    column: $table.manualPosition,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnFilters(column),
@@ -6098,6 +6481,11 @@ class $$TasksTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<int> get manualPosition => $composableBuilder(
+    column: $table.manualPosition,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnOrderings(column),
@@ -6213,6 +6601,11 @@ class $$TasksTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<int> get manualPosition => $composableBuilder(
+    column: $table.manualPosition,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
@@ -6321,6 +6714,7 @@ class $$TasksTableTableManager
               $$TasksTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<int?> manualPosition = const Value.absent(),
                 Value<String> id = const Value.absent(),
                 Value<String> title = const Value.absent(),
                 Value<String?> notes = const Value.absent(),
@@ -6344,6 +6738,7 @@ class $$TasksTableTableManager
                 Value<String> syncStatus = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TasksCompanion(
+                manualPosition: manualPosition,
                 id: id,
                 title: title,
                 notes: notes,
@@ -6369,6 +6764,7 @@ class $$TasksTableTableManager
               ),
           createCompanionCallback:
               ({
+                Value<int?> manualPosition = const Value.absent(),
                 required String id,
                 required String title,
                 Value<String?> notes = const Value.absent(),
@@ -6392,6 +6788,7 @@ class $$TasksTableTableManager
                 Value<String> syncStatus = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TasksCompanion.insert(
+                manualPosition: manualPosition,
                 id: id,
                 title: title,
                 notes: notes,
@@ -6860,6 +7257,9 @@ typedef $$CalendarEventsTableProcessedTableManager =
     >;
 typedef $$MessagesTableCreateCompanionBuilder =
     MessagesCompanion Function({
+      Value<String?> replyToMessageId,
+      Value<String?> replyQuote,
+      Value<String?> replyRole,
       required String conversationId,
       required String id,
       required String role,
@@ -6872,6 +7272,9 @@ typedef $$MessagesTableCreateCompanionBuilder =
     });
 typedef $$MessagesTableUpdateCompanionBuilder =
     MessagesCompanion Function({
+      Value<String?> replyToMessageId,
+      Value<String?> replyQuote,
+      Value<String?> replyRole,
       Value<String> conversationId,
       Value<String> id,
       Value<String> role,
@@ -6892,6 +7295,21 @@ class $$MessagesTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<String> get replyToMessageId => $composableBuilder(
+    column: $table.replyToMessageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get replyQuote => $composableBuilder(
+    column: $table.replyQuote,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get replyRole => $composableBuilder(
+    column: $table.replyRole,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get conversationId => $composableBuilder(
     column: $table.conversationId,
     builder: (column) => ColumnFilters(column),
@@ -6942,6 +7360,21 @@ class $$MessagesTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<String> get replyToMessageId => $composableBuilder(
+    column: $table.replyToMessageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get replyQuote => $composableBuilder(
+    column: $table.replyQuote,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get replyRole => $composableBuilder(
+    column: $table.replyRole,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get conversationId => $composableBuilder(
     column: $table.conversationId,
     builder: (column) => ColumnOrderings(column),
@@ -6992,6 +7425,19 @@ class $$MessagesTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<String> get replyToMessageId => $composableBuilder(
+    column: $table.replyToMessageId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get replyQuote => $composableBuilder(
+    column: $table.replyQuote,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get replyRole =>
+      $composableBuilder(column: $table.replyRole, builder: (column) => column);
+
   GeneratedColumn<String> get conversationId => $composableBuilder(
     column: $table.conversationId,
     builder: (column) => column,
@@ -7053,6 +7499,9 @@ class $$MessagesTableTableManager
               $$MessagesTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<String?> replyToMessageId = const Value.absent(),
+                Value<String?> replyQuote = const Value.absent(),
+                Value<String?> replyRole = const Value.absent(),
                 Value<String> conversationId = const Value.absent(),
                 Value<String> id = const Value.absent(),
                 Value<String> role = const Value.absent(),
@@ -7063,6 +7512,9 @@ class $$MessagesTableTableManager
                 Value<int> remoteVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessagesCompanion(
+                replyToMessageId: replyToMessageId,
+                replyQuote: replyQuote,
+                replyRole: replyRole,
                 conversationId: conversationId,
                 id: id,
                 role: role,
@@ -7075,6 +7527,9 @@ class $$MessagesTableTableManager
               ),
           createCompanionCallback:
               ({
+                Value<String?> replyToMessageId = const Value.absent(),
+                Value<String?> replyQuote = const Value.absent(),
+                Value<String?> replyRole = const Value.absent(),
                 required String conversationId,
                 required String id,
                 required String role,
@@ -7085,6 +7540,9 @@ class $$MessagesTableTableManager
                 Value<int> remoteVersion = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessagesCompanion.insert(
+                replyToMessageId: replyToMessageId,
+                replyQuote: replyQuote,
+                replyRole: replyRole,
                 conversationId: conversationId,
                 id: id,
                 role: role,
@@ -7119,6 +7577,8 @@ typedef $$MessagesTableProcessedTableManager =
     >;
 typedef $$ConversationsTableCreateCompanionBuilder =
     ConversationsCompanion Function({
+      Value<bool> pinned,
+      Value<int?> manualPosition,
       required String id,
       required String title,
       Value<String> type,
@@ -7133,6 +7593,8 @@ typedef $$ConversationsTableCreateCompanionBuilder =
     });
 typedef $$ConversationsTableUpdateCompanionBuilder =
     ConversationsCompanion Function({
+      Value<bool> pinned,
+      Value<int?> manualPosition,
       Value<String> id,
       Value<String> title,
       Value<String> type,
@@ -7155,6 +7617,16 @@ class $$ConversationsTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<bool> get pinned => $composableBuilder(
+    column: $table.pinned,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get manualPosition => $composableBuilder(
+    column: $table.manualPosition,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnFilters(column),
@@ -7215,6 +7687,16 @@ class $$ConversationsTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<bool> get pinned => $composableBuilder(
+    column: $table.pinned,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get manualPosition => $composableBuilder(
+    column: $table.manualPosition,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnOrderings(column),
@@ -7275,6 +7757,14 @@ class $$ConversationsTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<bool> get pinned =>
+      $composableBuilder(column: $table.pinned, builder: (column) => column);
+
+  GeneratedColumn<int> get manualPosition => $composableBuilder(
+    column: $table.manualPosition,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
@@ -7343,6 +7833,8 @@ class $$ConversationsTableTableManager
               $$ConversationsTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<bool> pinned = const Value.absent(),
+                Value<int?> manualPosition = const Value.absent(),
                 Value<String> id = const Value.absent(),
                 Value<String> title = const Value.absent(),
                 Value<String> type = const Value.absent(),
@@ -7355,6 +7847,8 @@ class $$ConversationsTableTableManager
                 Value<String> syncStatus = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ConversationsCompanion(
+                pinned: pinned,
+                manualPosition: manualPosition,
                 id: id,
                 title: title,
                 type: type,
@@ -7369,6 +7863,8 @@ class $$ConversationsTableTableManager
               ),
           createCompanionCallback:
               ({
+                Value<bool> pinned = const Value.absent(),
+                Value<int?> manualPosition = const Value.absent(),
                 required String id,
                 required String title,
                 Value<String> type = const Value.absent(),
@@ -7381,6 +7877,8 @@ class $$ConversationsTableTableManager
                 Value<String> syncStatus = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ConversationsCompanion.insert(
+                pinned: pinned,
+                manualPosition: manualPosition,
                 id: id,
                 title: title,
                 type: type,
@@ -7923,6 +8421,7 @@ typedef $$OutboxMutationsTableProcessedTableManager =
     >;
 typedef $$ProjectsTableCreateCompanionBuilder =
     ProjectsCompanion Function({
+      Value<int?> manualPosition,
       required String id,
       required String name,
       Value<String?> goal,
@@ -7943,6 +8442,7 @@ typedef $$ProjectsTableCreateCompanionBuilder =
     });
 typedef $$ProjectsTableUpdateCompanionBuilder =
     ProjectsCompanion Function({
+      Value<int?> manualPosition,
       Value<String> id,
       Value<String> name,
       Value<String?> goal,
@@ -7971,6 +8471,11 @@ class $$ProjectsTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<int> get manualPosition => $composableBuilder(
+    column: $table.manualPosition,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnFilters(column),
@@ -8061,6 +8566,11 @@ class $$ProjectsTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<int> get manualPosition => $composableBuilder(
+    column: $table.manualPosition,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get id => $composableBuilder(
     column: $table.id,
     builder: (column) => ColumnOrderings(column),
@@ -8151,6 +8661,11 @@ class $$ProjectsTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<int> get manualPosition => $composableBuilder(
+    column: $table.manualPosition,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
@@ -8238,6 +8753,7 @@ class $$ProjectsTableTableManager
               $$ProjectsTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<int?> manualPosition = const Value.absent(),
                 Value<String> id = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<String?> goal = const Value.absent(),
@@ -8256,6 +8772,7 @@ class $$ProjectsTableTableManager
                 Value<String> syncStatus = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ProjectsCompanion(
+                manualPosition: manualPosition,
                 id: id,
                 name: name,
                 goal: goal,
@@ -8276,6 +8793,7 @@ class $$ProjectsTableTableManager
               ),
           createCompanionCallback:
               ({
+                Value<int?> manualPosition = const Value.absent(),
                 required String id,
                 required String name,
                 Value<String?> goal = const Value.absent(),
@@ -8294,6 +8812,7 @@ class $$ProjectsTableTableManager
                 Value<String> syncStatus = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ProjectsCompanion.insert(
+                manualPosition: manualPosition,
                 id: id,
                 name: name,
                 goal: goal,

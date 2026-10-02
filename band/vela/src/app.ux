@@ -1,0 +1,13 @@
+<script>
+const transport = require('./services/transport')
+const page = require('./services/page')
+const store = require('./services/store')
+export default {
+  wearStore: store,
+  wearTransport: transport,
+  // Route names only: shared navigation metadata, never retained page instances.
+  wearNavigation: ['home'],
+  onCreate() { page.loadPreferences(store); transport.onInit() },
+  onDestroy() { transport.onDestroy() }
+}
+</script>

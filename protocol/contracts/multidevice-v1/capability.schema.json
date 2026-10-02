@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/multidevice-v1/capability.schema.json",
+  "title": "Orialis Node Capability v1",
+  "type": "object",
+  "required": ["name", "version", "available", "risk", "constraints"],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "available": {"type": "boolean"},
+    "risk": {"enum": ["low", "medium", "high"]},
+    "constraints": {"type": "object", "additionalProperties": true},
+    "grant": {"enum": ["allow", "deny", "ask", "unconfigured"]},
+    "grantExpiresAt": {"type": ["string", "null"], "format": "date-time"}
+  },
+  "additionalProperties": false
+}

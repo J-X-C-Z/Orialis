@@ -1,0 +1,15 @@
+<template>
+<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><scroll class="content" scroll-y="true"><div class="stack">
+<div class="header"><div class="back" onclick="goBack"><text class="backText">‹</text></div><text class="title">连接诊断</text></div><text class="sourceLine">{{ vm.sourceShort }}</text><text class="provenance">{{ vm.provenance }}</text>
+<div class="block"><text class="label">手机互联</text><text class="body">{{ vm.connectionStatus }}</text><text class="meta">{{ vm.detail }}</text><div class="button" onclick="diagnose"><text class="buttonText">诊断连接</text></div><div class="button" onclick="ping"><text class="buttonText">发送 Ping</text></div></div>
+<div class="block"><text class="label">最近结果</text><text class="body">{{ vm.lastResult }}</text><text class="meta">Pong 只表示手机回应。</text></div>
+<div class="block"><text class="label">快照</text><text class="body">{{ vm.snapshotSummary }}</text><text class="meta">ACK 在校验、写入和回读后发送。</text></div><div class="block"><div class="back" onclick="goBack"><text class="backText">返回设置</text></div></div>
+</div></scroll></div>
+</template>
+<script>
+const pages = require('../../services/page')
+export default pages.createPage('diagnostics')
+</script>
+<style>
+@import "../../common/wear.css";
+</style>

@@ -1,4 +1,4 @@
-"""Small, transport-neutral Orialis multi-device client scaffold."""
+"""Orialis multi-device SDK and MCP-neutral adapter."""
 
 from .multidevice import (
     CapabilityDecision,
@@ -6,10 +6,13 @@ from .multidevice import (
     MultiDeviceClient,
     MultiDeviceMcpAdapter,
 )
+from .http import HttpTransport, HttpTransportError
 
 __all__ = [
     "CapabilityDecision",
     "ContractError",
     "MultiDeviceClient",
     "MultiDeviceMcpAdapter",
+    "HttpTransport",
+    "HttpTransportError",
 ]

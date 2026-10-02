@@ -65,7 +65,7 @@ DOMAIN_CONTRACTS = {
         "updatedAt", "version", "deletedAt",
     ),
     "schedule": (
-        "id", "title", "description", "location", "startAt", "endAt", "allDay",
+        "id", "title", "description", "location", "startAt", "endAt", "allDay", "important",
         "reminderMinutes", "createdAt", "updatedAt", "version", "deletedAt",
     ),
     "conversation": ("id", "title", "createdAt", "updatedAt"),
@@ -269,6 +269,10 @@ def _validate_task_record(record: Mapping[str, Any]) -> None:
         raise ProtocolError("task.dueTime requires task.due")
     _nullable_non_negative_integer(record["reminderMinutes"], "task.reminderMinutes")
     _nullable_string(record["projectId"], "task.projectId")
+    _nullable_string(record.get("parentTaskId"), "task.parentTaskId")
+    _nullable_string(record.get("scheduleId"), "task.scheduleId")
+    if record.get("parentTaskId") is not None and record.get("scheduleId") is not None:
+        raise ProtocolError("task.parentTaskId and task.scheduleId are mutually exclusive")
     _validate_recurrence(record["recurrence"])
 
 
@@ -283,6 +287,8 @@ def validate_domain_record(kind: str, record: Mapping[str, Any]) -> dict[str, An
     if missing:
         raise ProtocolError(f"{kind}.{sorted(missing)[0]} is required")
     unexpected = set(normalized) - set(DOMAIN_CONTRACTS[kind])
+    if kind == "task":
+        unexpected -= {"parentTaskId", "scheduleId"}
     if unexpected:
         raise ProtocolError(f"{kind} has unsupported fields: {', '.join(sorted(unexpected))}")
     for field in DOMAIN_CONTRACTS[kind]:
@@ -304,6 +310,9 @@ def validate_domain_record(kind: str, record: Mapping[str, Any]) -> dict[str, An
         elif kind == "schedule" and field == "allDay":
             if not isinstance(value, bool):
                 raise ProtocolError("schedule.allDay must be a boolean")
+        elif kind == "schedule" and field == "important":
+            if not isinstance(value, bool):
+                raise ProtocolError("schedule.important must be a boolean")
         elif kind == "schedule" and field == "reminderMinutes":
             _nullable_non_negative_integer(value, "schedule.reminderMinutes")
         elif kind == "task" and field not in {"id", "title", "createdAt", "updatedAt", "version"}:

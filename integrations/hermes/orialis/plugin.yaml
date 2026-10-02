@@ -7,11 +7,43 @@ description: >
   This bridge preserves the v1 message, attachment, ACK, reconnect, and device
   authentication contract, and negotiates non-voice typing, streaming, agent/tool
   state, clarify, approval, slash commands, delivery, sessions, and artifacts.
-  Voice, STT, and TTS are intentionally not supported. Also exposes a read-only
-  capability-discovery tool so Hermes can inspect the server API contract.
+  Voice, STT, and TTS are intentionally not supported. Exposes authenticated,
+  validated tools for the complete user-domain HTTP API currently provided by
+  the server (tasks, projects, milestones, schedules/calendar events,
+  conversations, and messages).
 author: Orialis
 provides_tools:
   - orialis_capabilities
+  - list_tasks
+  - create_task
+  - update_task
+  - delete_task
+  - list_projects
+  - create_project
+  - update_project
+  - delete_project
+  - get_project_summary
+  - list_milestones
+  - create_milestone
+  - get_milestone
+  - update_milestone
+  - delete_milestone
+  - list_schedules
+  - create_schedule
+  - get_schedule
+  - update_schedule
+  - delete_schedule
+  - list_calendar_events
+  - create_calendar_event
+  - get_calendar_event
+  - update_calendar_event
+  - delete_calendar_event
+  - list_conversations
+  - create_conversation
+  - update_conversation
+  - delete_conversation
+  - list_messages
+  - create_message
 requires_env:
   - name: ORIALIS_SERVER_URL
     description: "Orialis Agent Gateway WebSocket URL (for example ws://127.0.0.1:18443/api/v1/agent/ws)"
@@ -23,7 +55,7 @@ requires_env:
     password: false
 optional_env:
   - name: ORIALIS_DEVICE_TOKEN
-    description: "Orialis Agent Gateway device token; required when the server enables Agent authentication"
+    description: "Orialis Agent bearer token; required for chat-based Schedule creation and when Agent authentication is enabled"
     prompt: "Orialis device token (or empty)"
     password: true
   - name: ORIALIS_HOME_CHANNEL

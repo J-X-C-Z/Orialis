@@ -1,0 +1,20 @@
+services:
+  orialis-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.headless
+    image: orialis-server:headless-local
+    read_only: true
+    user: "10001:10001"
+    init: true
+    ports:
+      - "127.0.0.1:18443:18443"
+    volumes:
+      - ./runtime-data:/data:rw
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

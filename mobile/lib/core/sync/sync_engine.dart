@@ -32,8 +32,16 @@ extension SyncStatePresentation on SyncState {
 }
 
 class SyncEngine {
-  SyncEngine({required this.database, required this.config, this.apiClient});
+  SyncEngine({
+    required this.database,
+    required this.config,
+    this.apiClient,
+    this.includeChat = true,
+    this.requireSession = false,
+  });
 
+  final bool includeChat;
+  final bool requireSession;
   final AppDatabase database;
   final AppConfig config;
   final OrialisApiClient? apiClient;
@@ -60,6 +68,9 @@ class SyncEngine {
 
   Future<SyncState> syncOnce() async {
     try {
+      if (requireSession && await config.sessionToken() == null) {
+        return SyncState.authRequired;
+      }
       final api = await _resolveApi();
       _serverCapabilities = null;
       final outbox = _outboxStore;
@@ -67,10 +78,15 @@ class SyncEngine {
       await outbox.recoverAcknowledgedEntities();
       // A task can reference a schedule, and a child can reference a task.
       // Upload schedules before tasks; _pushTasks uploads roots before children.
-      await Future.wait([_pushConversations(api), _pushCalendarEvents(api)]);
+      await Future.wait([
+        if (includeChat) _pushConversations(api),
+        _pushCalendarEvents(api),
+      ]);
       await _pushTasks(api);
-      await _pullConversations(api);
-      await Future.wait([_pushMessages(api), _pullMessages(api)]);
+      if (includeChat) {
+        await _pullConversations(api);
+        await Future.wait([_pushMessages(api), _pullMessages(api)]);
+      }
       await _pull(api);
       await _pushTasks(api, includeDerivedCompletionMutations: true);
       await _pushProjects(api);
@@ -109,6 +125,8 @@ class SyncEngine {
         result = await api.createConversation(
           id: conversation.id,
           title: conversation.title,
+          pinned: conversation.pinned,
+          manualPosition: conversation.manualPosition,
           mutationId: mutationId,
         );
       } else if (conversation.syncStatus == 'pendingDelete') {
@@ -128,6 +146,8 @@ class SyncEngine {
           conversation.title,
           conversation.remoteVersion,
           mutationId,
+          pinned: conversation.pinned,
+          manualPosition: conversation.manualPosition,
         );
       }
       final remoteVersion =
@@ -177,6 +197,7 @@ class SyncEngine {
               'startDate': project.startDate,
               'due': project.due,
               'nextActionTaskId': project.nextActionTaskId,
+              'manualPosition': project.manualPosition,
               'version': project.version,
               'createdAt': project.createdAt,
               'updatedAt': project.updatedAt,
@@ -193,20 +214,45 @@ class SyncEngine {
       try {
         final payload =
             jsonDecode(mutation.payloadJson) as Map<String, dynamic>;
+        Map<String, dynamic> result = {};
         if (mutation.operation == 'create') {
-          await api.createProject(payload, mutation.mutationId);
+          result = await api.createProject(payload, mutation.mutationId);
         } else if (mutation.operation == 'delete') {
           await api.deleteProject(project.id, mutation.mutationId);
         } else {
-          await api.updateProject(project.id, {
+          result = await api.updateProject(project.id, {
             ...payload,
             'baseVersion': mutation.baseVersion,
           }, mutation.mutationId);
         }
         await outbox.acknowledge(mutation.mutationId);
-        await (database.update(database.projects)
-              ..where((row) => row.id.equals(project.id)))
-            .write(const ProjectsCompanion(syncStatus: Value('synced')));
+        final remoteVersion =
+            (result['version'] as num?)?.toInt() ?? project.remoteVersion + 1;
+        await database.transaction(() async {
+          final current = await (database.select(
+            database.projects,
+          )..where((r) => r.id.equals(project.id))).getSingle();
+          await (database.update(
+            database.projects,
+          )..where((r) => r.id.equals(project.id))).write(
+            ProjectsCompanion(
+              version: Value(remoteVersion),
+              remoteVersion: Value(remoteVersion),
+              syncStatus: Value(
+                current.localRevision == mutation.entityRevision
+                    ? 'synced'
+                    : current.syncStatus == 'pendingCreate'
+                    ? 'pendingUpdate'
+                    : current.syncStatus,
+              ),
+            ),
+          );
+          await outbox.rebasePendingForEntity(
+            entityType: 'project',
+            entityId: project.id,
+            baseVersion: remoteVersion,
+          );
+        });
       } on DioException catch (error) {
         if (error.response?.statusCode == 409) {
           await outbox.markConflict(mutation.mutationId, error);
@@ -330,6 +376,8 @@ class SyncEngine {
               id: id,
               title: title,
               type: Value(type),
+              pinned: Value(value['pinned'] as bool? ?? false),
+              manualPosition: Value((value['manualPosition'] as num?)?.toInt()),
               createdAt: createdAt,
               updatedAt: updatedAt,
               version: Value(remoteVersion),
@@ -744,6 +792,7 @@ class SyncEngine {
           .into(database.tasks)
           .insertOnConflictUpdate(
             TasksCompanion.insert(
+              manualPosition: Value((value['manualPosition'] as num?)?.toInt()),
               id: id,
               title: value['title'] as String,
               notes: Value(value['notes'] as String?),
@@ -887,6 +936,7 @@ class SyncEngine {
           .into(database.projects)
           .insertOnConflictUpdate(
             ProjectsCompanion.insert(
+              manualPosition: Value((value['manualPosition'] as num?)?.toInt()),
               id: id,
               name: value['name'] as String,
               goal: Value(value['goal'] as String?),
@@ -1014,6 +1064,9 @@ class SyncEngine {
           id: message.id,
           content: message.content,
           attachments: attachments,
+          replyToMessageId: message.replyToMessageId,
+          replyQuote: message.replyQuote,
+          replyRole: message.replyRole,
         );
       } on DioException catch (error) {
         // The remote conversation may have been deleted independently. This
@@ -1127,6 +1180,9 @@ class SyncEngine {
             .into(database.messages)
             .insertOnConflictUpdate(
               MessagesCompanion.insert(
+                replyToMessageId: Value(value['replyToMessageId'] as String?),
+                replyQuote: Value(value['replyQuote'] as String?),
+                replyRole: Value(value['replyRole'] as String?),
                 conversationId: remoteConversationId,
                 id: id,
                 role: value['role'] as String,
@@ -1363,6 +1419,7 @@ class SyncEngine {
     'reminderMinutes': task.reminderMinutes,
     'projectId': task.projectId,
     'parentTaskId': task.parentTaskId,
+    'manualPosition': task.manualPosition,
     'scheduleId': task.scheduleId,
     'recurrence': task.recurrence == null ? null : jsonDecode(task.recurrence!),
     'createdAt': task.createdAt,

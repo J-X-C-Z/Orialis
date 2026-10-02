@@ -14,6 +14,7 @@ class _LuminaMaterial extends CustomPainter {
     required this.pressed,
     this.glass = false,
     this.diffuseGlass = false,
+    this.liquidGlass = false,
     this.cheapShadow = false,
     this.blurCompensation = 0,
   });
@@ -26,12 +27,30 @@ class _LuminaMaterial extends CustomPainter {
   final double? shoulderWidth;
   final bool glass;
   final bool diffuseGlass;
+  final bool liquidGlass;
   final bool cheapShadow;
 
   /// 0–1 — rises as blur level drops so tint + micro-noise + rim replace sigma.
   final double blurCompensation;
 
+  static final Map<(Size, double, bool, double?), Path> _outlineCache = {};
+
   Path _outline(Size size) {
+    final key = (size, radius, shoulder, shoulderWidth);
+    final hit = _outlineCache.remove(key);
+    if (hit != null) {
+      _outlineCache[key] = hit;
+      return hit;
+    }
+    final path = _makeOutline(size);
+    if (_outlineCache.length >= 64) {
+      _outlineCache.remove(_outlineCache.keys.first);
+    }
+    _outlineCache[key] = path;
+    return path;
+  }
+
+  Path _makeOutline(Size size) {
     final w = size.width, h = size.height;
     final r = radius.clamp(0.0, size.shortestSide / 2).toDouble();
     if (!shoulder || w < 160 || h < 64) {
@@ -121,6 +140,10 @@ class _LuminaMaterial extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
     final path = _outline(size), rect = Offset.zero & size;
+    if (liquidGlass) {
+      _paintLiquidGlass(canvas, path, rect);
+      return;
+    }
     final inset = depth == LuminaSurfaceDepth.recessed;
     final light = colors.dark
         ? const Color(0xFF4B5E6D)
@@ -171,7 +194,7 @@ class _LuminaMaterial extends CustomPainter {
       );
     }
     final bodyKey =
-        '${colors.dark}|$glass|$diffuseGlass|$inset|$contrast|${tint.toARGB32()}|${rect.width.toStringAsFixed(1)}x${rect.height.toStringAsFixed(1)}';
+        '${colors.dark}|$glass|$diffuseGlass|$inset|$contrast|${tint.toARGB32()}|${colors.surface.toARGB32()}|${colors.accent.toARGB32()}|${rect.width.toStringAsFixed(1)}x${rect.height.toStringAsFixed(1)}';
     canvas.drawPath(
       path,
       Paint()
@@ -220,7 +243,7 @@ class _LuminaMaterial extends CustomPainter {
         rect,
         Paint()
           ..shader = _grainShader
-          ..color = Color.fromRGBO(255, 255, 255, colors.dark ? .55 : 1),
+          ..color = Color.fromRGBO(255, 255, 255, colors.dark ? .28 : 1),
       );
       if (!inset) {
         canvas.drawPath(
@@ -228,11 +251,15 @@ class _LuminaMaterial extends CustomPainter {
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 3
-            ..shader = ui.Gradient.linear(
-              rect.topCenter,
-              rect.bottomCenter,
-              [light.withValues(alpha: .65), light.withValues(alpha: 0)],
-              [0, .32],
+            ..shader = _cachedGradient(
+              _rimGradientCache,
+              'card|${colors.dark}|${rect.height}',
+              () => ui.Gradient.linear(
+                rect.topCenter,
+                rect.bottomCenter,
+                [light.withValues(alpha: .65), light.withValues(alpha: 0)],
+                [0, .32],
+              ),
             ),
         );
       }
@@ -300,22 +327,26 @@ class _LuminaMaterial extends CustomPainter {
         ..strokeWidth = focused ? 3 : 1.5
         ..shader = focused || contrast
             ? null
-            : ui.Gradient.linear(rect.topLeft, rect.bottomRight, [
-                light.withValues(
-                  alpha: inset
-                      ? .12
-                      : glass
-                      ? .90
-                      : .20,
-                ),
-                light.withValues(
-                  alpha: inset
-                      ? .50
-                      : glass
-                      ? .28
-                      : .08,
-                ),
-              ])
+            : _cachedGradient(
+                _rimGradientCache,
+                'edge|${colors.dark}|$inset|$glass|${rect.size}',
+                () => ui.Gradient.linear(rect.topLeft, rect.bottomRight, [
+                  light.withValues(
+                    alpha: inset
+                        ? .12
+                        : glass
+                        ? .90
+                        : .20,
+                  ),
+                  light.withValues(
+                    alpha: inset
+                        ? .50
+                        : glass
+                        ? .28
+                        : .08,
+                  ),
+                ]),
+              )
         ..color = focused
             ? colors.accent
             : contrast
@@ -327,6 +358,156 @@ class _LuminaMaterial extends CustomPainter {
     }
     canvas.restore();
   }
+
+  /// Thin, clear glass: broad highlights and soft occlusion replace the grain,
+  /// solid extrusion and deep inset bevel of the original material. Shadows
+  /// stay outside the transparent body instead of muddying its background.
+  void _paintLiquidGlass(Canvas canvas, Path path, Rect rect) {
+    final inset = depth == LuminaSurfaceDepth.recessed;
+    final white = const Color(0xFFFFFFFF);
+    final shadow = colors.dark
+        ? const Color(0xFF020812)
+        : const Color(0xFF415B78);
+    if (!contrast && !inset) {
+      canvas.save();
+      canvas.clipPath(
+        Path()
+          ..fillType = PathFillType.evenOdd
+          ..addRect(rect.inflate(48))
+          ..addPath(path, Offset.zero),
+      );
+      canvas.drawPath(
+        path.shift(Offset(0, pressed ? 2 : 7)),
+        Paint()
+          ..color = shadow.withValues(alpha: colors.dark ? .22 : .085)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 14),
+      );
+      canvas.drawPath(
+        path.shift(const Offset(0, 1)),
+        Paint()
+          ..color = shadow.withValues(alpha: colors.dark ? .12 : .045)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+      );
+      canvas.restore();
+    }
+    if (contrast) {
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = Color.alphaBlend(tint, colors.surface).withValues(alpha: 1),
+      );
+    } else {
+      final alpha =
+          tint.a *
+          (inset
+              ? .28
+              : colors.dark
+              ? .66
+              : .46);
+      final key =
+          'liquid|${colors.dark}|$inset|${tint.toARGB32()}|${rect.size}';
+      canvas.drawPath(
+        path,
+        Paint()
+          ..shader = _cachedGradient(
+            _bodyGradientCache,
+            key,
+            () => ui.Gradient.linear(
+              rect.topLeft,
+              rect.bottomRight,
+              [
+                Color.lerp(
+                  tint,
+                  white,
+                  colors.dark ? .08 : .50,
+                )!.withValues(alpha: alpha + .14),
+                tint.withValues(alpha: alpha),
+                Color.lerp(
+                  tint,
+                  colors.accent,
+                  .06,
+                )!.withValues(alpha: alpha * .85),
+                Color.lerp(
+                  tint,
+                  white,
+                  colors.dark ? .04 : .28,
+                )!.withValues(alpha: alpha + .06),
+              ],
+              [0, .35, .72, 1],
+            ),
+          ),
+      );
+      canvas.save();
+      canvas.clipPath(path);
+      // A wide specular wash has no visible texture or hard highlight band.
+      canvas.drawRect(
+        rect,
+        Paint()
+          ..shader = _cachedGradient(
+            _bodyGradientCache,
+            'specular|${colors.dark}|${rect.size}',
+            () => ui.Gradient.radial(
+              Offset(rect.width * .18, -rect.height * .2),
+              math.max(rect.width, rect.height) * .85,
+              [
+                white.withValues(alpha: colors.dark ? .055 : .22),
+                white.withValues(alpha: 0),
+              ],
+            ),
+          ),
+      );
+      canvas.drawPath(
+        path.shift(const Offset(0, .8)),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.8
+          ..shader = _cachedGradient(
+            _rimGradientCache,
+            'liquid-inner|${colors.dark}|${rect.size}',
+            () => ui.Gradient.linear(
+              rect.topCenter,
+              rect.bottomCenter,
+              [
+                white.withValues(alpha: colors.dark ? .12 : .42),
+                white.withValues(alpha: 0),
+                white.withValues(alpha: colors.dark ? .06 : .18),
+              ],
+              [0, .4, 1],
+            ),
+          ),
+      );
+      canvas.restore();
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = focused ? 2 : .8
+        ..color = focused
+            ? colors.accent
+            : contrast
+            ? colors.muted
+            : white
+        ..shader = focused || contrast
+            ? null
+            : _cachedGradient(
+                _rimGradientCache,
+                'liquid-edge|${colors.dark}|$inset|${rect.size}',
+                () => ui.Gradient.linear(
+                  rect.topLeft,
+                  rect.bottomRight,
+                  [
+                    white.withValues(alpha: colors.dark ? .34 : .84),
+                    white.withValues(alpha: colors.dark ? .06 : .18),
+                    white.withValues(alpha: colors.dark ? .19 : .52),
+                  ],
+                  [0, .55, 1],
+                ),
+              ),
+    );
+  }
+
+  static final Map<Size, List<Offset>> _glassGrainPoints = {};
 
   /// Micro-noise + soft highlight that replaces the quality of a large
   /// Gaussian when the blur budget is BlurM/S/XS.
@@ -351,15 +532,26 @@ class _LuminaMaterial extends CustomPainter {
         ),
     );
     // Sparse deterministic grain: fixed lattice, no RNG per frame.
-    final grain = Paint()..color = light.withValues(alpha: .045 * amount);
-    const step = 7.0;
-    for (var y = rect.top + 3; y < rect.bottom; y += step) {
-      var x = rect.left + ((y / step).truncate() % 2 == 0 ? 1.5 : 4.5);
-      while (x < rect.right) {
-        canvas.drawCircle(Offset(x, y), .6, grain);
-        x += step;
+    final grain = Paint()
+      ..color = light.withValues(alpha: .045 * amount)
+      ..strokeWidth = 1.2
+      ..strokeCap = StrokeCap.round;
+    final points = _glassGrainPoints.putIfAbsent(rect.size, () {
+      if (_glassGrainPoints.length >= 32) {
+        _glassGrainPoints.remove(_glassGrainPoints.keys.first);
       }
-    }
+      const step = 7.0;
+      return [
+        for (var y = 3.0; y < rect.height; y += step)
+          for (
+            var x = (y / step).truncate() % 2 == 0 ? 1.5 : 4.5;
+            x < rect.width;
+            x += step
+          )
+            Offset(x, y),
+      ];
+    });
+    canvas.drawPoints(ui.PointMode.points, points, grain);
     canvas.restore();
   }
 
@@ -377,6 +569,7 @@ class _LuminaMaterial extends CustomPainter {
       old.pressed != pressed ||
       old.glass != glass ||
       old.diffuseGlass != diffuseGlass ||
+      old.liquidGlass != liquidGlass ||
       old.cheapShadow != cheapShadow ||
       old.blurCompensation != blurCompensation;
 }

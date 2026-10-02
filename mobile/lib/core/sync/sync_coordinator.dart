@@ -10,13 +10,19 @@ class SyncCoordinator {
   SyncCoordinator({
     required this.sync,
     required this.realtime,
-    required this.chatRepository,
+    this.chatRepository,
+    this.localChanges,
+    this.localChangeDelay = const Duration(milliseconds: 250),
   });
 
   final Future<SyncState> Function() sync;
   final MobileRealtimeClient realtime;
-  final ChatRepository chatRepository;
+  final ChatRepository? chatRepository;
+  final Stream<void>? localChanges;
+  final Duration localChangeDelay;
   StreamSubscription<MobileEnvelope>? _events;
+  StreamSubscription<void>? _localChanges;
+  Timer? _localChangeTimer;
   Future<SyncState>? _inFlight;
   bool _queued = false;
   bool _started = false;
@@ -32,6 +38,13 @@ class SyncCoordinator {
     if (_started || _disposed) return;
     _started = true;
     _events = realtime.events.listen(_onEvent);
+    _localChanges = localChanges?.listen((_) {
+      _localChangeTimer?.cancel();
+      _localChangeTimer = Timer(localChangeDelay, () {
+        _localChangeTimer = null;
+        if (!_disposed) unawaited(requestSync());
+      });
+    });
     unawaited(realtime.connect().catchError((_) {}));
     await requestSync();
   }
@@ -62,7 +75,10 @@ class SyncCoordinator {
 
   void _onEvent(MobileEnvelope event) {
     if (event.type == 'message') {
-      unawaited(chatRepository.applyRemoteMessage(event.payload));
+      final repository = chatRepository;
+      if (repository != null) {
+        unawaited(repository.applyRemoteMessage(event.payload));
+      }
       return;
     }
     if (isSyncTriggerType(event.type)) {
@@ -72,7 +88,13 @@ class SyncCoordinator {
 
   Future<void> dispose() async {
     _disposed = true;
+    _localChangeTimer?.cancel();
+    _localChangeTimer = null;
+    await _localChanges?.cancel();
+    _localChanges = null;
     await _events?.cancel();
     _events = null;
+    // Finish old-account work before its database and credentials are changed.
+    await _inFlight;
   }
 }

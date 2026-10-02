@@ -1,29 +1,33 @@
 import 'package:flutter/widgets.dart';
 
+import 'lumina_tokens_generated.dart';
+
 class LuminaBaseColors {
-  static const ink = Color(0xFF152232),
-      paper = Color(0xFFE9EEF4),
-      surface = Color(0xFFF2F5F8),
-      accent = Color(0xFF3978D0),
-      accentSoft = Color(0xFFDCE7F5),
-      muted = Color(0xFF637183),
-      danger = Color(0xFFAC4545),
-      outline = Color(0xFFD8E0E5);
+  static const ink = LuminaTokenLight.ink,
+      paper = LuminaTokenLight.paper,
+      surface = LuminaTokenLight.surface,
+      accent = LuminaTokenLight.accent,
+      accentSoft = LuminaTokenLight.accentSoft,
+      muted = LuminaTokenLight.muted,
+      danger = LuminaTokenLight.danger,
+      outline = LuminaTokenLight.outline;
 }
 
 class LuminaSpacing {
-  static const page = 20.0,
-      pageTop = 12.0,
-      section = 24.0,
-      item = 14.0,
-      compact = 8.0,
-      tight = 6.0,
-      emptyState = 24.0,
-      controlGap = 8.0;
+  static const page = LuminaTokenSpacing.page,
+      pageTop = LuminaTokenSpacing.pageTop,
+      section = LuminaTokenSpacing.section,
+      item = LuminaTokenSpacing.item,
+      compact = LuminaTokenSpacing.compact,
+      tight = LuminaTokenSpacing.tight,
+      emptyState = LuminaTokenSpacing.emptyState,
+      controlGap = LuminaTokenSpacing.controlGap;
 }
 
 class LuminaRadius {
-  static const card = 24.0, control = 18.0, attachment = 14.0;
+  static const card = LuminaTokenRadius.card,
+      control = LuminaTokenRadius.control,
+      attachment = LuminaTokenRadius.attachment;
 }
 
 /// Large information cards share one heading origin and type hierarchy.
@@ -34,13 +38,14 @@ class LuminaCardMetrics {
 }
 
 class LuminaControlSize {
-  static const minimum = 48.0;
-  static const capsuleRadius = 999.0;
-  static const topBarContentHeight = 56.0;
+  static const minimum = LuminaTokenSize.minimumControl;
+  static const capsuleRadius = LuminaTokenRadius.capsule;
+  static const topBarContentHeight = LuminaTokenSize.topBarContent;
 }
 
 class LuminaIconSize {
-  static const compact = 17.0, control = 24.0;
+  static const compact = LuminaTokenSize.compactIcon,
+      control = LuminaTokenSize.controlIcon;
 }
 
 class LuminaChatMetrics {
@@ -54,8 +59,8 @@ class LuminaChatMetrics {
 }
 
 class LuminaMotion {
-  static const fast = Duration(milliseconds: 140),
-      page = Duration(milliseconds: 180),
-      standard = Duration(milliseconds: 220),
-      fluid = Duration(milliseconds: 420);
+  static const fast = Duration(milliseconds: LuminaTokenMotion.fast),
+      page = Duration(milliseconds: LuminaTokenMotion.page),
+      standard = Duration(milliseconds: LuminaTokenMotion.standard),
+      fluid = Duration(milliseconds: LuminaTokenMotion.fluid);
 }

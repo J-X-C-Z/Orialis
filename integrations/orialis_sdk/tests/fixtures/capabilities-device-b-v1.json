@@ -1,0 +1,1 @@
+{"protocolVersion":"1","deviceId":"device_B","capabilities":[{"name":"files.read","version":"1.0.0","available":true,"risk":"low","constraints":{"maxBytes":1048576},"grant":"deny"}]}

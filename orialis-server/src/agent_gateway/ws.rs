@@ -789,19 +789,33 @@ pub(crate) async fn dispatch_message(
         content,
         attachments,
     };
-    let active_device_id = match sqlx::query_scalar::<_, Option<String>>(
-        "SELECT active_device_id FROM agent_preferences WHERE user_id=?",
-    )
-    .bind(&user_id)
-    .fetch_optional(&state.pool)
-    .await
-    {
-        Ok(active_device_id) => active_device_id.flatten(),
-        Err(error) => {
-            tracing::warn!(%error, %message_id, "could not read active Orialis Agent device");
-            return;
-        }
-    };
+    let active_device_id =
+        match crate::conversation_agent_device(&state.pool, &user_id, &conversation_id).await {
+            Ok(Some(device_id)) => Some(device_id),
+            Ok(None) => match sqlx::query_scalar::<_, Option<String>>(
+                "SELECT active_device_id FROM agent_preferences WHERE user_id=?",
+            )
+            .bind(&user_id)
+            .fetch_optional(&state.pool)
+            .await
+            {
+                Ok(device_id) => device_id.flatten(),
+                Err(error) => {
+                    fail_delivery(&state, &message_id, attempts, error.to_string()).await;
+                    return;
+                }
+            },
+            Err(error) => {
+                fail_delivery(
+                    &state,
+                    &message_id,
+                    attempts,
+                    format!("conversation routing unavailable: {error:?}"),
+                )
+                .await;
+                return;
+            }
+        };
     // A mobile POST can race the final handshake bookkeeping on a freshly
     // connected Agent. Give that connection a short grace window before
     // rescheduling the durable delivery for a much longer retry interval.
@@ -1048,8 +1062,8 @@ async fn fail_delivery(state: &AppState, message_id: &str, attempts: i64, error:
 }
 
 pub(crate) async fn dispatch_due_messages(state: Arc<AppState>) {
-    let rows = match sqlx::query_as::<_, (String, String, String, String, String)>(
-        "SELECT q.user_id,q.conversation_id,q.message_id,m.content,m.attachments_json
+    let rows = match sqlx::query_as::<_, (String, String, String, String, String, Option<String>, Option<String>)>(
+        "SELECT q.user_id,q.conversation_id,q.message_id,m.content,m.attachments_json,m.reply_quote,m.reply_role
          FROM agent_delivery_queue q JOIN messages m ON m.id=q.message_id
          WHERE q.next_attempt_at<=? ORDER BY q.created_at,q.message_id LIMIT 8",
     )
@@ -1063,7 +1077,18 @@ pub(crate) async fn dispatch_due_messages(state: Arc<AppState>) {
             return;
         }
     };
-    for (user_id, conversation_id, message_id, content, attachments_json) in rows {
+    for (
+        user_id,
+        conversation_id,
+        message_id,
+        content,
+        attachments_json,
+        reply_quote,
+        reply_role,
+    ) in rows
+    {
+        let content =
+            crate::quoted_agent_content(&content, reply_quote.as_deref(), reply_role.as_deref());
         let attachments = serde_json::from_str::<Vec<crate::Attachment>>(&attachments_json)
             .unwrap_or_default()
             .into_iter()

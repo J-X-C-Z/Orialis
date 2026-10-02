@@ -23,48 +23,129 @@
     "deletedAt"
   ],
   "properties": {
-    "id": { "$ref": "./common.schema.json#/$defs/entityId" },
-    "title": { "type": "string", "minLength": 1 },
-    "notes": { "$ref": "./common.schema.json#/$defs/nullableString" },
-    "important": { "type": ["boolean", "null"] },
-    "urgent": { "type": ["boolean", "null"] },
-    "completed": { "type": "boolean" },
-    "completedAt": { "$ref": "./common.schema.json#/$defs/nullableTimestamp" },
-    "due": { "$ref": "./common.schema.json#/$defs/nullableDate" },
-    "dueTime": { "$ref": "./common.schema.json#/$defs/nullableLocalTime" },
+    "id": {
+      "$ref": "./common.schema.json#/$defs/entityId"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "notes": {
+      "$ref": "./common.schema.json#/$defs/nullableString"
+    },
+    "important": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "urgent": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "completed": {
+      "type": "boolean"
+    },
+    "completedAt": {
+      "$ref": "./common.schema.json#/$defs/nullableTimestamp"
+    },
+    "due": {
+      "$ref": "./common.schema.json#/$defs/nullableDate"
+    },
+    "dueTime": {
+      "$ref": "./common.schema.json#/$defs/nullableLocalTime"
+    },
     "reminderMinutes": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "minimum": 0
     },
-    "projectId": { "$ref": "./common.schema.json#/$defs/nullableEntityId" },
-    "parentTaskId": { "$ref": "./common.schema.json#/$defs/nullableEntityId" },
-    "scheduleId": { "$ref": "./common.schema.json#/$defs/nullableEntityId" },
-    "recurrence": { "$ref": "./common.schema.json#/$defs/recurrence" },
-    "createdAt": { "$ref": "./common.schema.json#/$defs/timestamp" },
-    "updatedAt": { "$ref": "./common.schema.json#/$defs/timestamp" },
-    "version": { "type": "integer", "minimum": 1 },
-    "deletedAt": { "$ref": "./common.schema.json#/$defs/nullableTimestamp" }
+    "projectId": {
+      "$ref": "./common.schema.json#/$defs/nullableEntityId"
+    },
+    "parentTaskId": {
+      "$ref": "./common.schema.json#/$defs/nullableEntityId"
+    },
+    "scheduleId": {
+      "$ref": "./common.schema.json#/$defs/nullableEntityId"
+    },
+    "recurrence": {
+      "$ref": "./common.schema.json#/$defs/recurrence"
+    },
+    "createdAt": {
+      "$ref": "./common.schema.json#/$defs/timestamp"
+    },
+    "updatedAt": {
+      "$ref": "./common.schema.json#/$defs/timestamp"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "deletedAt": {
+      "$ref": "./common.schema.json#/$defs/nullableTimestamp"
+    },
+    "manualPosition": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "User-defined order. Null preserves default ordering; ties use existing date and id ordering."
+    }
   },
   "allOf": [
     {
       "not": {
-        "required": ["parentTaskId", "scheduleId"],
+        "required": [
+          "parentTaskId",
+          "scheduleId"
+        ],
         "properties": {
-          "parentTaskId": { "$ref": "./common.schema.json#/$defs/entityId" },
-          "scheduleId": { "$ref": "./common.schema.json#/$defs/entityId" }
+          "parentTaskId": {
+            "$ref": "./common.schema.json#/$defs/entityId"
+          },
+          "scheduleId": {
+            "$ref": "./common.schema.json#/$defs/entityId"
+          }
         }
       }
     },
     {
-      "if": { "properties": { "completed": { "const": false } } },
-      "then": { "properties": { "completedAt": { "type": "null" } } }
+      "if": {
+        "properties": {
+          "completed": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "completedAt": {
+            "type": "null"
+          }
+        }
+      }
     },
     {
-      "if": { "properties": { "completed": { "const": true } } },
-      "then": {
-        "required": ["completedAt"],
+      "if": {
         "properties": {
-          "completedAt": { "$ref": "./common.schema.json#/$defs/timestamp" }
+          "completed": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "completedAt"
+        ],
+        "properties": {
+          "completedAt": {
+            "$ref": "./common.schema.json#/$defs/timestamp"
+          }
         }
       }
     }

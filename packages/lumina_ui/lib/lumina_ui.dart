@@ -2,5 +2,7 @@
 library;
 
 export 'src/design_components.dart';
+export 'src/lumina_catalog.dart';
 export 'src/lumina_services.dart';
 export 'src/lumina_localizations.dart';
+export 'src/lumina_keyboard.dart';

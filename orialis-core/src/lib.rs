@@ -55,6 +55,8 @@ pub enum Quadrant {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Task {
+    #[serde(default)]
+    pub manual_position: Option<i64>,
     pub id: EntityId,
     pub user_id: EntityId,
     pub title: String,
@@ -104,7 +106,8 @@ impl Serialize for Task {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Task", 20)?;
+        let mut state = serializer.serialize_struct("Task", 21)?;
+        state.serialize_field("manualPosition", &self.manual_position)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("userId", &self.user_id)?;
         state.serialize_field("title", &self.title)?;
@@ -133,6 +136,8 @@ impl Serialize for Task {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
+    #[serde(default)]
+    pub manual_position: Option<i64>,
     pub id: EntityId,
     pub user_id: EntityId,
     pub name: String,
@@ -236,6 +241,7 @@ mod tests {
 
     fn task(important: Option<bool>, urgent: Option<bool>) -> Task {
         Task {
+            manual_position: None,
             id: "0198f3b5-2d5a-7abc-8f14-7e46e6d7f001".into(),
             user_id: "0198f3b5-2d5a-7abc-8f14-7e46e6d7f002".into(),
             title: "提交作业".into(),
@@ -326,6 +332,7 @@ mod tests {
     #[test]
     fn project_and_milestone_keep_relationship_and_progress_fields() {
         let project = Project {
+            manual_position: None,
             id: "project-1".into(),
             user_id: "user-1".into(),
             name: "毕业设计".into(),

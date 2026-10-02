@@ -5,6 +5,7 @@ import 'package:drift/native.dart';
 part 'app_database.g.dart';
 
 class Tasks extends Table {
+  IntColumn get manualPosition => integer().nullable()();
   TextColumn get id => text()();
   TextColumn get title => text()();
   TextColumn get notes => text().nullable()();
@@ -54,6 +55,7 @@ class CalendarEvents extends Table {
 }
 
 class Projects extends Table {
+  IntColumn get manualPosition => integer().nullable()();
   TextColumn get id => text()();
   TextColumn get name => text()();
   TextColumn get goal => text().nullable()();
@@ -99,7 +101,11 @@ class ProjectMilestones extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+@TableIndex(name: 'idx_messages_conversation_created', columns: {#conversationId, #createdAt, #id})
 class Messages extends Table {
+  TextColumn get replyToMessageId => text().nullable()();
+  TextColumn get replyQuote => text().nullable()();
+  TextColumn get replyRole => text().nullable()();
   TextColumn get conversationId => text()();
   TextColumn get id => text()();
   TextColumn get role => text()();
@@ -114,6 +120,8 @@ class Messages extends Table {
 }
 
 class Conversations extends Table {
+  BoolColumn get pinned => boolean().withDefault(const Constant(false))();
+  IntColumn get manualPosition => integer().nullable()();
   TextColumn get id => text()();
   TextColumn get title => text()();
   TextColumn get type => text().withDefault(const Constant('normal'))();
@@ -166,10 +174,11 @@ class OutboxMutations extends Table {
   ],
 )
 class AppDatabase extends _$AppDatabase {
-  AppDatabase({QueryExecutor? executor}) : super(executor ?? _openConnection());
+  AppDatabase({QueryExecutor? executor, String name = 'orialis'})
+      : super(executor ?? _openConnection(name));
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -315,6 +324,44 @@ class AppDatabase extends _$AppDatabase {
           () => m.addColumn(conversations, conversations.localRevision),
         );
       }
+      if (from < 10) {
+        await customStatement('CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages (conversation_id, created_at, id)');
+        await addColumnIfMissing(
+          'tasks',
+          'manual_position',
+          () => m.addColumn(tasks, tasks.manualPosition),
+        );
+        await addColumnIfMissing(
+          'projects',
+          'manual_position',
+          () => m.addColumn(projects, projects.manualPosition),
+        );
+        await addColumnIfMissing(
+          'conversations',
+          'manual_position',
+          () => m.addColumn(conversations, conversations.manualPosition),
+        );
+        await addColumnIfMissing(
+          'conversations',
+          'pinned',
+          () => m.addColumn(conversations, conversations.pinned),
+        );
+        await addColumnIfMissing(
+          'messages',
+          'reply_to_message_id',
+          () => m.addColumn(messages, messages.replyToMessageId),
+        );
+        await addColumnIfMissing(
+          'messages',
+          'reply_quote',
+          () => m.addColumn(messages, messages.replyQuote),
+        );
+        await addColumnIfMissing(
+          'messages',
+          'reply_role',
+          () => m.addColumn(messages, messages.replyRole),
+        );
+      }
       if (from < 9) {
         await addColumnIfMissing(
           'tasks',
@@ -338,7 +385,12 @@ class AppDatabase extends _$AppDatabase {
   Stream<List<Task>> watchActiveTasks() {
     return (select(tasks)
           ..where((row) => row.deletedAt.isNull())
-          ..orderBy([(row) => OrderingTerm(expression: row.due)]))
+          ..orderBy([
+            (row) => OrderingTerm(expression: row.manualPosition.isNull()),
+            (row) => OrderingTerm(expression: row.manualPosition),
+            (row) => OrderingTerm(expression: row.due),
+            (row) => OrderingTerm(expression: row.id),
+          ]))
         .watch();
   }
 
@@ -346,6 +398,8 @@ class AppDatabase extends _$AppDatabase {
     return (select(projects)
           ..where((row) => row.deletedAt.isNull())
           ..orderBy([
+            (row) => OrderingTerm(expression: row.manualPosition.isNull()),
+            (row) => OrderingTerm(expression: row.manualPosition),
             (row) => OrderingTerm(expression: row.createdAt),
             (row) => OrderingTerm(expression: row.id),
           ]))
@@ -373,22 +427,19 @@ class AppDatabase extends _$AppDatabase {
         .watch();
   }
 
-  Stream<List<Conversation>> watchActiveConversations() {
-    return (select(conversations)
-          ..where((row) => row.deletedAt.isNull())
-          ..orderBy([
-            (row) =>
-                OrderingTerm(expression: row.type, mode: OrderingMode.desc),
-            (row) => OrderingTerm(
-              expression: row.updatedAt,
-              mode: OrderingMode.desc,
-            ),
-          ]))
-        .watch();
-  }
+  Stream<List<Conversation>> watchActiveConversations() => customSelect(
+    '''
+    SELECT c.* FROM conversations c
+    WHERE c.deleted_at IS NULL
+    ORDER BY c.pinned DESC, c.manual_position IS NULL, c.manual_position,
+      COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id), c.updated_at) DESC,
+      c.id
+    ''',
+    readsFrom: {conversations, messages},
+  ).watch().map((rows) => rows.map((row) => conversations.map(row.data)).toList());
 
-  static QueryExecutor _openConnection() {
-    return driftDatabase(name: 'orialis');
+  static QueryExecutor _openConnection(String name) {
+    return driftDatabase(name: name);
   }
 
   static QueryExecutor inMemoryExecutor() => NativeDatabase.memory();

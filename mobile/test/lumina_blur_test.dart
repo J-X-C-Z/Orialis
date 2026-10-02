@@ -30,10 +30,14 @@ void main() {
       expect(config.imageFilter(), isNotNull);
     });
 
-    test('high-performance chrome is BlurXL not legacy full-res gaussian', () {
+    test('high-performance chrome is cheaper than balanced mode', () {
       final config = LuminaBlurConfig.highPerformanceChrome;
       expect(config.backend, isNot(LuminaBlurBackend.legacyGaussian));
-      expect(config.level, LuminaBlurLevel.blurXL);
+      expect(config.level, LuminaBlurLevel.blurS);
+      expect(
+        config.level.sigma,
+        lessThan(LuminaBlurConfig.flowingGlass.level.sigma),
+      );
       expect(config.imageFilter(), isNotNull);
     });
 
@@ -78,7 +82,7 @@ void main() {
       policy.useLegacyFallback();
       expect(seen, LuminaBlurLevel.blurXL);
       policy.useHighPerformanceChrome();
-      expect(seen, LuminaBlurLevel.blurXL);
+      expect(seen, LuminaBlurLevel.blurS);
       policy.useFlowingGlass();
       expect(seen, LuminaBlurLevel.blurM);
     });

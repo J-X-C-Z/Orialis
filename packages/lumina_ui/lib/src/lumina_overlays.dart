@@ -6,46 +6,58 @@ Future<T?> showLuminaDialog<T>({
   String? title,
   Widget? content,
   List<Widget> actions = const [],
-}) => showGeneralDialog<T>(
-  context: context,
-  barrierDismissible: true,
-  barrierLabel: LuminaLocalizations.of(context).close,
-  transitionBuilder: (c, a, b, child) => luminaOverlayTransition(c, a, child),
-  barrierColor: const Color(0x55131C24),
-  transitionDuration: LuminaTheme.motionReducedOf(context)
-      ? Duration.zero
-      : LuminaMotion.standard,
-  pageBuilder: (c, a, b) => LuminaTheme(
-    brightness: LuminaTheme.of(context).brightness,
-    reduceTransparency: LuminaTheme.of(context).reduceTransparency,
-    highPerformanceMode: LuminaTheme.of(context).highPerformanceMode,
-    tint: LuminaTheme.of(context).tint,
-    data: LuminaTheme.of(context).data,
-    child: DefaultTextStyle(
-      style: LuminaTheme.of(context).textTheme.bodyMedium,
-      child: Center(
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            24,
-            24,
-            24,
-            24 + MediaQuery.viewInsetsOf(c).bottom,
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 440, maxHeight: 640),
-            child:
-                builder?.call(c) ??
-                LuminaDialog(
-                  title: title ?? '',
-                  content: content ?? const SizedBox(),
-                  actions: actions,
+}) {
+  final media = MediaQuery.of(context);
+  final theme = LuminaTheme.of(context);
+  return showGeneralDialog<T>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: LuminaLocalizations.of(context).close,
+    transitionBuilder: (c, a, b, child) => luminaOverlayTransition(c, a, child),
+    barrierColor: const Color(0x55131C24),
+    transitionDuration: LuminaTheme.motionReducedOf(context)
+        ? Duration.zero
+        : LuminaMotion.standard,
+    pageBuilder: (c, a, b) => MediaQuery(
+      data: media,
+      child: LuminaTheme(
+        brightness: theme.brightness,
+        reduceTransparency: theme.reduceTransparency,
+        highPerformanceMode: theme.highPerformanceMode,
+        tint: theme.tint,
+        data: theme.data,
+        child: DefaultTextStyle(
+          style: theme.textTheme.bodyMedium,
+          child: Center(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                24,
+                24,
+                24,
+                24 + MediaQuery.viewInsetsOf(c).bottom,
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: 440,
+                  maxHeight: 640,
                 ),
+                child: Builder(
+                  builder: (overlayContext) =>
+                      builder?.call(overlayContext) ??
+                      LuminaDialog(
+                        title: title ?? '',
+                        content: content ?? const SizedBox(),
+                        actions: actions,
+                      ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
     ),
-  ),
-);
+  );
+}
 
 class LuminaDialog extends StatelessWidget {
   const LuminaDialog({
@@ -59,6 +71,8 @@ class LuminaDialog extends StatelessWidget {
   final List<Widget> actions;
   @override
   Widget build(BuildContext context) => LuminaSurface(
+    glass: true,
+    depth: LuminaSurfaceDepth.raised,
     padding: const EdgeInsets.all(24),
     radius: 28,
     child: SingleChildScrollView(
@@ -66,7 +80,14 @@ class LuminaDialog extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(title, style: LuminaTheme.of(context).textTheme.titleLarge),
+          Semantics(
+            namesRoute: true,
+            header: true,
+            child: Text(
+              title,
+              style: LuminaTheme.of(context).textTheme.titleLarge,
+            ),
+          ),
           const SizedBox(height: 20),
           content,
           if (actions.isNotEmpty) ...[
@@ -87,67 +108,78 @@ class LuminaDialog extends StatelessWidget {
 Future<T?> showLuminaSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
-}) => showGeneralDialog<T>(
-  context: context,
-  barrierDismissible: true,
-  barrierLabel: LuminaLocalizations.of(context).closeSheet,
-  transitionBuilder: (c, a, b, child) =>
-      luminaOverlayTransition(c, a, child, sheet: true),
-  barrierColor: const Color(0x55131C24),
-  transitionDuration: LuminaTheme.motionReducedOf(context)
-      ? Duration.zero
-      : LuminaMotion.standard,
-  pageBuilder: (c, a, b) => LuminaTheme(
-    brightness: LuminaTheme.of(context).brightness,
-    reduceTransparency: LuminaTheme.of(context).reduceTransparency,
-    highPerformanceMode: LuminaTheme.of(context).highPerformanceMode,
-    tint: LuminaTheme.of(context).tint,
-    data: LuminaTheme.of(context).data,
-    child: DefaultTextStyle(
-      style: LuminaTheme.of(context).textTheme.bodyMedium,
-      child: Align(
-        alignment: Alignment.bottomCenter,
-        child: AnimatedPadding(
-          duration: MediaQuery.disableAnimationsOf(c)
-              ? Duration.zero
-              : LuminaMotion.standard,
-          curve: luminaEaseOut,
-          padding: EdgeInsets.only(
-            top: MediaQuery.viewPaddingOf(c).top + 12,
-            bottom: MediaQuery.viewInsetsOf(c).bottom,
-          ),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: 640,
-              maxHeight: MediaQuery.sizeOf(c).height * .85,
-            ),
-            child: LuminaSurface(
-              radius: 28,
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
-              child: SafeArea(
-                top: false,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 36,
-                        height: 4,
-                        margin: const EdgeInsets.only(bottom: 18),
-                        decoration: BoxDecoration(
-                          color: LuminaTheme.of(context).colors.outline,
-                          borderRadius: BorderRadius.circular(3),
-                        ),
+}) {
+  final media = MediaQuery.of(context);
+  final theme = LuminaTheme.of(context);
+  return showGeneralDialog<T>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: LuminaLocalizations.of(context).closeSheet,
+    transitionBuilder: (c, a, b, child) =>
+        luminaOverlayTransition(c, a, child, sheet: true),
+    barrierColor: const Color(0x55131C24),
+    transitionDuration: LuminaTheme.motionReducedOf(context)
+        ? Duration.zero
+        : LuminaMotion.standard,
+    pageBuilder: (c, a, b) => MediaQuery(
+      data: media,
+      child: LuminaTheme(
+        brightness: theme.brightness,
+        reduceTransparency: theme.reduceTransparency,
+        highPerformanceMode: theme.highPerformanceMode,
+        tint: theme.tint,
+        data: theme.data,
+        child: DefaultTextStyle(
+          style: theme.textTheme.bodyMedium,
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: AnimatedPadding(
+              duration: media.disableAnimations
+                  ? Duration.zero
+                  : LuminaMotion.standard,
+              curve: luminaEaseOut,
+              padding: EdgeInsets.only(
+                top: MediaQuery.viewPaddingOf(c).top + 12,
+                bottom: MediaQuery.viewInsetsOf(c).bottom,
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 640,
+                  maxHeight: MediaQuery.sizeOf(c).height * .85,
+                ),
+                child: LuminaSurface(
+                  glass: true,
+                  depth: LuminaSurfaceDepth.raised,
+                  radius: 28,
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
+                  child: SafeArea(
+                    top: false,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 4,
+                            margin: const EdgeInsets.only(bottom: 18),
+                            decoration: BoxDecoration(
+                              color: LuminaTheme.of(context).colors.outline,
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
+                          Builder(
+                            builder: (sheetContext) => MediaQuery.removePadding(
+                              context: sheetContext,
+                              removeTop: true,
+                              removeBottom: true,
+                              child: _LuminaSheetScope(
+                                child: Builder(builder: builder),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      MediaQuery.removePadding(
-                        context: c,
-                        removeTop: true,
-                        removeBottom: true,
-                        child: _LuminaSheetScope(
-                          child: Builder(builder: builder),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -156,10 +188,13 @@ Future<T?> showLuminaSheet<T>({
         ),
       ),
     ),
-  ),
-);
+  );
+}
+
 void showLuminaMessage(BuildContext context, String text) {
   final overlay = Overlay.of(context);
+  final theme = LuminaTheme.of(context);
+  final media = MediaQuery.of(context);
   late OverlayEntry entry;
   entry = OverlayEntry(
     builder: (c) => Positioned(
@@ -167,10 +202,23 @@ void showLuminaMessage(BuildContext context, String text) {
       right: 24,
       bottom: MediaQuery.paddingOf(c).bottom + 28,
       child: IgnorePointer(
-        child: Center(
-          child: DefaultTextStyle(
-            style: LuminaTheme.of(context).textTheme.bodyMedium,
-            child: LuminaSurface(glass: true, child: Text(text)),
+        child: MediaQuery(
+          data: media,
+          child: LuminaTheme(
+            brightness: theme.brightness,
+            reduceTransparency: theme.reduceTransparency,
+            highPerformanceMode: theme.highPerformanceMode,
+            tint: theme.tint,
+            data: theme.data,
+            child: Center(
+              child: Semantics(
+                liveRegion: true,
+                child: DefaultTextStyle(
+                  style: theme.textTheme.bodyMedium,
+                  child: LuminaSurface(glass: true, child: Text(text)),
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -190,40 +238,129 @@ Future<DateTime?> showLuminaDatePicker({
   required DateTime initialDate,
   required DateTime firstDate,
   required DateTime lastDate,
-}) async {
-  var date = initialDate;
-  var month = DateTime(date.year, date.month);
+}) {
+  DateTime day(DateTime value) => DateTime(value.year, value.month, value.day);
+  final first = day(firstDate),
+      last = day(lastDate),
+      initial = day(initialDate);
+  assert(!last.isBefore(first), 'lastDate must not precede firstDate');
+  assert(
+    !initial.isBefore(first) && !initial.isAfter(last),
+    'initialDate must be inside the allowed range',
+  );
   return showLuminaDialog<DateTime>(
     context: context,
-    builder: (c) => StatefulBuilder(
-      builder: (c, set) => LuminaDialog(
-        title: LuminaLocalizations.of(c).selectDate,
+    builder: (c) =>
+        _LuminaDatePickerBody(initial: initial, first: first, last: last),
+  );
+}
+
+class _LuminaDatePickerBody extends StatefulWidget {
+  const _LuminaDatePickerBody({
+    required this.initial,
+    required this.first,
+    required this.last,
+  });
+  final DateTime initial, first, last;
+  @override
+  State<_LuminaDatePickerBody> createState() => _LuminaDatePickerBodyState();
+}
+
+class _LuminaDatePickerBodyState extends State<_LuminaDatePickerBody> {
+  late DateTime date = widget.initial;
+  late DateTime month = DateTime(date.year, date.month);
+  bool _enabled(DateTime value) =>
+      !value.isBefore(widget.first) && !value.isAfter(widget.last);
+  void _select(DateTime next) {
+    if (!_enabled(next)) return;
+    setState(() {
+      date = next;
+      month = DateTime(next.year, next.month);
+    });
+  }
+
+  DateTime _shiftMonth(int delta) {
+    final target = DateTime(date.year, date.month + delta);
+    return DateTime(
+      target.year,
+      target.month,
+      math.min(date.day, DateTime(target.year, target.month + 1, 0).day),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = LuminaLocalizations.of(context);
+    final theme = LuminaTheme.of(context);
+    final firstMonth = DateTime(widget.first.year, widget.first.month);
+    final lastMonth = DateTime(widget.last.year, widget.last.month);
+    final rtl = Directionality.of(context) == TextDirection.rtl;
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+          return KeyEventResult.ignored;
+        }
+        final key = event.logicalKey;
+        final delta = key == LogicalKeyboardKey.arrowLeft
+            ? (rtl ? 1 : -1)
+            : key == LogicalKeyboardKey.arrowRight
+            ? (rtl ? -1 : 1)
+            : key == LogicalKeyboardKey.arrowUp
+            ? -7
+            : key == LogicalKeyboardKey.arrowDown
+            ? 7
+            : null;
+        if (delta != null) {
+          _select(DateTime(date.year, date.month, date.day + delta));
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.pageUp ||
+            key == LogicalKeyboardKey.pageDown) {
+          _select(_shiftMonth(key == LogicalKeyboardKey.pageUp ? -1 : 1));
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: LuminaDialog(
+        title: strings.selectDate,
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
                 LuminaIconButton(
-                  onPressed: () =>
-                      set(() => month = DateTime(month.year, month.month - 1)),
+                  tooltip: strings.previousMonth,
+                  onPressed: month.isAfter(firstMonth)
+                      ? () => setState(
+                          () => month = DateTime(month.year, month.month - 1),
+                        )
+                      : null,
                   icon: const LuminaIcon(LuminaIcons.arrowLeft),
                 ),
                 Expanded(
-                  child: Text(
-                    '${month.year} / ${month.month}',
-                    textAlign: TextAlign.center,
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      '${month.year} / ${month.month}',
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                 ),
                 LuminaIconButton(
-                  onPressed: () =>
-                      set(() => month = DateTime(month.year, month.month + 1)),
+                  tooltip: strings.nextMonth,
+                  onPressed: month.isBefore(lastMonth)
+                      ? () => setState(
+                          () => month = DateTime(month.year, month.month + 1),
+                        )
+                      : null,
                   icon: const LuminaIcon(LuminaIcons.arrowRight),
                 ),
               ],
             ),
             const SizedBox(height: 12),
             Row(
-              children: LuminaLocalizations.of(c).weekdays
+              children: strings.weekdays
                   .map(
                     (day) =>
                         Expanded(child: Text(day, textAlign: TextAlign.center)),
@@ -231,71 +368,86 @@ Future<DateTime?> showLuminaDatePicker({
                   .toList(),
             ),
             const SizedBox(height: 8),
-            GridView.count(
-              crossAxisCount: 7,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisSpacing: 2,
-              mainAxisSpacing: 4,
-              children: List.generate(
-                DateTime(month.year, month.month + 1, 0).day +
-                    month.weekday -
-                    1,
-                (i) {
-                  if (i < month.weekday - 1) return const SizedBox();
-                  final d = DateTime(
-                    month.year,
-                    month.month,
-                    i - month.weekday + 2,
-                  );
-                  final enabled =
-                      !d.isBefore(
-                        DateTime(
-                          firstDate.year,
-                          firstDate.month,
-                          firstDate.day,
-                        ),
-                      ) &&
-                      !d.isAfter(lastDate);
-                  return SizedBox(
-                    width: 40,
-                    height: 44,
-                    child: LuminaSurface(
-                      radius: 12,
-                      padding: const EdgeInsets.all(4),
-                      color:
-                          date.year == d.year &&
-                              date.month == d.month &&
-                              date.day == d.day
-                          ? LuminaTheme.of(c).colors.accentSoft
-                          : null,
-                      onTap: enabled ? () => set(() => date = d) : null,
-                      child: Center(
-                        child: Text(
-                          '${d.day}',
-                          style: TextStyle(
-                            color: enabled
-                                ? LuminaTheme.of(c).colors.ink
-                                : LuminaTheme.of(c).colors.muted,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final dayHeight = math.max(
+                  44.0,
+                  MediaQuery.textScalerOf(context).scale(15) * 1.5 + 12,
+                );
+                final cellWidth = math.max(
+                  1.0,
+                  (constraints.maxWidth - 12) / 7,
+                );
+                return GridView.count(
+                  crossAxisCount: 7,
+                  childAspectRatio: cellWidth / dayHeight,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisSpacing: 2,
+                  mainAxisSpacing: 4,
+                  children: List.generate(
+                    DateTime(month.year, month.month + 1, 0).day +
+                        month.weekday -
+                        1,
+                    (index) {
+                      if (index < month.weekday - 1) return const SizedBox();
+                      final day = DateTime(
+                        month.year,
+                        month.month,
+                        index - month.weekday + 2,
+                      );
+                      final enabled = _enabled(day), selected = date == day;
+                      return Semantics(
+                        label:
+                            '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}',
+                        selected: selected,
+                        enabled: enabled,
+                        child: LuminaSurface(
+                          glass: selected,
+                          radius: 12,
+                          padding: const EdgeInsets.all(2),
+                          color: selected
+                              ? theme.colors.accentSoft
+                              : theme.colors.surface,
+                          onTap: enabled ? () => _select(day) : null,
+                          child: ExcludeSemantics(
+                            child: Center(
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '${day.day}',
+                                  style: theme.textTheme.bodyMedium.copyWith(
+                                    color: enabled
+                                        ? theme.colors.ink
+                                        : theme.colors.muted,
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                  );
-                },
-              ),
+                      );
+                    },
+                  ),
+                );
+              },
             ),
           ],
         ),
         actions: [
           LuminaButton(
-            onPressed: () => Navigator.pop(c, date),
-            child: Text(LuminaLocalizations.of(c).confirm),
+            onPressed: () => Navigator.pop(context),
+            primary: false,
+            child: Text(strings.cancel),
+          ),
+          LuminaButton(
+            onPressed: () => Navigator.pop(context, date),
+            child: Text(strings.confirm),
           ),
         ],
       ),
-    ),
-  );
+    );
+  }
 }
 
 Future<DateTime?> showLuminaTimePicker({
@@ -317,6 +469,9 @@ Future<DateTime?> showLuminaTimePicker({
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     LuminaIconButton(
+                      tooltip: isHour
+                          ? LuminaLocalizations.of(c).increaseHour
+                          : LuminaLocalizations.of(c).increaseMinute,
                       onPressed: () => set(() {
                         if (isHour) {
                           hour = (hour + 1) % 24;
@@ -334,6 +489,9 @@ Future<DateTime?> showLuminaTimePicker({
                       ),
                     ),
                     LuminaIconButton(
+                      tooltip: isHour
+                          ? LuminaLocalizations.of(c).decreaseHour
+                          : LuminaLocalizations.of(c).decreaseMinute,
                       onPressed: () => set(() {
                         if (isHour) {
                           hour = (hour + 23) % 24;
@@ -349,6 +507,11 @@ Future<DateTime?> showLuminaTimePicker({
           ],
         ),
         actions: [
+          LuminaButton(
+            onPressed: () => Navigator.pop(c),
+            primary: false,
+            child: Text(LuminaLocalizations.of(c).cancel),
+          ),
           LuminaButton(
             onPressed: () => Navigator.pop(
               c,

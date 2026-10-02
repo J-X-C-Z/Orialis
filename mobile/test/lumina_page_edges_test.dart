@@ -277,17 +277,30 @@ void main() {
       expect(tester.takeException(), isNull, reason: destination);
       if (destination == '日历') {
         for (final view in ['周', '月', '日']) {
-          await tester.tap(find.text(view).first);
+          await tester.tap(
+            find
+                .descendant(
+                  of: find.byType(LuminaSegmented<int>),
+                  matching: find.text(view),
+                )
+                .first,
+          );
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull, reason: view);
           if (view == '月') {
             final expand = find.text('展开月历');
-            await tester.ensureVisible(expand);
+            await Scrollable.ensureVisible(
+              tester.element(expand),
+              alignment: .5,
+            );
             await tester.pumpAndSettle();
             await tester.tap(expand);
             await tester.pumpAndSettle();
             final collapse = find.text('收起月历');
-            await tester.ensureVisible(collapse);
+            await Scrollable.ensureVisible(
+              tester.element(collapse),
+              alignment: .5,
+            );
             await tester.pumpAndSettle();
             await tester.tap(collapse);
             await tester.pumpAndSettle();
@@ -308,6 +321,47 @@ void main() {
     await tester.pumpAndSettle();
     await db.close();
   });
+  testWidgets('expanded month reserves both categories and overflow count', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(432, 960);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final db = AppDatabase(executor: NativeDatabase.memory());
+    final repository = EventRepository(database: db, config: _Config());
+    final today = DateTime.now();
+    final key =
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    await repository.createCalendarEvent(
+      title: '月格日程',
+      startAt: DateTime(today.year, today.month, today.day, 10),
+      endAt: DateTime(today.year, today.month, today.day, 11),
+    );
+    await repository.createTask(title: '月格截止一', due: key);
+    await repository.createTask(title: '月格截止二', due: key);
+    await tester.pumpWidget(_app(db));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('日历').last);
+    await tester.pumpAndSettle();
+    final expand = find.text('展开月历');
+    await Scrollable.ensureVisible(tester.element(expand), alignment: .5);
+    await tester.pumpAndSettle();
+    await tester.tap(expand);
+    await tester.pumpAndSettle();
+    final summaries = tester
+        .widgetList<LuminaCalendarSummary>(find.byType(LuminaCalendarSummary))
+        .toList();
+    expect(summaries.length, 2);
+    expect(summaries.where((s) => s.deadline).length, 1);
+    expect(summaries.where((s) => !s.deadline).single.title, '月格日程');
+    expect(find.text('+1'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    await db.close();
+  });
+
   testWidgets('weekly schedule rows use the recessed card treatment', (
     tester,
   ) async {
@@ -345,7 +399,14 @@ void main() {
       expect(tile.glass, isTrue);
       expect(tile.onTap, isNotNull);
     }
-    await tester.tap(find.text('周').first);
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byType(LuminaSegmented<int>),
+            matching: find.text('周'),
+          )
+          .first,
+    );
     await tester.pumpAndSettle();
     final row = tester.widget<OrialisListRow>(
       find.widgetWithText(OrialisListRow, '周视图凹陷日程'),
@@ -354,22 +415,27 @@ void main() {
     expect(
       find.ancestor(
         of: find.widgetWithText(OrialisListRow, '周视图凹陷日程'),
-        matching: find.byType(LuminaCollapsibleCard),
+        matching: find.byType(LuminaTitledContentCard),
       ),
       findsOneWidget,
     );
     expect(find.text('附属事件'), findsNothing);
-    await tester.tap(find.text('日').first);
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byType(LuminaSegmented<int>),
+            matching: find.text('日'),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(LuminaTitledContentCard), findsNWidgets(2));
+    expect(find.text('当天截止'), findsOneWidget);
+    expect(find.text('这一天没有截止事项。'), findsOneWidget);
+    expect(find.text('附属事件'), findsNothing);
+    await tester.tap(find.widgetWithText(OrialisListRow, '周视图凹陷日程'));
     await tester.pumpAndSettle();
     expect(find.text('附属事件'), findsOneWidget);
-    expect(
-      find.byWidgetPredicate(
-        (w) =>
-            w is LuminaCollapsibleCard &&
-            w.storageId.startsWith('calendar.schedule.'),
-      ),
-      findsOneWidget,
-    );
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await tester.pumpAndSettle();

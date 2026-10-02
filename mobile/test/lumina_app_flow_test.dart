@@ -84,6 +84,18 @@ void main() {
       await tester.tap(find.text('我的').last);
       await tester.pumpAndSettle();
       expect(find.text('未登录'), findsOneWidget);
+      final profileHeader = find.byType(LuminaTopBar);
+      final brand = find.text('Orialis');
+      expect(
+        tester.getTopLeft(brand).dy,
+        greaterThan(tester.getBottomLeft(profileHeader).dy),
+      );
+      await tester.drag(find.byType(ListView).last, const Offset(0, -160));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(brand).dy,
+        lessThan(tester.getBottomLeft(profileHeader).dy),
+      );
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();

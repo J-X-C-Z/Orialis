@@ -25,6 +25,8 @@ part 'lumina_overlays.dart';
 part 'lumina_material.dart';
 part 'lumina_completion.dart';
 part 'lumina_patterns.dart';
+part 'lumina_reorder.dart';
+part 'lumina_calendar.dart';
 
 /// Standard glass: backdrop diffusion, body tint, soft film and contact depth.
 /// Accessibility replaces transparency and motion without changing semantics.
@@ -116,7 +118,34 @@ class _LuminaSurfaceState extends State<LuminaSurface>
     _driftX?.dispose();
     _driftY?.dispose();
     _film?.dispose();
+    if (widget.backdrop) {
+      LuminaBlurPolicy.instance.chromeListenable.removeListener(_blurChanged);
+    }
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.backdrop) {
+      LuminaBlurPolicy.instance.chromeListenable.addListener(_blurChanged);
+    }
+  }
+
+  @override
+  void didUpdateWidget(LuminaSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.backdrop != widget.backdrop) {
+      if (widget.backdrop) {
+        LuminaBlurPolicy.instance.chromeListenable.addListener(_blurChanged);
+      } else {
+        LuminaBlurPolicy.instance.chromeListenable.removeListener(_blurChanged);
+      }
+    }
+  }
+
+  void _blurChanged() {
+    if (widget.backdrop && mounted) setState(() {});
   }
 
   bool pressed = false, hover = false, focused = false;
@@ -202,19 +231,22 @@ class _LuminaSurfaceState extends State<LuminaSurface>
                 colors: colors,
                 tint: transparent
                     ? colors.surface
+                    : theme.data.liquidGlass
+                    ? tint
                     : widget.glass && !opaque
                     // Thin frost: keep tint low so the blur actually reads.
                     ? tint.withValues(alpha: backdrop ? .22 : .58)
                     : tint,
                 glass: widget.glass && !opaque,
                 diffuseGlass: widget.diffuseGlass,
+                liquidGlass: theme.data.liquidGlass,
                 radius: widget.radius >= LuminaControlSize.capsuleRadius
                     ? widget.radius
                     : widget.radius * theme.data.radiusScale,
                 depth: widget.depth,
                 shoulder: widget.shoulder,
                 shoulderWidth: shoulderWidth,
-                contrast: contrast,
+                contrast: contrast || (theme.data.liquidGlass && opaque),
                 focused: focused,
                 pressed: pressed,
                 cheapShadow: theme.highPerformanceMode,
@@ -388,20 +420,22 @@ class LuminaIconButton extends StatelessWidget {
   final Widget icon;
   final String? tooltip;
   @override
-  Widget build(BuildContext context) => Semantics(
-    label: tooltip,
-    button: true,
-    enabled: onPressed != null,
-    child: Opacity(
-      opacity: onPressed == null ? 0.45 : 1,
-      child: LuminaSurface(
-        onTap: onPressed,
-        glass: true,
-        radius: LuminaControlSize.capsuleRadius,
-        padding: EdgeInsets.zero,
-        child: SizedBox.square(
-          dimension: LuminaControlSize.minimum,
-          child: Center(child: icon),
+  Widget build(BuildContext context) => MergeSemantics(
+    child: Semantics(
+      label: tooltip,
+      button: true,
+      enabled: onPressed != null,
+      child: Opacity(
+        opacity: onPressed == null ? 0.45 : 1,
+        child: LuminaSurface(
+          onTap: onPressed,
+          glass: true,
+          radius: LuminaControlSize.capsuleRadius,
+          padding: EdgeInsets.zero,
+          child: SizedBox.square(
+            dimension: LuminaControlSize.minimum,
+            child: Center(child: icon),
+          ),
         ),
       ),
     ),
@@ -521,46 +555,96 @@ class LuminaPageScaffold extends StatelessWidget {
     color: LuminaTheme.of(context).colors.paper,
     child: SafeArea(
       bottom: false,
-      child: Column(
-        children: [
-          LuminaTopBar(
-            title: title,
-            subtitle: subtitle,
-            leading: leading,
-            actions: actions,
-          ),
-          Expanded(
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: MediaQuery(
-                    data: MediaQuery.of(context).copyWith(
-                      padding: EdgeInsets.only(
-                        bottom:
-                            LuminaNavigationInset.of(context) +
-                            MediaQuery.paddingOf(context).bottom,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final scale = MediaQuery.textScalerOf(context);
+          final text = LuminaTheme.of(context).textTheme;
+          final titleHeight =
+              scale.scale(text.titleMedium.fontSize ?? 18) * 1.4;
+          final subtitleHeight = subtitle == null
+              ? 0.0
+              : scale.scale(text.bodySmall.fontSize ?? 13) * 1.4;
+          final headerHeight = math.max(
+            64.0,
+            titleHeight + subtitleHeight + 24,
+          );
+          return Column(
+            children: [
+              Expanded(
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: LuminaPageHeaderInset(
+                        inset: headerHeight + 12,
+                        child: MediaQuery(
+                          data: MediaQuery.of(context).copyWith(
+                            padding: EdgeInsets.only(
+                              bottom:
+                                  LuminaNavigationInset.of(context) +
+                                  MediaQuery.paddingOf(context).bottom,
+                            ),
+                          ),
+                          child: Padding(
+                            padding: padding
+                                .resolve(Directionality.of(context))
+                                .copyWith(top: 0),
+                            child: body,
+                          ),
+                        ),
                       ),
                     ),
-                    child: Padding(padding: padding, child: body),
-                  ),
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: headerHeight,
+                      child: LuminaTopBar(
+                        title: title,
+                        subtitle: subtitle,
+                        leading: leading,
+                        actions: actions,
+                      ),
+                    ),
+                    if (floatingActionButton != null)
+                      Positioned(
+                        right: 20,
+                        bottom:
+                            20 +
+                            LuminaNavigationInset.of(context) +
+                            MediaQuery.paddingOf(context).bottom,
+                        child: floatingActionButton!,
+                      ),
+                  ],
                 ),
-                if (floatingActionButton != null)
-                  Positioned(
-                    right: 20,
-                    bottom:
-                        20 +
-                        LuminaNavigationInset.of(context) +
-                        MediaQuery.paddingOf(context).bottom,
-                    child: floatingActionButton!,
-                  ),
-              ],
-            ),
-          ),
-          ?bottomActions,
-        ],
+              ),
+              ?bottomActions,
+            ],
+          );
+        },
       ),
     ),
   );
+}
+
+/// The space scrollables reserve initially for a page's floating title bar.
+/// Keep this space in scroll padding so content can move behind the glass.
+class LuminaPageHeaderInset extends InheritedWidget {
+  const LuminaPageHeaderInset({
+    required this.inset,
+    required super.child,
+    super.key,
+  });
+  final double inset;
+
+  static double of(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<LuminaPageHeaderInset>()
+          ?.inset ??
+      0;
+
+  @override
+  bool updateShouldNotify(LuminaPageHeaderInset oldWidget) =>
+      inset != oldWidget.inset;
 }
 
 class LuminaTopBar extends StatelessWidget {
@@ -577,33 +661,57 @@ class LuminaTopBar extends StatelessWidget {
   final List<Widget> actions;
   @override
   Widget build(BuildContext context) => LuminaSurface(
-    radius: 28,
-    padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
+    radius: 24,
+    glass: true,
+    backdrop: true,
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     child: ConstrainedBox(
-      constraints: const BoxConstraints(
-        minHeight: LuminaControlSize.topBarContentHeight,
-      ),
-      child: Row(
+      constraints: const BoxConstraints(minHeight: 48),
+      child: Stack(
+        alignment: Alignment.center,
         children: [
-          if (leading != null) ...[leading!, const SizedBox(width: 12)],
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Positioned.fill(
+            child: Row(
               children: [
-                Text(
-                  title,
-                  style: LuminaTheme.of(context).textTheme.titleLarge,
-                ),
-                if (subtitle != null)
-                  Text(
-                    subtitle!,
-                    style: LuminaTheme.of(context).textTheme.bodySmall,
+                ?leading,
+                const Spacer(),
+                ...actions.map(
+                  (a) => Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: a,
                   ),
+                ),
               ],
             ),
           ),
-          ...actions.map(
-            (a) => Padding(padding: const EdgeInsets.only(left: 8), child: a),
+          IgnorePointer(
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: math
+                    .max(leading == null ? 0 : 56, actions.length * 56)
+                    .toDouble(),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: LuminaTheme.of(context).textTheme.titleMedium,
+                  ),
+                  if (subtitle != null)
+                    Text(
+                      subtitle!,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: LuminaTheme.of(context).textTheme.bodySmall,
+                    ),
+                ],
+              ),
+            ),
           ),
         ],
       ),

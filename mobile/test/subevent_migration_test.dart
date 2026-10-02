@@ -7,7 +7,7 @@ import 'package:orialis_mobile/core/database/app_database.dart';
 
 void main() {
   test(
-    'v6 data migrates to v9 with empty task links and unimportant events',
+    'v6 data migrates to v10 with empty task links and unimportant events',
     () async {
       final fixture = File('test/fixtures/schema_v6.sql').readAsStringSync();
       final database = AppDatabase(
@@ -20,7 +20,7 @@ void main() {
       final version = await database
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 9);
+      expect(version.read<int>('user_version'), 10);
 
       final oldTask = await (database.select(
         database.tasks,

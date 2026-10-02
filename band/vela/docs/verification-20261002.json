@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-02",
+  "toolchain": "aiot-toolkit 2.0.5",
+  "node": "v26.8.1",
+  "rpk": "dist/top.jxcz.orialis.debug.0.2.0-ui.rpk",
+  "bytes": 45423,
+  "sha256": "afb1f83126e2d167dffc47284351842eead0202232a554e702d29b33ad4a5098",
+  "signer": "toolkit development signer; simulation only; companion matching not accepted",
+  "simulator": {
+    "avd": "10Pro",
+    "image": "vela-pre-4.0",
+    "screen": "336x480",
+    "controller": "127.0.0.1:8554",
+    "pagesVisited": 12,
+    "outOfMemoryAfterSharedBundleFix": false
+  },
+  "checks": {
+    "unitTests": 14,
+    "failed": 0,
+    "build": "passed",
+    "jsSyntax": "passed"
+  },
+  "screenshots": [
+    "home-empty.png",
+    "tasks-empty.png",
+    "commands-empty.png",
+    "devices-empty.png",
+    "settings-empty.png",
+    "tasks-detail-mock.png"
+  ]
+}

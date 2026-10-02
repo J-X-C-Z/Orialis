@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/multidevice-v1/device.schema.json",
+  "title": "Orialis Node Device v1",
+  "type": "object",
+  "required": ["protocolVersion", "deviceId", "accountId", "status", "createdAt", "lastSeenAt", "observedAt", "revocationVersion", "capabilities"],
+  "properties": {
+    "protocolVersion": {"const": "1"},
+    "deviceId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "accountId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "displayName": {"type": "string", "maxLength": 128},
+    "platform": {"type": "string", "maxLength": 64},
+    "nodeVersion": {"type": "string", "maxLength": 64},
+    "status": {"enum": ["online", "offline", "revoked", "unknown"]},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "lastSeenAt": {"type": ["string", "null"], "format": "date-time"},
+    "observedAt": {"type": "string", "format": "date-time"},
+    "revocationVersion": {"type": "integer", "minimum": 0},
+    "capabilities": {"type": "array", "items": {"$ref": "capability.schema.json"}, "uniqueItems": true},
+    "nextCursor": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

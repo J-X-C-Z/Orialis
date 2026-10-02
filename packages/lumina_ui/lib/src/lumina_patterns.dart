@@ -273,3 +273,72 @@ class _LuminaSheetScope extends InheritedWidget {
   @override
   bool updateShouldNotify(_LuminaSheetScope oldWidget) => false;
 }
+
+/// Shared quoted-message preview for a composer or message bubble.
+/// The application owns reply identity, persistence and source navigation.
+class LuminaQuotePreview extends StatelessWidget {
+  const LuminaQuotePreview({
+    required this.title,
+    required this.text,
+    this.onTap,
+    this.onDismiss,
+    super.key,
+  });
+  final String title, text;
+  final VoidCallback? onTap, onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = LuminaTheme.of(context);
+    return LuminaSurface(
+      radius: 14,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: theme.colors.accentSoft,
+      child: Row(
+        children: [
+          Container(width: 3, height: 36, color: theme.colors.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Semantics(
+              button: onTap != null,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onTap,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium.copyWith(
+                          color: theme.colors.accent,
+                        ),
+                      ),
+                      Text(
+                        text,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (onDismiss != null)
+            LuminaIconButton(
+              icon: const LuminaIcon(LuminaIcons.close),
+              onPressed: onDismiss,
+              tooltip: LuminaLocalizations.of(context).cancelReply,
+            ),
+        ],
+      ),
+    );
+  }
+}

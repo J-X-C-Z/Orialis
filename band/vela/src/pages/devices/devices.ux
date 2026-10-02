@@ -1,0 +1,13 @@
+<template>
+<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><scroll class="content" scroll-y="true"><div class="stack">
+<div class="header"><div class="back" onclick="goBack"><text class="backText">‹</text></div><text class="title">设备</text><div class="badge"><text class="badgeText">{{ vm.devices.length }}</text></div></div><text class="sourceLine">{{ vm.sourceShort }}</text><div class="card"><text class="label">手机确认的目标</text><text class="body">{{ vm.targetName }}</text><text class="meta">由手机管理真实执行路由</text></div><text class="label">本地预览</text>
+<div class="block" if="{{ !vm.devices.length }}"><text class="emptyTitle">暂无设备</text><text class="emptyBody">请在手机管理设备，连接后同步列表。</text></div><div class="row {{ vm.previewTargetId === $item.id ? 'selected' : '' }}" for="{{ vm.devices }}" onclick="selectDevice($item.id)"><div class="glyphCircle blue"><div class="glyph deviceGlyph"><div class="deviceStand"></div></div></div><div class="copy"><text class="rowTitle">{{ $item.name }}</text><text class="rowHint">{{ $item.platform }} · {{ vm.stale ? '待刷新' : $item.statusLabel }}</text><text class="provenance" if="{{ vm.previewTargetId === $item.id }}">本地预览选中</text></div></div><div class="disabled"><text class="disabledText">切换手机目标 · 待接入</text></div><text class="meta">点击仅改变本地预览。</text><div class="block"><text class="provenance">{{ vm.provenance }}</text><text class="meta">{{ vm.syncLabel }}</text><text class="hint">右滑返回上一层</text></div>
+</div></scroll></div>
+</template>
+<script>
+const pages = require('../../services/page')
+export default pages.createPage('devices')
+</script>
+<style>
+@import "../../common/wear.css";
+</style>

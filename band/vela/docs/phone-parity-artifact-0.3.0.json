@@ -1,0 +1,23 @@
+{
+  "versionName": "0.3.0-ui",
+  "versionCode": 4,
+  "artifact": "../artifacts/phone-parity-0.3.0-ui.rpk",
+  "bytes": 144291,
+  "sha256": "d853f8503cb10fec8634127a57e1aa1f44d7ee45926f10abf3847ccc45200683",
+  "toolkit": "2.0.5",
+  "profile": {
+    "mode": "development",
+    "enableJsc": false,
+    "watch": false,
+    "inlineSourceMap": false,
+    "source": "standalone CLI after IDE watcher stopped"
+  },
+  "checks": {
+    "existing": 19,
+    "pass": 19,
+    "fail": 0
+  },
+  "ideVisualAcceptance": "pending root preview",
+  "liveSdkAndBusinessMutation": "not verified; real mutations disabled",
+  "appJsBytes": 133024
+}

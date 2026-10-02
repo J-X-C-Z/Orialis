@@ -14,3 +14,7 @@
 # file_picker and image_picker touch content resolvers and providers.
 -keep class androidx.core.content.FileProvider { *; }
 -keep class ** extends androidx.core.content.FileProvider { *; }
+
+# Xiaomi Wear's Binder callbacks and parcelable models cross the Mi Fitness process.
+# Keep the vendor API identity in addition to the AAR's bundled consumer rules.
+-keep class com.xiaomi.xms.wearable.** { *; }

@@ -1,0 +1,23 @@
+PODS:
+  - FlutterMacOS (1.0.0)
+  - sqlite3 (3.52.0):
+    - sqlite3/common (= 3.52.0)
+  - sqlite3/common (3.52.0)
+
+DEPENDENCIES:
+  - FlutterMacOS (from `Flutter/ephemeral`)
+  - sqlite3 (from `../../desktop/native/sqlite3.podspec.json`)
+
+EXTERNAL SOURCES:
+  FlutterMacOS:
+    :path: Flutter/ephemeral
+  sqlite3:
+    :podspec: "../../desktop/native/sqlite3.podspec.json"
+
+SPEC CHECKSUMS:
+  FlutterMacOS: c232990155153907050900a2e175c7773903ba4e
+  sqlite3: 4b88c473bfd176f0af482558ad1a94c7bcc9672b
+
+PODFILE CHECKSUM: 45495d2d385ed3a885095a4f3c68aeb6f58e5a41
+
+COCOAPODS: 1.17.0

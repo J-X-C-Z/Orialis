@@ -17,6 +17,8 @@ void main() {
     await tester.scrollUntilVisible(find.text('Preferences'), 420,
         scrollable: find.byType(Scrollable).first);
     expect(find.text('Preferences'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Open a bottom sheet'), 240,
+        scrollable: find.byType(Scrollable).first);
     expect(find.text('Open a bottom sheet'), findsOneWidget);
   });
 }

@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orialis.example/contracts/multidevice-v1/http.schema.json",
+  "title": "Orialis Multi-device HTTP v1 implementation profile",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/startRequest"
+    },
+    {
+      "$ref": "#/$defs/nodesResponse"
+    },
+    {
+      "$ref": "#/$defs/capabilitiesResponse"
+    },
+    {
+      "$ref": "#/$defs/eventsResponse"
+    }
+  ],
+  "$defs": {
+    "startRequest": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "nodeIdentity"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "1"
+        },
+        "nodeIdentity": {
+          "$ref": "pairing.schema.json#/$defs/nodeIdentity"
+        }
+      },
+      "additionalProperties": false
+    },
+    "nodesResponse": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "nodes",
+        "nextCursor"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "1"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "device.schema.json"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "capabilitiesResponse": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "deviceId",
+        "capabilities"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "1"
+        },
+        "deviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "capability.schema.json"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "eventsResponse": {
+      "type": "object",
+      "required": [
+        "protocolVersion",
+        "events",
+        "nextCursor"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "1"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "event.schema.json"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

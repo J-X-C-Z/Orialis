@@ -47,6 +47,13 @@ void main() => runApp(MaterialApp(
 
 ## 组件分层
 
+Flutter 3.47.4 的 Material 3 控件目录逐项映射见
+[`docs/material3-coverage.md`](docs/material3-coverage.md)。新增的
+`LuminaMaterialBridge` 为保留 Flutter 原生键盘、焦点和无障碍行为的控件提供
+Lumina 主题。固定 28 类目录已使用 Lumina 自有材质绘制，滑块、单选、菜单等继续复用 SDK 的行为机制；具体实现与验收边界见覆盖表。
+三态外观控件为 `LuminaThemeModeSelector`，传入 `ThemeMode.system/light/dark`；
+宿主保存用户选择，并将实际亮度传给 `LuminaTheme.brightness`。
+
 | 层 | 主要 API |
 | --- | --- |
 | 基础 | `LuminaTheme`、`LuminaThemeData`、`LuminaColors`、`LuminaCardPalette`、`LuminaIcon`、`LuminaMotion` |
@@ -102,7 +109,16 @@ flutter pub get
 flutter run -d chrome
 ```
 
-展示六套配色、深浅主题、文字缩放、性能模式、减少动效、按钮/输入/卡片/弹层。
+展示六套配色、深浅主题、文字缩放、性能模式、减少动效，以及固定目录的全部 28 类控件。
+导航、菜单、单选/多选、滑块和日期/时间选择都能实际操作；控件采用 Lumina 材质，
+复杂输入和弹层保留 Flutter 的焦点、语义与手势机制。
+
+用 `?catalog=1` 直接打开完整控件集；加上 `&dark=1&liquid=1&locale=zh`
+预览中文深色液态玻璃。可在偏好设置中切换材质、文字缩放和减少动效。
+
+把同组单选控件包在 `LuminaRadioGroup<T>(groupValue: ..., onChanged: ..., child: ...)`
+内可启用兄弟控件之间的方向键切换。菜单行使用 `LuminaMenuItem`；
+`LuminaMenuAnchor` 仍接受 SDK 菜单子项和 builder。
 可用 `flutter run` 选择 Android 或 iOS 设备。平台验证结果见
 [验证记录](docs/verification.md)，未测试的平台不视为已验收。
 

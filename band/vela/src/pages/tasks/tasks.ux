@@ -1,0 +1,15 @@
+<template>
+<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><scroll class="content" scroll-y="true"><div class="stack">
+<div class="header"><div class="back" onclick="goBack"><text class="backText">‹</text></div><text class="title">{{ selectedTask ? '任务详情' : '任务' }}</text><div class="badge"><text class="badgeText">{{ vm.tasks.length }}</text></div></div><text class="sourceLine">{{ vm.sourceShort }}</text>
+<div class="block" if="{{ !vm.tasks.length }}"><text class="emptyTitle">暂无任务</text><text class="emptyBody">在手机打开 Orialis，同步任务后查看摘要。</text></div>
+<div class="stack" if="{{ !selectedTask }}"><div class="listRow {{ vm.compact ? 'compactRow' : '' }}" for="{{ vm.tasks }}" onclick="openTask($item.id)"><div class="glyphCircle teal"><div class="check"></div></div><div class="copy"><text class="rowTitle">{{ $item.shortTitle }}</text><text class="rowHint">{{ $item.statusLabel }}</text><text if="{{ !vm.compact }}" class="rowHint">{{ $item.shortSummary }}</text><div class="statusLine {{ $item.tone }}"></div></div><text class="chevron">›</text></div></div>
+<div class="block" if="{{ selectedTask }}"><text class="body">{{ selectedTask.title }}</text><text class="stateBadge">{{ selectedTask.statusLabel }}</text><div class="statusLine {{ selectedTask.tone }}"></div><text class="progress" if="{{ selectedTask.progress >= 0 }}">{{ selectedTask.progress }}%</text><text class="emptyBody">{{ selectedTask.summary }}</text><div class="disabled"><text class="disabledText">停止任务 · 待接入</text></div><text class="meta">执行与审批请在手机处理。</text><div class="button" onclick="closeTask"><text class="buttonText">返回任务列表</text></div></div><div class="block"><text class="provenance">{{ vm.provenance }}</text><text class="meta">{{ vm.syncLabel }}</text><text class="hint">右滑返回上一层</text></div>
+</div></scroll></div>
+</template>
+<script>
+const pages = require('../../services/page')
+export default pages.createPage('tasks')
+</script>
+<style>
+@import "../../common/wear.css";
+</style>

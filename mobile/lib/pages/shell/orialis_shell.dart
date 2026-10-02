@@ -48,7 +48,18 @@ class _OrialisShellState extends State<OrialisShell> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              Positioned.fill(child: widget.navigationShell),
+              Positioned.fill(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.viewInsetsOf(context).bottom,
+                  ),
+                  child: MediaQuery.removeViewInsets(
+                    context: context,
+                    removeBottom: true,
+                    child: widget.navigationShell,
+                  ),
+                ),
+              ),
               Positioned(
                 left: 0,
                 right: 0,
@@ -64,12 +75,15 @@ class _OrialisShellState extends State<OrialisShell> {
                         listenable: LuminaBlurPolicy.instance.chromeListenable,
                         builder: (context, _) => LuminaSurface(
                           depth: LuminaSurfaceDepth.raised,
+                          glass: true,
+                          backdrop: true,
                           radius: AppControlSize.capsuleRadius,
                           padding: const EdgeInsets.all(6),
                           child: LuminaSlidingSelection(
                             index: widget.navigationShell.currentIndex,
                             count: OrialisShell._labels.length,
                             longTravel: true,
+                            backdrop: false,
                             onDragEnd: (index) =>
                                 widget.navigationShell.goBranch(index),
                             child: Row(

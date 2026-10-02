@@ -1,0 +1,6 @@
+{
+  "protocolVersion": "1",
+  "deviceId": "dev_opaque_01",
+  "accountId": "acct_opaque_01",
+  "deviceCredential": "device_credential_returned_once_0123456789"
+}

@@ -1,0 +1,17 @@
+<template>
+<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><scroll class="content" scroll-y="true"><div class="stack">
+<div class="header"><div class="back" onclick="goBack"><text class="backText">‹</text></div><text class="title">菜单</text></div>
+<div class="row menuRow" onclick="events"><div class="glyphCircle teal"><div class="glyph check"></div></div><text class="menuTitle">四象限</text><text class="chevron">›</text></div>
+<div class="row menuRow" onclick="projects"><div class="glyphCircle orange"><div class="glyph folderGlyph"></div></div><text class="menuTitle">项目</text><text class="chevron">›</text></div>
+<div class="row menuRow" onclick="calendar"><div class="glyphCircle blue"><div class="glyph calendarGlyph"></div></div><text class="menuTitle">日历</text><text class="chevron">›</text></div>
+<div class="row menuRow" onclick="settings"><div class="glyphCircle slate"><div class="glyph gearGlyph"></div></div><text class="menuTitle">设置</text><text class="chevron">›</text></div>
+<text class="hint">右滑返回今日</text>
+</div></scroll></div>
+</template>
+<script>
+const pages = require('../../services/page')
+export default pages.createPage('menu')
+</script>
+<style>
+@import "../../common/wear.css";
+</style>

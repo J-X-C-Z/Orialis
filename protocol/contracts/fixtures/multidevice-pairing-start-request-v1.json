@@ -1,0 +1,8 @@
+{
+  "protocolVersion": "1",
+  "nodeIdentity": {
+    "displayName": "Acceptance Node",
+    "platform": "macos",
+    "nodeVersion": "1.0.1"
+  }
+}

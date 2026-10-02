@@ -1,0 +1,132 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+:root { font-family:'DM Sans','Noto Sans SC',system-ui,sans-serif; }
+* { box-sizing:border-box; }
+body { margin:0; }
+button,input { font:inherit; }
+/* The body and opposing inner rims follow Flutter's top-left light source.
+   Shared color/geometry variables are supplied by LuminaProvider. */
+.lumina-root {
+  --ink:#152232; --paper:#E9EEF4; --surface:#F2F5F8; --accent:#3978D0; --accent-soft:#DCE7F5; --muted:#637183; --danger:#AC4545; --outline:#D8E0E5;
+  --material-light:#fff; --material-shade:#A6B7CD;
+  --glass:rgba(242,245,248,.48); --glass-edge:rgba(255,255,255,.78);
+  --glass-shadow:rgba(106,128,156,.18); --etch-light:rgba(255,255,255,.98); --etch-dark:rgba(53,70,89,.13);
+  --glass-body:linear-gradient(135deg,rgba(255,255,255,.66) 0%,rgba(242,245,248,.31) 40%,rgba(185,210,240,.29) 74%,rgba(255,255,255,.42) 100%);
+  --glass-rim:inset 0 2.5px 1px rgba(255,255,255,.70),inset 0 -1.5px 1px rgba(255,255,255,.65),inset 0 -3.5px 2px rgba(57,120,208,.10);
+  --material-shadow:2px 5px 12px var(--glass-shadow);
+  --recessed-shadow:inset 1.5px 2px 5px rgba(106,128,156,.23),inset 0 -1px 0 rgba(255,255,255,.66);
+  --glass-filter:blur(var(--glass-blur,12px)) saturate(1.15);
+  color:var(--ink); background:var(--paper); min-height:100vh; color-scheme:light;
+  transition:background .22s,color .22s;
+}
+.lumina-root[data-theme=dark] {
+  --ink:#EEF3FA; --paper:#101822; --surface:#192431; --accent:#8DBBFF; --accent-soft:#243D5D; --muted:#A3B3C5; --danger:#FF8E91; --outline:#344356;
+  --material-light:#4B5E6D; --material-shade:#070F18;
+  --glass:rgba(25,36,49,.58); --glass-edge:rgba(124,153,177,.38); --glass-shadow:rgba(7,15,24,.38);
+  --etch-light:rgba(231,243,255,.16); --etch-dark:rgba(0,0,0,.72);
+  --glass-body:linear-gradient(135deg,rgba(62,79,95,.69) 0%,rgba(25,36,49,.38) 40%,rgba(58,82,114,.34) 74%,rgba(75,94,109,.10) 100%);
+  --glass-rim:inset 0 2.5px 1px rgba(110,137,156,.36),inset 0 -1.5px 1px rgba(107,133,153,.32),inset 0 -3.5px 2px rgba(141,187,255,.09);
+  --recessed-shadow:inset 1.5px 2px 5px rgba(7,15,24,.6),inset 0 -1px 0 rgba(107,133,153,.23);
+  color-scheme:dark;
+}
+.lumina-root button { cursor:pointer; }
+.lumina-root button:disabled,.lumina-root input:disabled { opacity:.46; cursor:not-allowed; }
+.lumina-root :focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+.lumina-etched,.lumina-button:not(.lumina-button--primary),.lumina-menu__panel button,.lumina-segmented button.selected {
+  color:var(--ink); text-shadow:0 1px 0 var(--etch-light),0 -1px 1px var(--etch-dark);
+}
+/* A single backdrop blur per material. Rim depth is entirely painted shadows. */
+.lumina-button,.lumina-card,.lumina-topbar,.lumina-segmented,.lumina-menu__panel,.lumina-dialog,.lumina-toast {
+  background:var(--glass-body); border:1px solid var(--glass-edge);
+  box-shadow:var(--material-shadow),var(--glass-rim);
+  backdrop-filter:var(--glass-filter); -webkit-backdrop-filter:var(--glass-filter);
+}
+[data-lumina-water] { isolation:isolate; }
+[data-lumina-water]:not(.lumina-topbar):not(.lumina-menu__panel):not(.lumina-dialog):not(.lumina-toast) { position:relative; }
+.lumina-water-canvas { position:absolute; inset:0; width:100%; height:100%; border-radius:inherit; pointer-events:none; z-index:-1; }
+.lumina-button {
+  min-height:var(--minimum-control,48px); border-radius:var(--radius-control,18px); padding:0 19px;
+  display:inline-flex; align-items:center; justify-content:center; gap:9px; color:var(--ink); font-weight:600;
+  transition:transform .14s ease,box-shadow .14s ease,border-color .22s ease;
+}
+.lumina-button:active:not(:disabled) { transform:translateY(1px) scale(.985); box-shadow:1px 1px 5px var(--glass-shadow),inset 0 1px 1px var(--glass-edge),inset 0 -1px 1px var(--glass-edge); }
+.lumina-button--primary { color:#fff; background:linear-gradient(135deg,color-mix(in srgb,var(--accent),white 12%),var(--accent) 60%,color-mix(in srgb,var(--accent),var(--material-shade) 10%)); border-color:color-mix(in srgb,var(--accent),white 35%); text-shadow:0 1px 1px rgba(0,0,0,.15); }
+[data-theme=dark] .lumina-button--primary { color:#102033; text-shadow:0 1px 0 rgba(255,255,255,.25); }
+.lumina-button--quiet { background:transparent; border-color:transparent; box-shadow:none; backdrop-filter:none; -webkit-backdrop-filter:none; }
+.lumina-button.lumina-button--danger { color:var(--danger); }
+.lumina-icon-button { width:var(--minimum-control,48px); padding:0; border-radius:999px; font-size:22px; }
+.lumina-spinner { width:17px; height:17px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:lumina-spin .7s linear infinite; }
+@keyframes lumina-spin { to { transform:rotate(360deg); } }
+.lumina-field { display:grid; gap:7px; min-width:0; }
+.lumina-field label,.lumina-slider label { font-size:14px; font-weight:600; }
+.lumina-field input { width:100%; min-height:var(--minimum-control,48px); border:1px solid var(--outline); border-radius:var(--radius-control,18px); background:linear-gradient(135deg,color-mix(in srgb,var(--surface),var(--material-shade) 8%),var(--surface)); color:var(--ink); padding:0 15px; box-shadow:var(--recessed-shadow); transition:border-color .14s; }
+.lumina-field input::placeholder { color:var(--muted); }
+.lumina-field input[aria-invalid=true] { border-color:var(--danger); }
+.lumina-hint,.lumina-error { font-size:12px; color:var(--muted); }
+.lumina-error { color:var(--danger); }
+.lumina-choice { display:inline-flex; align-items:center; gap:11px; min-height:48px; cursor:pointer; position:relative; }
+.lumina-choice input { position:absolute; width:24px; height:24px; opacity:0; }
+.lumina-choice:has(input:disabled) { opacity:.46; cursor:not-allowed; }
+.lumina-checkbox-mark { width:24px; height:24px; border:1.5px solid var(--muted); border-radius:7px; background:var(--glass-body); display:grid; place-items:center; box-shadow:var(--recessed-shadow); transition:background .14s,border-color .14s; }
+.lumina-choice input:checked + .lumina-checkbox-mark { background:var(--accent); border-color:var(--accent); box-shadow:inset 0 1px 1px rgba(255,255,255,.3),1px 2px 4px var(--glass-shadow); }
+.lumina-choice input:checked + .lumina-checkbox-mark::after { content:'✓'; color:var(--paper); font-size:18px; line-height:1; }
+.lumina-choice input:focus-visible + span { outline:3px solid var(--accent); outline-offset:3px; }
+.lumina-switch-track { width:47px; height:28px; border-radius:999px; background:color-mix(in srgb,var(--surface),var(--material-shade) 12%); border:1px solid var(--outline); padding:3px; box-shadow:var(--recessed-shadow); transition:background .22s; }
+.lumina-switch-track span { display:block; width:20px; height:20px; border-radius:50%; background:linear-gradient(135deg,color-mix(in srgb,var(--surface),var(--material-light) 35%),var(--surface)); box-shadow:1px 2px 4px var(--glass-shadow),inset 0 1px 1px var(--glass-edge); transition:transform .22s; }
+.lumina-switch-input:checked + .lumina-switch-track { background:var(--accent); border-color:var(--accent); }
+.lumina-switch-input:checked + .lumina-switch-track span { transform:translateX(19px); }
+.lumina-slider { display:grid; gap:8px; }
+.lumina-slider label { display:flex; justify-content:space-between; }
+.lumina-slider output { color:var(--accent); }
+.lumina-slider input { appearance:none; -webkit-appearance:none; width:100%; height:40px; margin:0; background:transparent; cursor:pointer; }
+.lumina-slider input::-webkit-slider-runnable-track { height:10px; border:1px solid var(--outline); border-radius:999px; background:linear-gradient(90deg,var(--accent) 0 var(--slider-progress,0%),var(--surface) var(--slider-progress,0%) 100%); box-shadow:var(--recessed-shadow); }
+.lumina-slider input::-moz-range-track { height:8px; border:1px solid var(--outline); border-radius:999px; background:var(--surface); box-shadow:var(--recessed-shadow); }
+.lumina-slider input::-moz-range-progress { height:8px; border-radius:999px; background:var(--accent); }
+.lumina-slider input::-webkit-slider-thumb { appearance:none; -webkit-appearance:none; width:28px; height:28px; margin-top:-10px; border:1px solid var(--glass-edge); border-radius:50%; background:linear-gradient(135deg,color-mix(in srgb,var(--surface),var(--material-light) 28%),var(--surface)); box-shadow:1px 3px 6px var(--glass-shadow),var(--glass-rim); transition:transform .14s; }
+.lumina-slider input::-moz-range-thumb { width:26px; height:26px; border:1px solid var(--glass-edge); border-radius:50%; background:linear-gradient(135deg,color-mix(in srgb,var(--surface),var(--material-light) 28%),var(--surface)); box-shadow:1px 3px 6px var(--glass-shadow),var(--glass-rim); transition:transform .14s; }
+.lumina-slider input:active:not(:disabled)::-webkit-slider-thumb { transform:scale(.94); }
+.lumina-slider input:active:not(:disabled)::-moz-range-thumb { transform:scale(.94); }
+.lumina-segmented { display:inline-flex; max-width:100%; padding:4px; gap:4px; border-radius:999px; box-shadow:var(--recessed-shadow); overflow:auto; }
+.lumina-segmented button { border:1px solid transparent; background:transparent; color:var(--muted); min-height:40px; padding:0 16px; border-radius:999px; white-space:nowrap; font-weight:600; transition:background .18s,box-shadow .18s,transform .14s; }
+.lumina-segmented button.selected { background:var(--glass-body); border-color:var(--glass-edge); box-shadow:1px 3px 6px var(--glass-shadow),var(--glass-rim); }
+.lumina-segmented button:active { transform:scale(.97); }
+.lumina-card { border-radius:var(--radius-card,24px); padding:20px; }
+.lumina-card h2 { font-size:18px; margin:0 0 12px; }
+.lumina-topbar { min-height:64px; padding:8px 20px; position:sticky; top:0; z-index:20; display:grid; grid-template-columns:minmax(60px,1fr) auto minmax(60px,1fr); align-items:center; border-inline:0; border-top:0; }
+.lumina-topbar h1 { text-align:center; font-size:18px; margin:0; }
+.lumina-topbar__side { display:flex; align-items:center; gap:8px; }
+.lumina-topbar__side--end { justify-content:flex-end; }
+.lumina-menu { position:relative; display:inline-block; }
+.lumina-menu__panel { position:absolute; top:calc(100% + 8px); left:0; z-index:25; min-width:190px; padding:6px; border-radius:var(--radius-control,18px); }
+.lumina-menu__panel button { width:100%; display:block; text-align:left; min-height:42px; border:0; border-radius:12px; background:transparent; color:var(--ink); padding:0 12px; }
+.lumina-dialog { width:min(440px,calc(100vw - 32px)); border-radius:var(--radius-card,24px); padding:24px; color:var(--ink); box-shadow:2px 16px 40px var(--glass-shadow),var(--glass-rim); }
+.lumina-dialog::backdrop { background:rgba(4,13,26,.5); backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px); }
+.lumina-dialog h2 { margin:0 0 16px; font-size:20px; }
+.lumina-dialog footer { display:flex; justify-content:flex-end; margin-top:24px; }
+.lumina-toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:40; display:flex; align-items:center; gap:14px; max-width:min(520px,calc(100vw - 32px)); min-height:52px; padding:9px 12px 9px 18px; border-radius:var(--radius-control,18px); }
+.lumina-toast button { border:0; background:transparent; color:var(--accent); font-weight:700; min-height:38px; padding:0 7px; }
+@media (hover:hover) and (pointer:fine) {
+  .lumina-button:hover:not(:disabled):not(.lumina-button--quiet) { transform:translateY(-1px); box-shadow:2px 7px 14px var(--glass-shadow),var(--glass-rim); }
+  .lumina-button--quiet:hover:not(:disabled),.lumina-menu__panel button:hover:not(:disabled),.lumina-segmented button:not(.selected):hover { background:var(--accent-soft); }
+  .lumina-button:active:not(:disabled):not(.lumina-button--quiet) { transform:translateY(1px) scale(.985); box-shadow:1px 1px 5px var(--glass-shadow),inset 0 1px 1px var(--glass-edge); }
+}
+@media (prefers-reduced-transparency:reduce) {
+  .lumina-root { --glass-body:var(--surface); --glass-filter:none; }
+  .lumina-water-canvas { display:none; }
+  .lumina-dialog::backdrop { backdrop-filter:none; -webkit-backdrop-filter:none; }
+}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) { .lumina-root { --glass-body:var(--surface); } }
+@media (prefers-reduced-motion:reduce) {
+  .lumina-root *,.lumina-root *::before,.lumina-root *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
+  .lumina-water-canvas { display:none; }
+}
+@media (forced-colors:active) {
+  .lumina-root { --glass-body:Canvas; --glass-filter:none; --glass-edge:ButtonText; }
+  .lumina-water-canvas { display:none; }
+  .lumina-choice input:checked + .lumina-checkbox-mark { background:Highlight; border-color:Highlight; }
+  .lumina-choice input:checked + .lumina-checkbox-mark::after { color:HighlightText; }
+  .lumina-switch-input:checked + .lumina-switch-track { background:Highlight; }
+}
+@media (max-width:540px) { .lumina-topbar { padding-inline:12px; } .lumina-segmented button { padding-inline:12px; } }
+/* The water bounds follow the visible switch/checkbox surface, not its label. */
+[data-water-surface] { position:relative; isolation:isolate; }
+.lumina-slider-surface { border-radius:999px; }

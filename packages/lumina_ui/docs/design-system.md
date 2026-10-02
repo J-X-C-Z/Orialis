@@ -1,12 +1,19 @@
-# Lumina content and interaction controls
+# Lumina Flutter design and interaction controls
+
+通用设计规范： [Lumina Design System](https://github.com/J-X-C-Z/Lumina)。本页负责Flutter实现细节；日历、子任务和项目摘要段属于Orialis宿主模式，不构成Core领域规则。共享数值来源为 [`lumina.v1.json`](../../lumina_tokens/lumina.v1.json)，Web使用CSS近似映射。
+
+## Two material modes
+
+默认 `LuminaThemeData.liquidGlass=false` 保留雕刻材质、微纹理与低对比文字高光；true选择无颗粒清透表面、薄边缘与漫射阴影。内容仍保持稳定层级。材质与性能独立：`LuminaTheme.highPerformanceMode`默认true；正常模式由宿主显式选择。
 
 ## Sliding selection material
 
 `LuminaSlidingSelection` paints one stationary glass recess below the labels
-and one raised transparent lens above them. The recess has a clipped, small
-backdrop blur, soft inner shadow and muted frost; the lens magnifies labels.
-High-performance mode uses BlurS, regular mode BlurM. Reduced transparency and
-high contrast use opaque material. The recess does not travel or animate.
+and one raised transparent lens above them. The recess can opt into a clipped backdrop blur, with a stable inner boundary
+and muted tint. The active lens can magnify labels in normal mode; high-performance
+and reduced-motion branches remove the moving magnifier. BlurS/BlurM describe
+actual Flutter Gaussian sigma 3.5/5.5, not the shared JSON glass values12/6.
+Reduced transparency and high contrast use opaque material without backdrop blur. The recess does not travel or animate.
 Navigation, segmented selection, switches and discrete value sliders share
 this implementation, the spring and capsule radius. Each accepts a long press
 on the lens, drags continuously and commits the nearest stop on release.
@@ -27,7 +34,7 @@ selection lenses and transition timing belong in `packages/lumina_ui/lib/src/`.
   never use a percentage of card width for the title shelf.
 - Recessed task/schedule titles: 16sp, medium weight, 1.35 line height, system
   font. Card heading-to-body spacing is 12dp.
-- `LuminaCollapsibleCard`: default expanded, saves folding preference locally,
+- `LuminaCollapsibleCard`: default expanded, supports host-injected folding storage (memory-only by default),
   preserves mounted content, and clips/reveals from the top using the shared
   220ms ease-out. A collapsed card retains its heading and a short status.
 - `LuminaExpandableCard`: projects expand at their list position. Only one
@@ -107,3 +114,52 @@ removes positional travel; folding and selection remain operable.
 ## Package ownership
 
 Business data, child-task propagation, calendar calculations and navigation routes remain in the host application. The library owns only the generic UI and callback contracts above. Do not move server or synchronization implementations into the UI package.
+
+## Android compact glass and reply controls
+
+Persistent navigation and top bars use a clipped Gaussian backdrop with a
+translucent tint and rim. Normal mode uses sigma 5.5; high-performance mode uses
+sigma 3.5, flat shadows, and no moving magnification layer. These are Flutter
+ImageFilter values: there is no custom downsample or Dual Kawase implementation.
+The frame watcher lowers normal-mode sigma after sustained slow frames. List
+rows never opt into backdrop filtering. High contrast/reduced transparency use
+opaque chrome; reduced motion removes lens distortion.
+
+Compact top bars use 4-point vertical padding with a 48-point minimum content area;
+the full top-bar content height token is 56. Interactive targets remain at least48.
+Long-press scrubbing compresses the navigation lens against the well edge;
+the lens remains inside its bounds and native haptics fire once per contact.
+Hosts with an already blurred base set `LuminaSlidingSelection.backdrop: false`
+to avoid two filters over the same pixels.
+
+`LuminaQuotePreview(title:, text:, onTap:, onDismiss:)` is the shared reply
+preview. It keeps a 48-point action target, truncates long previews, and adapts
+to the current palette. Reply identities and text snapshots remain host data.
+
+### 长按排序
+
+`LuminaLongPressOrderable<T>` 提供同组长按排序、跨组接收、拖动反馈与滚动边缘自动滚动。
+领域层负责保存排序与撤销属性变化；控件不持有任务或项目数据。
+`LuminaOrderDrag<T>` 可用于整个空分组的 DragTarget，确保没有条目时仍能接收。
+减少动态效果开启时不播放目标缩放过渡。
+
+### Floating calendar and event content
+
+`LuminaFloatingHeader` keeps only its capsule fixed. Apply the builder's inset to scroll padding, so rows can travel behind the glass. Date navigation belongs inside the scroll body. `LuminaDateNavigator` reserves 12px between date and arrows and permits scaled text wrapping.
+
+`LuminaTitledContentCard` keeps its semantic heading in populated and empty states. Use separate schedule and deadline cards. `LuminaCalendarSummary` is a lightweight one-line label with a distinct schedule/deadline marker; limit month cells to two entries, one per category when both exist, and add an overflow count. Full information belongs below the grid.
+
+Normal-mode glass uses bounded shape/gradient caches and batched grain drawing. Blur adapts to the display refresh budget, lowers after 12 consecutive slow frames, and recovers after 120 frames with headroom. A two-second cooldown prevents oscillation; automatic reduction retains at least BlurS. High-performance and reduced-transparency settings remain authoritative.
+
+## Complete Flutter catalog material (2026-10-02)
+
+The fixed 28-entry catalog now renders Lumina surfaces, lenses and tracks across
+all component categories. Slider/radio/chip/menu mechanics continue to use SDK
+input and focus infrastructure; their default Material geometry is replaced.
+The catalog wrappers retain public constructors and use the active light/dark
+palette, sculpted/clear-glass setting and accessibility substitutions.
+
+Popup menus, tooltips, dialogs, sheets and messages capture Lumina theme and
+MediaQuery preferences from their triggering context. Navigation visibility
+scrolls the component's own viewport without changing the containing page.
+State examples and verification boundaries live in material3-coverage.md.

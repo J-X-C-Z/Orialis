@@ -1,0 +1,8 @@
+{
+  "pairingSecret": "secret_from_target_node_0123456789abcdef",
+  "nodeIdentity": {
+    "displayName": "Office Node",
+    "platform": "linux-x86_64",
+    "nodeVersion": "1.0.0"
+  }
+}

@@ -77,6 +77,7 @@ Calendar 的日程查询。
   "startAt": "2026-09-18T09:00:00Z",
   "endAt": "2026-09-18T11:00:00Z",
   "allDay": false,
+  "important": false,
   "reminderMinutes": 30,
   "createdAt": "2026-09-17T08:00:00Z",
   "updatedAt": "2026-09-17T08:00:00Z",
@@ -304,6 +305,11 @@ Today 不建立自己的同步流，而是从本地 Task 和 Schedule 查询后�
 - 对 `message_id` 做接收去重，对回复保留 `reply_to`。
 - 附件只使用服务器返回的元数据和下载 URL，不暴露本地路径给手机端。
 - 能力发现结果必须反映服务器真实 capabilities，不把未实现工具伪报为可用。
+- `create_schedule` 调用规范 `POST /api/v1/schedules`，只发送 Schedule 字段；通过 Agent Bearer token 认证，服务端将 token 绑定到配置用户或唯一用户。
+
+### 聊天创建日程（已实现）
+
+Hermes 提供 `create_schedule` 工具，必填 `title`、带时区的 RFC 3339 `startAt`、`endAt`，可选 `description`、`location`、`allDay`、`important`、`reminderMinutes`。插件先校验参数，再将请求发至现有 Schedule API。服务端只在创建路由接受配置的 Agent Bearer token；列表、更新和删除仍要求用户会话。创建沿用原 API 的输入校验、版本 1、`calendar_event` 同步记录与实时变更提示，因此手机端通过既有同步收到该日程。
 
 ### 手机端
 

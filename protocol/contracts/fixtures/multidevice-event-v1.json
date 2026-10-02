@@ -1,0 +1,11 @@
+{
+  "protocolVersion": "1",
+  "eventId": "evt_opaque_01",
+  "deviceId": "dev_opaque_01",
+  "sequence": 1,
+  "occurredAt": "2026-10-01T08:00:21Z",
+  "eventType": "node.presence_changed",
+  "requestId": null,
+  "payload": {"status": "online", "observedAt": "2026-10-01T08:00:21Z"},
+  "cursor": "cursor_opaque_01"
+}

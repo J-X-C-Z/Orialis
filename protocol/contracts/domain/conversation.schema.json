@@ -4,14 +4,50 @@
   "title": "Orialis Conversation v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "title", "isDefault", "type", "createdAt", "updatedAt", "version"],
+  "required": [
+    "id",
+    "title",
+    "isDefault",
+    "type",
+    "createdAt",
+    "updatedAt",
+    "version"
+  ],
   "properties": {
-    "id": {"$ref": "./common.schema.json#/$defs/entityId"},
-    "title": {"type": "string", "minLength": 1},
-    "isDefault": {"type": "boolean"},
-    "type": {"type": "string", "minLength": 1},
-    "createdAt": {"$ref": "./common.schema.json#/$defs/timestamp"},
-    "updatedAt": {"$ref": "./common.schema.json#/$defs/timestamp"},
-    "version": {"type": "integer", "minimum": 1}
+    "id": {
+      "$ref": "./common.schema.json#/$defs/entityId"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "isDefault": {
+      "type": "boolean"
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "createdAt": {
+      "$ref": "./common.schema.json#/$defs/timestamp"
+    },
+    "updatedAt": {
+      "$ref": "./common.schema.json#/$defs/timestamp"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "manualPosition": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "User-defined order. Null preserves default ordering; ties use existing date and id ordering."
+    },
+    "pinned": {
+      "type": "boolean",
+      "default": false
+    }
   }
 }

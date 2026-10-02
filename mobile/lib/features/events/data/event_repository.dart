@@ -44,6 +44,41 @@ class EventRepository {
   EventRepository({required this.database, required this.config});
 
   final AppDatabase database;
+  Future<void> reorderTasks(List<String> orderedIds) =>
+      _setTaskOrder(orderedIds, reset: false);
+  Future<void> resetTaskOrder(List<String> ids) async {
+    await _setTaskOrder(ids, reset: true);
+  }
+
+  Future<void> _setTaskOrder(List<String> ids, {required bool reset}) async {
+    if (ids.toSet().length != ids.length) throw ArgumentError('Duplicate IDs');
+    await database.transaction(() async {
+      for (var i = 0; i < ids.length; i++) {
+        final id = ids[i];
+        final current = await (database.select(
+          database.tasks,
+        )..where((r) => r.id.equals(id) & r.deletedAt.isNull())).getSingle();
+        final position = reset ? null : i;
+        if (current.manualPosition == position) continue;
+        await (database.update(
+          database.tasks,
+        )..where((r) => r.id.equals(id))).write(
+          TasksCompanion(
+            manualPosition: Value(position),
+            updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
+            localRevision: Value(current.localRevision + 1),
+            syncStatus: Value(
+              current.syncStatus == 'pendingCreate'
+                  ? 'pendingCreate'
+                  : 'pendingUpdate',
+            ),
+          ),
+        );
+        await _enqueueTaskInTransaction(id);
+      }
+    });
+  }
+
   final AppConfig config;
 
   Stream<List<Task>> watchTasks() => database.watchActiveTasks();
@@ -55,7 +90,12 @@ class EventRepository {
                   row.deletedAt.isNull() &
                   row.parentTaskId.equals(parentTaskId),
             )
-            ..orderBy([(row) => OrderingTerm(expression: row.due)]))
+            ..orderBy([
+              (row) => OrderingTerm(expression: row.manualPosition.isNull()),
+              (row) => OrderingTerm(expression: row.manualPosition),
+              (row) => OrderingTerm(expression: row.due),
+              (row) => OrderingTerm(expression: row.id),
+            ]))
           .watch();
 
   Stream<List<Task>> watchTasksForSchedule(String scheduleId) =>
@@ -64,7 +104,12 @@ class EventRepository {
               (row) =>
                   row.deletedAt.isNull() & row.scheduleId.equals(scheduleId),
             )
-            ..orderBy([(row) => OrderingTerm(expression: row.due)]))
+            ..orderBy([
+              (row) => OrderingTerm(expression: row.manualPosition.isNull()),
+              (row) => OrderingTerm(expression: row.manualPosition),
+              (row) => OrderingTerm(expression: row.due),
+              (row) => OrderingTerm(expression: row.id),
+            ]))
           .watch();
 
   Stream<List<Task>> watchForSchedule(String scheduleId) =>
@@ -77,7 +122,13 @@ class EventRepository {
     final key = _dateKey(date);
     return (database.select(database.tasks)
           ..where((row) => row.deletedAt.isNull() & row.due.equals(key))
-          ..orderBy([(row) => OrderingTerm(expression: row.dueTime)]))
+          ..orderBy([
+            (row) => OrderingTerm(expression: row.manualPosition.isNull()),
+            (row) => OrderingTerm(expression: row.manualPosition),
+            (row) => OrderingTerm(expression: row.dueTime),
+            (row) => OrderingTerm(expression: row.id),
+            (row) => OrderingTerm(expression: row.id),
+          ]))
         .watch();
   }
 
@@ -114,8 +165,11 @@ class EventRepository {
         return predicate;
       })
       ..orderBy([
+        (row) => OrderingTerm(expression: row.manualPosition.isNull()),
+        (row) => OrderingTerm(expression: row.manualPosition),
         (row) => OrderingTerm(expression: row.due),
         (row) => OrderingTerm(expression: row.dueTime),
+        (row) => OrderingTerm(expression: row.id),
       ]);
     return query.watch();
   }
@@ -289,6 +343,28 @@ class EventRepository {
       }
     });
   }
+
+  /// Updates only quadrant attributes, preserving concurrent edits to title,
+  /// due date, relations and completion. Returns the pre-move snapshot for undo.
+  Future<Task> setTaskQuadrant(String id, {bool? important, bool? urgent}) =>
+      database.transaction(() async {
+        final current = await (database.select(
+          database.tasks,
+        )..where((r) => r.id.equals(id) & r.deletedAt.isNull())).getSingle();
+        await (database.update(
+          database.tasks,
+        )..where((r) => r.id.equals(id))).write(
+          TasksCompanion(
+            important: Value(important),
+            urgent: Value(urgent),
+            updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
+            localRevision: Value(current.localRevision + 1),
+            syncStatus: Value(_statusAfterLocalEdit(current.syncStatus)),
+          ),
+        );
+        await _enqueueTaskInTransaction(id);
+        return current;
+      });
 
   Future<void> updateTask(Task task, {required String title}) async {
     await database.transaction(() async {
@@ -746,6 +822,7 @@ class EventRepository {
     'reminderMinutes': task.reminderMinutes,
     'projectId': task.projectId,
     'parentTaskId': task.parentTaskId,
+    'manualPosition': task.manualPosition,
     'scheduleId': task.scheduleId,
     'recurrence': task.recurrence == null ? null : jsonDecode(task.recurrence!),
     'createdAt': task.createdAt,

@@ -18,6 +18,11 @@ The first slice is `Task` and `Schedule` v1. The existing `calendar_event` wire
 value remains the v1 sync compatibility value even though the domain name is
 `Schedule`.
 
+The separate `multidevice-v1/` contract freezes Node identity, capabilities,
+events, Orialis resource URIs, auth/pairing, presence and revocation semantics.
+It is a common protocol contract only; deployment support is advertised only
+after the Node and Control Plane routes are implemented and live-verified.
+
 Tasks may be linked directly to one parent task or one schedule through
 `parentTaskId` or `scheduleId`; the two links are mutually exclusive. Parent
 tasks must belong to the same user, cannot be the task itself, and cannot

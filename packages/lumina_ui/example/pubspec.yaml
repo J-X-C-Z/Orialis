@@ -21,3 +21,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: LuminaShowcaseSans
+      fonts:
+        - asset: assets/fonts/LuminaShowcaseSans-Regular.ttf
+  assets:
+    - assets/fonts/OFL.txt

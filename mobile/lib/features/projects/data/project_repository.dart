@@ -24,6 +24,43 @@ Task? selectNextAction(Project project, Iterable<Task> tasks) {
 class ProjectRepository {
   ProjectRepository(this.database);
   final AppDatabase database;
+  Future<void> reorderProjects(List<String> orderedIds) =>
+      _setProjectOrder(orderedIds, reset: false);
+  Future<void> resetProjectOrder() async {
+    final ids = (await (database.select(
+      database.projects,
+    )..where((r) => r.deletedAt.isNull())).get()).map((r) => r.id).toList();
+    await _setProjectOrder(ids, reset: true);
+  }
+
+  Future<void> _setProjectOrder(List<String> ids, {required bool reset}) async {
+    if (ids.toSet().length != ids.length) throw ArgumentError('Duplicate IDs');
+    await database.transaction(() async {
+      for (var i = 0; i < ids.length; i++) {
+        final id = ids[i];
+        final current = await (database.select(
+          database.projects,
+        )..where((r) => r.id.equals(id) & r.deletedAt.isNull())).getSingle();
+        final position = reset ? null : i;
+        if (current.manualPosition == position) continue;
+        await (database.update(
+          database.projects,
+        )..where((r) => r.id.equals(id))).write(
+          ProjectsCompanion(
+            manualPosition: Value(position),
+            updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
+            localRevision: Value(current.localRevision + 1),
+            syncStatus: Value(
+              current.syncStatus == 'pendingCreate'
+                  ? 'pendingCreate'
+                  : 'pendingUpdate',
+            ),
+          ),
+        );
+        await _enqueueProject(await _project(id));
+      }
+    });
+  }
 
   Stream<List<Project>> watchProjects() => database.watchActiveProjects();
 
@@ -35,7 +72,12 @@ class ProjectRepository {
             ..where(
               (row) => row.projectId.equals(projectId) & row.deletedAt.isNull(),
             )
-            ..orderBy([(row) => OrderingTerm(expression: row.due)]))
+            ..orderBy([
+              (row) => OrderingTerm(expression: row.manualPosition.isNull()),
+              (row) => OrderingTerm(expression: row.manualPosition),
+              (row) => OrderingTerm(expression: row.due),
+              (row) => OrderingTerm(expression: row.id),
+            ]))
           .watch();
 
   Future<Project> createProject({required String name, String? goal}) async {
@@ -195,6 +237,7 @@ class ProjectRepository {
           'startDate': project.startDate,
           'due': project.due,
           'nextActionTaskId': project.nextActionTaskId,
+          'manualPosition': project.manualPosition,
           'version': project.version,
           'createdAt': project.createdAt,
           'updatedAt': project.updatedAt,

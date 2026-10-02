@@ -8,6 +8,8 @@
 - Orialis → Hermes：文本消息，以及图片、文本、文档和源文件附件。
 - Hermes → Orialis：文本回复，以及通过 Server HTTP 文件 API 上传的图片或文档附件。
 - 多 Agent 设备：每个 Hermes 安装使用独立、稳定的设备 ID；服务端可将账号消息路由到当前选中的在线设备。
+- 聊天创建日程：Hermes 提供 `create_schedule`，接收标题、RFC 3339 起止时间，以及可选描述、地点、全天、重要程度和提醒设置。插件通过配置的 Agent Bearer token 调用 `/api/v1/schedules`；服务端将新日程写入既有同步流。
+- 用户域 HTTP 工具：插件提供经过显式输入校验、全部使用 `Authorization: Bearer $ORIALIS_DEVICE_TOKEN` 的异步工具，覆盖任务 CRUD、项目 CRUD/summary、里程碑 CRUD、`/schedules` 与 `/calendar-events` CRUD、会话 CRUD，以及会话消息的 list/create。PATCH 和 DELETE 始终要求 `baseVersion`；消息附件仍由既有 adapter/HTTP 附件 API 处理。
 - 协议错误会生成 `error` 帧；未知类型或格式错误不应使插件进程退出。
 
 附件内容不走 WebSocket。消息中只传附件元数据，实际字节通过 Orialis Server 的 HTTP API 传输。
@@ -20,13 +22,13 @@ request/delivery ID 并按能力协商执行。调度触发仍由 Hermes Cron �
 
 ## 配置
 
-在 Hermes 的 Orialis 平台配置中设置以下环境变量（或对应的 platform `extra` 配置）：
+在 Hermes 的 Orialis 平台配置中设置以下环境变量（或对应的 platform `extra` 配置）。要从聊天创建日程，必须配置 Agent token：
 
 | 变量 | 必需 | 说明 |
 | --- | --- | --- |
 | `ORIALIS_SERVER_URL` | 是 | Agent Gateway WebSocket URL，例如 `ws://127.0.0.1:18443/api/v1/agent/ws`。附件 HTTP 地址从同一服务派生。 |
 | `ORIALIS_DEVICE_ID` | 是 | 稳定设备 ID，格式为 `<USER>_<DEVICE>_<Agent>`，例如 `JXCZ_MBA_Hermes`。每段仅允许 ASCII 字母或数字，长度为 2–24；总长度不超过 80。 |
-| `ORIALIS_DEVICE_TOKEN` | 条件 | 当服务端设置了 `ORIALIS_AGENT_DEVICE_TOKEN` 时必须设置，并与其完全相同。 |
+| `ORIALIS_DEVICE_TOKEN` | 创建日程必需 | 创建日程时必须与服务端 `ORIALIS_AGENT_DEVICE_TOKEN` 一致；Gateway 启用 Agent 认证时也必须配置。 |
 
 仓库级静态/协议门禁可运行 `python scripts/validate-contracts.py`。若要运行
 依赖 Hermes `gateway` 包的完整插件测试，使用 Hermes 虚拟环境：

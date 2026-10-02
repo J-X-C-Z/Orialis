@@ -1,0 +1,35 @@
+{
+  "protocolVersion": "1",
+  "nodes": [
+    {
+      "protocolVersion": "1",
+      "deviceId": "dev_opaque_01",
+      "accountId": "acct_opaque_01",
+      "displayName": "Office node",
+      "platform": "macos",
+      "nodeVersion": "1.0.0",
+      "status": "online",
+      "createdAt": "2026-10-01T08:00:00Z",
+      "lastSeenAt": "2026-10-01T08:00:20Z",
+      "observedAt": "2026-10-01T08:00:21Z",
+      "revocationVersion": 0,
+      "capabilities": [
+        {
+          "name": "files.read",
+          "version": "1.0.0",
+          "available": true,
+          "risk": "medium",
+          "constraints": {
+            "rootIds": [
+              "root_opaque_01"
+            ],
+            "maxBytes": 1048576
+          },
+          "grant": "allow",
+          "grantExpiresAt": "2026-10-02T08:00:00Z"
+        }
+      ]
+    }
+  ],
+  "nextCursor": null
+}
