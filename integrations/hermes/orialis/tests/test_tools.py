@@ -9,6 +9,18 @@ from .. import tools
 
 
 class ToolTests(unittest.TestCase):
+    def test_schedule_read_uses_collection_pagination(self):
+        pages = [
+            {"ok": True, "data": {"items": [{"id": "other"}], "hasMore": True, "nextCursor": "next"}},
+            {"ok": True, "data": {"items": [{"id": "wanted", "title": "Meeting"}], "hasMore": False}},
+        ]
+        with patch.dict(os.environ, {"ORIALIS_SERVER_URL": "https://example.test", "ORIALIS_DEVICE_TOKEN": "secret"}, clear=True), patch.object(tools, "_request", side_effect=pages) as request:
+            result = json.loads(asyncio.run(tools.HANDLERS["get_schedule"][1]({"id": "wanted"})))
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["result"]["title"], "Meeting")
+        self.assertEqual(request.call_args.args[3], "/api/v1/schedules")
+        self.assertEqual(request.call_args.kwargs["query"]["after"], "next")
+
     def test_all_domain_contracts_are_callable_and_registered(self):
         expected = {
             "task", "project", "milestone", "schedule", "conversation", "message"
@@ -92,6 +104,57 @@ class ToolTests(unittest.TestCase):
             result = json.loads(asyncio.run(tools.handle_capabilities({})))
         self.assertEqual(result["server"]["api_version"], "v1")
         self.assertEqual(set(result["plugin"]["tools"]), set(tools.TOOL_NAMES))
+
+    def test_news_publish_uses_fixed_route_publisher_secret_and_stable_ids(self):
+        env = {
+            "ORIALIS_SERVER_URL": "wss://example.test/api/v1/agent/ws",
+            "ORIALIS_NEWS_PUBLISHER_TOKEN": "publisher-secret",
+            "ORIALIS_DEVICE_TOKEN": "different-device-secret",
+        }
+        args = {"dataset": "github.daily", "result": [{"repository": "a/b"}]}
+        with patch.dict(os.environ, env, clear=True), patch.object(tools, "_request", return_value={"ok": True, "data": {"status": "succeeded"}}) as request:
+            first = json.loads(asyncio.run(tools.HANDLERS["news.publish"][1](args)))
+            first_payload = request.call_args.kwargs["payload"]
+            asyncio.run(tools.HANDLERS["news.publish"][1](args))
+            second_payload = request.call_args.kwargs["payload"]
+        self.assertTrue(first["ok"])
+        self.assertEqual(request.call_args.args[2:4], ("POST", "/api/v1/news/publish/github/daily"))
+        self.assertEqual(request.call_args.args[1], "publisher-secret")
+        self.assertEqual(first_payload["taskId"], second_payload["taskId"])
+        self.assertEqual(first_payload["idempotencyKey"], second_payload["idempotencyKey"])
+        self.assertNotIn("userId", first_payload)
+
+    def test_news_publish_rejects_user_ids_paths_and_invalid_shapes_before_http(self):
+        bad_args = (
+            {"dataset": "../../tasks", "result": {}},
+            {"dataset": "aihot.hot", "result": {}, "userId": "other-user"},
+            {"dataset": "projects.weekly", "result": {}, "reportDate": "2026-99"},
+            {"dataset": "aihot.events", "result": {"title": "missing id"}},
+        )
+        with patch.dict(os.environ, {"ORIALIS_SERVER_URL": "https://example.test", "ORIALIS_NEWS_PUBLISHER_TOKEN": "secret"}, clear=True), patch.object(tools, "_request") as request:
+            for args in bad_args:
+                with self.subTest(args=args):
+                    result = json.loads(asyncio.run(tools.HANDLERS["news.publish"][1](args)))
+                    self.assertFalse(result["ok"])
+            request.assert_not_called()
+
+    def test_news_publish_requires_separate_publisher_token(self):
+        with patch.dict(os.environ, {"ORIALIS_SERVER_URL": "https://example.test", "ORIALIS_DEVICE_TOKEN": "device-secret"}, clear=True), patch.object(tools, "_request") as request:
+            result = json.loads(asyncio.run(tools.HANDLERS["news.publish"][1]({"dataset": "aihot.hot", "result": []})))
+        self.assertFalse(result["ok"])
+        self.assertIn("ORIALIS_NEWS_PUBLISHER_TOKEN", result["error"])
+        request.assert_not_called()
+
+    def test_project_news_publish_uses_project_report_route_without_user_override(self):
+        args = {"dataset": "projects.weekly", "result": {"title": "Week"}, "projectId": "project-1", "reportDate": "2026-W40"}
+        with patch.dict(os.environ, {"ORIALIS_SERVER_URL": "https://example.test", "ORIALIS_NEWS_PUBLISHER_TOKEN": "publisher"}, clear=True), patch.object(tools, "_request", return_value={"ok": True, "data": {}}) as request:
+            asyncio.run(tools.HANDLERS["news.publish"][1](args))
+        self.assertEqual(request.call_args.args[3], "/api/v1/news/projects/publish")
+        payload = request.call_args.kwargs["payload"]
+        self.assertEqual(payload["period"], "weekly")
+        self.assertEqual(payload["projectId"], "project-1")
+        self.assertEqual(payload["source"], "orialis-project-report/hermes")
+        self.assertNotIn("userId", payload)
 
 
 if __name__ == "__main__":

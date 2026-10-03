@@ -28,6 +28,7 @@ dependencies:
   uuid: ^4.5.1
   web_socket_channel: ^3.0.3
   url_launcher: ^6.3.2
+  webview_flutter: ^4.14.1
 
 dev_dependencies:
   integration_test:
@@ -42,5 +43,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/config/web_services.json
     - assets/branding/orialis-schedule.png
     - assets/branding/orialis-news.png

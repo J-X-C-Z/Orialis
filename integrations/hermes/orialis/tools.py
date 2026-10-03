@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+import hashlib
 import json
 import logging
 import os
@@ -55,10 +56,27 @@ MILESTONE_FIELDS = {"title":"string","due":"string","completed":"boolean","posit
 CREATE_TASK_SCHEMA = _schema("create_task", "Create a task in Orialis.", _props(TASK_FIELDS, nullable=("notes","important","urgent","completedAt","due","dueTime","reminderMinutes","projectId","parentTaskId","scheduleId","recurrence")), ("title",))
 CREATE_PROJECT_SCHEMA = _schema("create_project", "Create a project in Orialis.", _props(PROJECT_FIELDS, nullable=("goal","description","color","status","startDate","due","nextActionTaskId")), ("name",))
 CREATE_SCHEDULE_SCHEMA = _schema("create_schedule", "Create a Schedule in the user's Orialis calendar.", _props(SCHEDULE_FIELDS, nullable=("description","location","reminderMinutes")), ("title","startAt","endAt"))
-CREATE_MILESTONE_SCHEMA = _schema("create_milestone", "Create a project milestone.", _props(MILESTONE_FIELDS, nullable=("due","completed","position")), ("projectId","title"))
+CREATE_MILESTONE_SCHEMA = _schema("create_milestone", "Create a project milestone.", {**_props(MILESTONE_FIELDS, nullable=("due","completed","position")), "projectId":ID}, ("projectId","title"))
 CREATE_CONVERSATION_SCHEMA = _schema("create_conversation", "Create a conversation.", {"title":TEXT,"id":ID,"pinned":{"type":"boolean"},"manualPosition":{"type":"integer"}}, ("title",))
 CREATE_MESSAGE_SCHEMA = _schema("create_message", "Create a user message in a conversation.", {"conversationId":ID,"content":{"type":"string"},"id":ID,"replyToMessageId":ID,"attachments":{"type":"array"}}, ("conversationId","content"))
 CAPABILITY_SCHEMA = _schema("orialis_capabilities", "Read Orialis server and plugin capabilities.", {})
+NEWS_PUBLISH_DATASETS = (
+    "aihot.hot", "aihot.items", "aihot.events",
+    "aihot.reports.daily", "aihot.reports.weekly", "aihot.reports.monthly",
+    "github.daily", "github.weekly", "projects.daily", "projects.weekly",
+)
+NEWS_PUBLISH_SCHEMA = _schema(
+    "news.publish",
+    "Publish an AIHOT, GitHub trending, or Orialis project report using the configured publisher identity.",
+    {
+        "dataset": {"type":"string", "enum":list(NEWS_PUBLISH_DATASETS)},
+        "result": {"type":["array", "object"]},
+        "projectId": {"type":"string", "minLength":1, "maxLength":128},
+        "reportDate": {"type":"string", "minLength":1, "maxLength":10},
+        "generatedAt": {"type":"string", "minLength":1, "maxLength":64},
+    },
+    ("dataset", "result"),
+)
 
 
 def _http_url(server_url: str, path: str, query: Mapping[str, Any] | None = None) -> str:
@@ -98,6 +116,106 @@ def _validate_schedule_args(args: Dict[str, Any]) -> Dict[str, Any]:
     if "reminderMinutes" in out and (out["reminderMinutes"] is not None and (isinstance(out["reminderMinutes"],bool) or not isinstance(out["reminderMinutes"],int) or out["reminderMinutes"]<0)): raise ValueError("reminderMinutes must be a non-negative integer or null")
     out.setdefault("id",str(uuid4())); return out
 
+NEWS_PUBLISH_ROUTES = {
+    "aihot.hot": ("/api/v1/news/publish/aihot/hot", "aihot.news"),
+    "aihot.items": ("/api/v1/news/publish/aihot/items", "aihot.news"),
+    "aihot.events": ("/api/v1/news/publish/aihot/events", "aihot.news"),
+    "aihot.reports.daily": ("/api/v1/news/publish/aihot/reports/daily", "aihot.news"),
+    "aihot.reports.weekly": ("/api/v1/news/publish/aihot/reports/weekly", "aihot.news"),
+    "aihot.reports.monthly": ("/api/v1/news/publish/aihot/reports/monthly", "aihot.news"),
+    "github.daily": ("/api/v1/news/publish/github/daily", "githot.dev"),
+    "github.weekly": ("/api/v1/news/publish/github/weekly", "githot.dev"),
+    "projects.daily": ("/api/v1/news/projects/publish", "orialis-project-report/hermes"),
+    "projects.weekly": ("/api/v1/news/projects/publish", "orialis-project-report/hermes"),
+}
+
+
+def _validate_news_publish_args(args: Any) -> tuple[str, dict[str, Any]]:
+    allowed = {"dataset", "result", "projectId", "reportDate", "generatedAt"}
+    out = _validate_args(args, allowed, ("dataset",))
+    dataset = out["dataset"]
+    if dataset not in NEWS_PUBLISH_ROUTES:
+        raise ValueError("dataset must be one of the supported news.publish datasets")
+    result = out.get("result")
+    if not isinstance(result, (dict, list)):
+        raise ValueError("result must be a JSON object or array")
+    try:
+        encoded_result = json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("result must contain valid JSON values") from exc
+    if len(encoded_result.encode("utf-8")) > 1024 * 1024:
+        raise ValueError("result must be no larger than 1 MiB")
+    if dataset in {"aihot.hot", "aihot.items"} and not isinstance(result, list):
+        raise ValueError("this AIHOT dataset requires result to be an array")
+    if dataset.startswith("github."):
+        if not isinstance(result, (dict, list)):
+            raise ValueError("GitHub result must be an object or array")
+    elif dataset not in {"aihot.hot", "aihot.items"} and not isinstance(result, dict):
+        raise ValueError("this dataset requires result to be an object")
+    if dataset == "aihot.events":
+        event_id = result.get("publicId")
+        if event_id is None:
+            event_id = result.get("id")
+        if not isinstance(event_id, str) or not event_id.strip():
+            raise ValueError("AIHOT events require result.publicId or result.id")
+    if dataset.startswith("github."):
+        repos = result if isinstance(result, list) else result.get("repositories", result.get("items"))
+        if not isinstance(repos, list):
+            raise ValueError("GitHub result must be an array or contain a repositories array")
+    if dataset.startswith("projects."):
+        project_id = out.get("projectId")
+        if project_id is not None and (not isinstance(project_id, str) or not project_id.strip() or len(project_id) > 128 or any(ord(c) < 32 for c in project_id)):
+            raise ValueError("projectId must be a non-empty project identifier")
+        report_date = out.get("reportDate")
+        if report_date is not None:
+            if not isinstance(report_date, str) or len(report_date) > 10:
+                raise ValueError("reportDate must be a daily date or ISO week")
+            try:
+                if dataset == "projects.weekly":
+                    year, week = report_date.split("-W", 1)
+                    if len(year) != 4 or len(week) != 2 or not (year + week).isdigit():
+                        raise ValueError
+                    datetime.fromisocalendar(int(year), int(week), 1)
+                else:
+                    if len(report_date) != 10 or datetime.strptime(report_date, "%Y-%m-%d").strftime("%Y-%m-%d") != report_date:
+                        raise ValueError
+            except (ValueError, TypeError) as exc:
+                raise ValueError("reportDate must be YYYY-MM-DD (daily) or YYYY-Www (weekly)") from exc
+    elif "projectId" in out or "reportDate" in out:
+        raise ValueError("projectId and reportDate are only supported for project reports")
+    if "generatedAt" in out:
+        _timestamp(out["generatedAt"], "generatedAt")
+    return dataset, out
+
+
+async def handle_news_publish(args, **_kwargs):
+    try:
+        dataset, clean = _validate_news_publish_args(args)
+    except ValueError as exc:
+        return json.dumps({"ok":False,"error":str(exc)}, ensure_ascii=False, separators=(",", ":"))
+    server = os.getenv("ORIALIS_SERVER_URL", "").strip()
+    token = os.getenv("ORIALIS_NEWS_PUBLISHER_TOKEN", "").strip()
+    if not server or not token:
+        return json.dumps({"ok":False,"error":"ORIALIS_SERVER_URL and ORIALIS_NEWS_PUBLISHER_TOKEN are required to publish news"}, separators=(",", ":"))
+    path, source = NEWS_PUBLISH_ROUTES[dataset]
+    payload = {
+        "source": source,
+        "result": clean["result"],
+        "period": dataset.rsplit(".", 1)[1] if dataset.startswith("projects.") else None,
+        "projectId": clean.get("projectId"),
+        "reportDate": clean.get("reportDate"),
+        "generatedAt": clean.get("generatedAt"),
+    }
+    payload = {key:value for key,value in payload.items() if value is not None}
+    stable_request = json.dumps([dataset, payload], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(stable_request.encode("utf-8")).hexdigest()
+    payload["taskId"] = "hermes-news-" + digest
+    payload["idempotencyKey"] = "hermes-news-" + digest
+    response = await asyncio.to_thread(_request, server, token, "POST", path, payload=payload)
+    if response.get("ok") and "data" in response:
+        response["result"] = response.pop("data")
+    return json.dumps(response, ensure_ascii=False, separators=(",", ":"))
+
 def _validate_payload(kind: str, args: Any, *, patch=False, delete=False, project_id=False, conversation_id=False) -> dict[str,Any]:
     fields={"task":TASK_FIELDS,"project":PROJECT_FIELDS,"schedule":SCHEDULE_FIELDS,"milestone":MILESTONE_FIELDS,"conversation":{"title":"string","pinned":"boolean","manualPosition":"integer"},"message":{"content":"string","id":"string","replyToMessageId":"string","attachments":"array"}}[kind]
     allowed=set(fields)|({"baseVersion"} if patch or delete else set())|({"id"} if kind in {"task","project","schedule","conversation","message"} and not patch and not delete else set())
@@ -120,12 +238,12 @@ def _request(server_url: str, token: str, method: str, path: str, *, payload=Non
     req=Request(_http_url(server_url,path,query), data=body, method=method, headers={"Accept":"application/json","Authorization":f"Bearer {token}","User-Agent":"orialis-hermes-plugin/0.2.0", **({"Content-Type":"application/json"} if body is not None else {})})
     try:
         with urlopen(req,timeout=HTTP_TIMEOUT_SECONDS) as response: raw=response.read(MAX_RESPONSE_BYTES+1); status=response.status
-    except HTTPError as exc: return {"ok":False,"error":f"server returned HTTP {exc.code}"}
-    except (URLError,TimeoutError,OSError) as exc: logger.warning("Orialis HTTP request failed: %s",exc); return {"ok":False,"error":"Orialis server request failed; the server could not be reached"}
-    if len(raw)>MAX_RESPONSE_BYTES: return {"ok":False,"error":"server response is too large"}
+    except HTTPError as exc: return {"ok":False,"status":exc.code,"error":f"server returned HTTP {exc.code}", "outcomeUnknown":method=="POST" and exc.code>=500}
+    except (URLError,TimeoutError,OSError) as exc: logger.warning("Orialis HTTP request failed: %s",exc); return {"ok":False,"error":"Orialis server request failed; the server could not be reached", "outcomeUnknown":method=="POST"}
+    if len(raw)>MAX_RESPONSE_BYTES: return {"ok":False,"error":"server response is too large", "outcomeUnknown":method=="POST"}
     if status==204 or not raw: return {"ok":True,"status":status}
     try: data=json.loads(raw.decode())
-    except (UnicodeDecodeError,json.JSONDecodeError): return {"ok":False,"error":"server returned invalid JSON"}
+    except (UnicodeDecodeError,json.JSONDecodeError): return {"ok":False,"error":"server returned invalid JSON", "outcomeUnknown":method=="POST"}
     return {"ok":status<300,"status":status,"data":data} if status<300 else {"ok":False,"status":status,"error":data.get("message","server request failed") if isinstance(data,dict) else "server request failed"}
 
 def _post_schedule(server_url: str, token: str, payload: Dict[str, Any]) -> dict[str, Any]:
@@ -189,8 +307,8 @@ def _make(name, method, path, kind=None, transform=None):
         return await _tool(clean,method,path_value,kind=kind)
     handler.__name__="handle_"+name; return handler
 
-TOOL_NAMES=["orialis_capabilities"]
-HANDLERS={"orialis_capabilities":(CAPABILITY_SCHEMA,handle_capabilities)}
+TOOL_NAMES=["orialis_capabilities", "news.publish"]
+HANDLERS={"orialis_capabilities":(CAPABILITY_SCHEMA,handle_capabilities), "news.publish":(NEWS_PUBLISH_SCHEMA,handle_news_publish)}
 def _add(name,schema,method,path,kind=None,transform=None): TOOL_NAMES.append(name); HANDLERS[name]=(schema,_make(name,method,path,kind,transform))
 
 # List endpoints retain the server's pagination/filter query contract.
@@ -213,7 +331,133 @@ _add("list_messages",_schema("list_messages","List messages in a conversation.",
 # Creation of schedules retains its stricter timestamp validation and legacy response shape.
 HANDLERS["create_schedule"]=(CREATE_SCHEDULE_SCHEMA, handle_create_schedule)
 
+def _schedule_reader(root):
+    async def handler(args, **_kwargs):
+        try:
+            clean = _validate_args(args, {"id"}, ("id",))
+        except ValueError as exc:
+            return json.dumps({"ok": False, "error": str(exc)})
+        # The canonical API exposes collection reads, PATCH and DELETE, but
+        # no single-Schedule GET route. Resolve IDs through paginated reads.
+        cursor = None
+        seen = set()
+        while True:
+            page = await _handle_request({}, "GET", root, query={"limit": 100, "after": cursor})
+            if not page.get("ok"):
+                return json.dumps(page)
+            data = page.get("result", {})
+            for item in data.get("items", []):
+                if item.get("id") == clean["id"]:
+                    return json.dumps({"ok": True, "status": 200, "result": item}, ensure_ascii=False)
+            if not data.get("hasMore"):
+                return json.dumps({"ok": False, "status": 404, "error": "Schedule not found"})
+            cursor = data.get("nextCursor")
+            if not cursor or cursor in seen:
+                return json.dumps({"ok": False, "error": "invalid pagination cursor"})
+            seen.add(cursor)
+    return handler
+
+for _name, _root in (("get_schedule", "/api/v1/schedules"), ("get_calendar_event", "/api/v1/calendar-events")):
+    HANDLERS[_name] = (HANDLERS[_name][0], _schedule_reader(_root))
+
+MAX_BATCH_ITEMS = 200
+
+def _validate_batch_item(item, schema, kind):
+    parameters = schema["parameters"]
+    properties = parameters["properties"]
+    allowed = set(properties)
+    if kind != "milestone":
+        allowed.add("id")
+    clean = _validate_args(item, allowed, parameters["required"])
+    types = {
+        "string": lambda v: isinstance(v, str),
+        "boolean": lambda v: isinstance(v, bool),
+        "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+        "object": lambda v: isinstance(v, dict),
+        "array": lambda v: isinstance(v, list),
+        "null": lambda v: v is None,
+    }
+    for field, value in clean.items():
+        spec = properties.get(field, ID)
+        choices = spec["type"] if isinstance(spec["type"], list) else [spec["type"]]
+        if not any(types[t](value) for t in choices):
+            raise ValueError(f"{field} has an invalid type")
+        if isinstance(value, str) and len(value.strip()) < spec.get("minLength", 0):
+            raise ValueError(f"{field} must not be empty")
+    # Validate route identifiers without removing them from the submitted item.
+    path_fields = {"milestone": "projectId", "message": "conversationId"}
+    body = {k:v for k,v in clean.items() if k != path_fields.get(kind)}
+    if kind == "schedule":
+        body = _validate_schedule_args(body)
+    else:
+        body = _validate_payload(kind, body)
+        if kind != "milestone":
+            body.setdefault("id", str(uuid4()))
+    if kind in path_fields:
+        body[path_fields[kind]] = clean[path_fields[kind]]
+    return body
+
+def _batch_creator(single_name, kind):
+    async def handler(args, **kwargs):
+        try:
+            clean = _validate_args(args, {"items"})
+            items = clean.get("items")
+            if not isinstance(items, list) or not 1 <= len(items) <= MAX_BATCH_ITEMS:
+                raise ValueError(f"items must contain 1 to {MAX_BATCH_ITEMS} objects")
+            prepared = []
+            ids = set()
+            for index, item in enumerate(items):
+                try:
+                    payload = _validate_batch_item(item, HANDLERS[single_name][0], kind)
+                    if "id" in payload:
+                        if payload["id"] in ids:
+                            raise ValueError("duplicate id in batch")
+                        ids.add(payload["id"])
+                    prepared.append(payload)
+                except ValueError as exc:
+                    return json.dumps({"ok":False,"error":str(exc),"validationIndex":index,"written":0}, ensure_ascii=False)
+        except ValueError as exc:
+            return json.dumps({"ok":False,"error":str(exc),"written":0}, ensure_ascii=False)
+        server, token = _env()
+        if not server:
+            return json.dumps({"ok":False,"error":"ORIALIS_SERVER_URL and ORIALIS_DEVICE_TOKEN are required","written":0})
+        try:
+            _http_url(server, "/api/v1/tasks")
+        except ValueError as exc:
+            return json.dumps({"ok":False,"error":str(exc),"written":0})
+        results = []
+        # Sequential requests preserve parent references and milestone ordering.
+        # Never retry a POST: a lost response may already have committed a write.
+        for index, payload in enumerate(prepared):
+            response = json.loads(await HANDLERS[single_name][1](payload, **kwargs))
+            results.append({"index":index,"submitted":payload,**response})
+        succeeded = sum(item.get("ok") is True for item in results)
+        return json.dumps({"ok":succeeded==len(results),"atomic":False,"total":len(results),"succeeded":succeeded,"failed":len(results)-succeeded,"results":results}, ensure_ascii=False, separators=(",", ":"))
+    return handler
+
+for _plural, _single, _kind in (
+    ("schedules", "schedule", "schedule"),
+    ("calendar_events", "calendar_event", "schedule"),
+    ("tasks", "task", "task"),
+    ("projects", "project", "project"),
+    ("milestones", "milestone", "milestone"),
+    ("conversations", "conversation", "conversation"),
+    ("messages", "message", "message"),
+):
+    _single_name = "create_" + _single
+    _batch_name = "create_" + _plural
+    _item_schema = dict(HANDLERS[_single_name][0]["parameters"])
+    _item_schema["properties"] = dict(_item_schema["properties"])
+    if _kind != "milestone":
+        _item_schema["properties"]["id"] = ID
+    _batch_schema = _schema(_batch_name,
+        "Create 1-200 Orialis resources sequentially. Validate all items first; returns per-item results. Not atomic. Never retry the entire batch; check outcomeUnknown writes before retrying.",
+        {"items":{"type":"array","minItems":1,"maxItems":MAX_BATCH_ITEMS,"items":_item_schema}}, ("items",))
+    TOOL_NAMES.append(_batch_name)
+    HANDLERS[_batch_name] = (_batch_schema, _batch_creator(_single_name, _kind))
+    DOMAIN_CONTRACTS[_kind]["tools"].append(_batch_name)
+
 def register_tools(ctx: Any) -> None:
     for name in TOOL_NAMES:
         schema,handler=HANDLERS[name]
-        ctx.register_tool(name=name,toolset="orialis",schema=schema,handler=handler,is_async=True,emoji="🔗" if name=="orialis_capabilities" else "🗂️")
+        ctx.register_tool(name=name,toolset="orialis",schema=schema,handler=handler,is_async=True,emoji="🔗" if name=="orialis_capabilities" else ("📰" if name=="news.publish" else "🗂️"))

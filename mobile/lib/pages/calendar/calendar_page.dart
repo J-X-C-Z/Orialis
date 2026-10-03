@@ -178,6 +178,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   );
 
   Widget _viewSelector() => LuminaSegmented<int>(
+    transparent: true,
     items: const {0: '日', 1: '周', 2: '月'},
     value: _view,
     onChanged: (v) => setState(() => _view = v),

@@ -15,6 +15,7 @@ class DesktopShell extends StatefulWidget {
     'AI Hot',
     'GitHub',
     'Project',
+    'Web 服务',
   ];
   static const icons = [
     LuminaIcons.today,
@@ -25,6 +26,7 @@ class DesktopShell extends StatefulWidget {
     LuminaIcons.sparkles,
     LuminaIcons.branch,
     LuminaIcons.folder,
+    LuminaIcons.devices,
   ];
 
   @override
@@ -42,6 +44,7 @@ class _DesktopShellState extends State<DesktopShell> {
     LogicalKeyboardKey.digit6: 5,
     LogicalKeyboardKey.digit7: 6,
     LogicalKeyboardKey.digit8: 7,
+    LogicalKeyboardKey.digit9: 8,
   };
 
   @override

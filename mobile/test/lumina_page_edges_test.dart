@@ -133,7 +133,7 @@ void main() {
     await db.close();
   });
 
-  testWidgets('long event filter travel changes only endpoint content', (
+  testWidgets('glass event selectors preserve filters and endpoint travel', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(432, 960);
@@ -143,6 +143,7 @@ void main() {
     final db = AppDatabase(executor: NativeDatabase.memory());
     final repository = EventRepository(database: db, config: _Config());
     await repository.createTask(title: '无截止待办');
+    await repository.createTask(title: '有截止待办', due: '2030-01-01');
     await repository.createTask(title: '已经完成的事项');
     final completed = (await db.select(db.tasks).get()).singleWhere(
       (task) => task.title == '已经完成的事项',
@@ -152,6 +153,23 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('事件').last);
     await tester.pumpAndSettle();
+    final pageSelector = tester.widget<LuminaSegmented<int>>(
+      find.byWidgetPredicate(
+        (widget) => widget is LuminaSegmented<int> && widget.items[0] == '四象限',
+      ),
+    );
+    expect(pageSelector.transparent, isTrue);
+    expect(
+      tester
+          .widget<LuminaSegmented<String>>(find.byType(LuminaSegmented<String>))
+          .transparent,
+      isTrue,
+    );
+    expect(find.text('有截止待办'), findsOneWidget);
+    await tester.tap(find.text('无截止'));
+    await tester.pumpAndSettle();
+    expect(find.text('无截止待办'), findsOneWidget);
+    expect(find.text('有截止待办'), findsNothing);
     await tester.tap(find.text('已完成'));
     await tester.pumpAndSettle();
     expect(find.text('已经完成的事项'), findsOneWidget);
@@ -170,6 +188,7 @@ void main() {
     expect(find.text('无截止待办'), findsNothing);
     await tester.pumpAndSettle();
     expect(find.text('无截止待办'), findsOneWidget);
+    expect(find.text('有截止待办'), findsOneWidget);
     expect(find.text('已经完成的事项'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
@@ -380,6 +399,12 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('日历').last);
     await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<LuminaSegmented<int>>(find.byType(LuminaSegmented<int>))
+          .transparent,
+      isTrue,
+    );
     final dateTiles = find.byWidgetPredicate(
       (w) =>
           w is LuminaSurface &&

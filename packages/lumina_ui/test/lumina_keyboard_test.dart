@@ -3,6 +3,81 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lumina_ui/lumina_ui.dart';
 
 void main() {
+  testWidgets(
+    'text input reopens a hidden keyboard while keeping focus and draft',
+    (tester) async {
+      final controller = TextEditingController(text: '保留草稿');
+      final focus = FocusNode();
+      await tester.pumpWidget(
+        WidgetsApp(
+          color: const Color(0xff000000),
+          builder: (context, _) => LuminaTheme(
+            child: Center(
+              child: SizedBox(
+                width: 280,
+                child: LuminaTextField(
+                  controller: controller,
+                  focusNode: focus,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byType(EditableText));
+      await tester.pumpAndSettle();
+      expect(focus.hasFocus, isTrue);
+      expect(tester.testTextInput.isVisible, isTrue);
+      for (var i = 0; i < 3; i++) {
+        tester.testTextInput.hide();
+        expect(focus.hasFocus, isTrue);
+        expect(tester.testTextInput.isVisible, isFalse);
+        // Padding belongs to the field's touch area too.
+        await tester.tapAt(
+          tester.getTopLeft(find.byType(LuminaTextField)) + const Offset(8, 24),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.testTextInput.isVisible, isTrue);
+        expect(controller.text, '保留草稿');
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+      focus.dispose();
+    },
+  );
+
+  testWidgets('read-only and disabled input taps never show a keyboard', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: '只读');
+    for (final enabled in [true, false]) {
+      await tester.pumpWidget(
+        WidgetsApp(
+          color: const Color(0xff000000),
+          builder: (context, _) => LuminaTheme(
+            child: Center(
+              child: SizedBox(
+                width: 280,
+                child: LuminaTextField(
+                  controller: controller,
+                  readOnly: true,
+                  enabled: enabled,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tapAt(
+        tester.getTopLeft(find.byType(LuminaTextField)) + const Offset(8, 24),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.testTextInput.isVisible, isFalse);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+    controller.dispose();
+  });
+
   testWidgets('Tab moves through desktop actions in order', (tester) async {
     var firstActivations = 0;
     var secondActivations = 0;

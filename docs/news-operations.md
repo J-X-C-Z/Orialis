@@ -5,18 +5,20 @@ This runbook covers the local collection, analysis, audit, and Paperclip schedul
 ## Runtime pieces
 
 - `integrations/news/pipeline.py` validates secretary reports, keeps a SQLite task ledger and user-scoped raw report inbox, invokes the configured Agent Runner, merges project reports, and publishes to the News API.
-- `scripts/news_sources.py` is the shared source collector. GitHub daily and weekly runs each fetch their own official Trending page and enrich repositories with metadata, topics, README, and latest release. AIHOT collection is a source-only operation and never calls an Agent Runner.
+- `scripts/news_sources.py` is the shared source collector. GitHub daily and weekly runs independently fetch Githot ranking cards and each repository’s native detail sections, retaining their order, source copy, tags, statistics, trial commands, and ranking history. AIHOT collection is a source-only operation and never calls an Agent Runner.
 - `integrations/news/paperclip_setup.py` uses Paperclip's real routine and schedule-trigger APIs. It previews by default. `--apply` creates missing routines and disabled schedule triggers after it can read current company agents, projects, and routines and validate explicitly supplied worker agents. Triggers remain disabled unless `--enable-triggers` is passed after the publisher, server, and durable runner route are ready.
 
-The default Agent Runner is a fresh, read-only Codex CLI process:
+GitHub and AIHot publish source content directly and never construct or invoke an Agent Runner. GitHub repository content uses `sourceTitle`, `sourceSummary`, `sourceTopics`, and `sourceContent` (safe Markdown converted from Githot’s visible detail sections). No fixed features/value/useCases fields are synthesized. `analysisStatus=not_required` identifies this successful source-only path. The period brief remains a compatibility envelope with a factual count and empty themes/highlights; the current client displays source attribution instead of an AI overview. A missing detail page preserves the ranking card and source link with `sourceDetailStatus=unavailable`.
 
-```text
-codex exec --ephemeral --sandbox read-only --skip-git-repo-check --json -
-```
-
-`ORIALIS_NEWS_RUNNER_COMMAND` replaces that command. The command reads one grounded JSON prompt on stdin and must return a JSON object on stdout. A single GitHub analysis call produces both per-repository summaries and the period brief, using only the first ten ranked repositories. If the response analyzes or references a repository outside that input set, discard the full analysis and use the same deterministic fallback as any other analysis failure. The publisher retains all collected ranking rows and creates its fallback brief only from observed descriptions, marked `analysisStatus=unavailable`. No model is called for AIHOT. Projects retains each original secretary report with deterministic merging.
+Projects alone retains the configured Agent Runner for project report processing; `ORIALIS_NEWS_RUNNER_COMMAND` applies to that path.
 
 The Nagi-specific, non-secret runner setting is recorded in `integrations/news/nagi-runner.env.example`. It uses the installed CLI's absolute path because `/home/JXCZ/.local/bin` is not in the observed non-interactive `PATH`; keep the Paperclip worker running as `JXCZ` so it uses that account's existing Codex login. The setting does not contain or read authentication data.
+
+## Azure Hermes production execution
+
+The user-requested Azure runner is the Aozora Linux host. News units run as the existing `hermes` service account. GitHub and AIHot execute Python collectors directly without invoking Hermes or another model; the existing `hermes-gateway.service` is not restarted. Secrets are loaded only from `/etc/orialis-news/worker.env` (root:hermes, mode 0640). AIHot uses `orialis-news-aihot.timer` every five minutes and has a successful scheduled production run.
+
+GitHub daily and weekly use separate systemd services and Asia/Shanghai schedules (18:00 daily, Monday 18:15 weekly). Both GitHub timers are enabled after verified direct publications. Current direct-content evidence is `news/evidence/githot-direct-20261004.json`; the earlier Hermes rollout remains historical evidence in `news/evidence/realtime-azure-hermes-20261003.json`.
 
 ## Environment
 
@@ -34,7 +36,23 @@ PAPERCLIP_COMPANY_ID=<Orialis company id>
 PAPERCLIP_API_KEY=<optional Paperclip key when local-trusted access is unavailable>
 ```
 
-`GITHUB_TOKEN` or `GH_TOKEN` is optional and only improves GitHub API rate limits. The API client disables environment HTTP proxies for loopback-safe local calls. The publisher identity is separate from the Paperclip runtime identity; the backend binds agent publishers to their configured user and rejects identity mismatches.
+`GITHUB_TOKEN` / `GH_TOKEN` are not required by the Githot direct collection path. The API client disables environment HTTP proxies for loopback-safe local calls. The publisher identity is separate from the Paperclip runtime identity; the backend binds agent publishers to their configured user and rejects identity mismatches.
+
+The server process must load `ORIALIS_NEWS_PUBLISHER_TOKEN` and
+`ORIALIS_NEWS_PUBLISHER_USER_ID` from its private EnvironmentFile (see
+`deploy/orialis.env.example`). The user ID must already exist in that server's
+database. Give the same dedicated publisher token to the worker that calls the
+News API; do not reuse `ORIALIS_AGENT_DEVICE_TOKEN`, a Session token, or a
+Paperclip key. The Codex Gateway uses `ORIALIS_NEWS_PUBLISHER_TOKEN` and may use
+`ORIALIS_NEWS_API_URL` to override the HTTP base; otherwise it derives HTTP(S)
+from `ORIALIS_SERVER_URL`. The server accepts only the configured publisher
+identity and validates each category's source and payload.
+
+The Codex Gateway's `news.publish` capability publishes GitHub daily or weekly
+briefs through `POST /api/v1/news/publish/github/{period}`. A successful request
+writes the shared news cache and a durable publish-task receipt that the signed-in
+app can read through its Session-authenticated News API. This is a server cache
+publication flow; it exposes Session-authenticated SSE cache invalidation for clients to re-read published data; OS notifications are a separate flow.
 
 ## GitHub runs
 
@@ -45,7 +63,7 @@ python3 -m integrations.news.cli github daily --publish
 python3 -m integrations.news.cli github weekly --publish
 ```
 
-Weekly collection fetches `https://github.com/trending?since=weekly` anew. It never assembles a weekly result from daily briefs. The publisher source is `github.com/trending`; the request uses `POST /api/v1/news/publish/github/daily` or `/weekly`, with `taskId`, `source`, `generatedAt`, `period`, `result={repositories: repos, brief: {title, summary, themes, highlights, analysisStatus, source}}`, `userId`, and `idempotencyKey`. The brief is returned by `GET /api/v1/news/github/briefs/daily` or `/weekly` as an object in the normal response envelope. Existing `GET /api/v1/news/github/daily` and `/weekly` ranking reads continue returning an array for older clients.
+Daily collection fetches `https://githot.dev/`; weekly collection independently fetches `https://githot.dev/weekly` and never assembles a weekly result from daily briefs. Repository detail content now comes directly from Githot; this path does not make GitHub API calls or re-fetch README. Optional README fields in older payloads remain readable by the client. The publisher source is `githot.dev`; requests use `POST /api/v1/news/publish/github/daily` or `/weekly`, with `taskId`, `source`, `generatedAt`, `period`, `result={repositories: repos, brief: {title, summary, themes, highlights, analysisStatus, source}}`, `userId`, and `idempotencyKey`. The brief is returned by `GET /api/v1/news/github/briefs/daily` or `/weekly` as an object in the normal response envelope. Existing `GET /api/v1/news/github/daily` and `/weekly` ranking reads continue returning an array for older clients.
 
 The GitHub ranking routes are `GET /api/v1/news/github/daily` and `/weekly`; they return a repository array inside `{data, updatedAt, stale, source, error}`. The additional `GET /api/v1/news/github/briefs/{period}` route returns the period brief object in that envelope. The client reads generated data; it does not start collection or Codex when a page opens.
 
@@ -93,7 +111,7 @@ This Paperclip version models scheduled work with **Routines** and `schedule` tr
 - `GET /api/issues/{id}/documents/plan` to read the plan document on an issue.
 - `POST /api/routines/{id}/run` to request an on-demand run.
 
-The Org chart is the existing Paperclip `reportsTo` hierarchy. This setup script does not install catalog teams, hire agents, change reporting lines, or send user notifications. Existing group lead/worker identities must be classified inside the Orialis company and selected explicitly. The AIHOT source-only routine must use a dedicated agent with Paperclip's `process` adapter configured for the collector command; GitHub and Projects require distinct configured Agent Runner agents. Applying routines leaves all schedule triggers disabled unless `--enable-triggers` is explicitly passed.
+The Org chart is the existing Paperclip `reportsTo` hierarchy. This setup script does not install catalog teams, hire agents, change reporting lines, or send user notifications. Existing group lead/worker identities must be classified inside the Orialis company and selected explicitly. The AIHOT source-only routine must use a dedicated agent with Paperclip's `process` adapter configured for the collector command; GitHub may use distinct daily/weekly process workers with exact `python3 -m integrations.news.cli github daily|weekly --publish` entrypoints; the GitHub CLI directly publishes source copy without invoking an Agent Runner. The older shared GitHub Runner is still supported. Projects uses its existing configured Agent Runner agent. Applying routines leaves all schedule triggers disabled unless `--enable-triggers` is explicitly passed.
 
 Preview the intended routines. A service outage still leaves the local plan readable and reports that Paperclip could not be inspected:
 
@@ -112,7 +130,7 @@ python3 -m integrations.news.paperclip_setup \
   --apply
 ```
 
-Prepared schedules (Asia/Shanghai): AIHOT source refresh every 5 minutes, daily GitHub at 18:00, weekly GitHub every Monday at 18:15, and Projects daily at 19:00. The AIHOT interval is above the upstream 60-second cache TTL and runs the pure collector command through Paperclip's `process` adapter, without invoking Codex. GitHub and Projects schedules use the configured Agent Runner and produce task records with `taskId`, `status`, `startedAt`, `finishedAt`, `source`, `result`, and `error`.
+Prepared schedules (Asia/Shanghai): AIHOT source refresh every 5 minutes, daily GitHub at 18:00, weekly GitHub every Monday at 18:15, and Projects daily at 19:00. The AIHOT interval is above the upstream 60-second cache TTL and runs the pure collector command through Paperclip's `process` adapter, without invoking Codex. GitHub period-specific process workers invoke the configured Agent Runner within the CLI; Projects schedules use their configured Agent Runner. Both produce task records with `taskId`, `status`, `startedAt`, `finishedAt`, `source`, `result`, and `error`.
 
 The daily source collector itself can be run directly for a controlled refresh:
 
@@ -151,3 +169,53 @@ News remains a feature of the existing Orialis computer application; this operat
 ## Local checks and limitations
 
 Mock/fault checks are in `integrations/news/tests/test_pipeline.py`. The 2026-10-02 Nagi evidence proves one real grounded analysis and JSON output without publishing; it does not prove persistent worker egress, publisher credentials, report feeds, or News API readiness. A Paperclip routine apply is not evidence that its assigned host command, runner login, publisher credentials, report feeds, or News API are ready; verify those at the Paperclip run/API readback before enabling a schedule.
+
+
+## AIHot / GitHub realtime invalidation — 2026-10-03
+
+`GET /api/v1/news/stream` requires the same Session authentication as News reads.
+It returns SSE `news.updated` with `id=<revision>` and
+`data={"channels":["aihot","github","projects"],"revision":"<revision>"}`.
+The revision hashes persisted public cache metadata plus only the authenticated
+user's project-report metadata. It includes failure/recovery state, contains no
+article or project-report body, and survives process restart. The server checks
+metadata and session validity every second, sends a 15-second keepalive, and sets
+`X-Accel-Buffering: no`. Use the explicit SSE proxy location in the nginx template.
+
+A new connection receives the current revision; a matching `Last-Event-ID`
+suppresses a duplicate invalidation. After missed updates, the client fetches the
+latest complete channel snapshots. This endpoint reconciles current state; it is
+not a historical per-article event log. Publication continues to use the existing
+cache/API contracts and requires no additional migration.
+
+Visible News requests now listen to SSE and reload their published snapshots,
+with 30-second polling for an older server or transient failure. Reconnect uses
+bounded backoff and the last revision. Backgrounding cancels the subscription;
+foregrounding reloads. Account/server changes clear displayed data before
+reloading, and cancelled or obsolete responses cannot replace current content.
+These are in-app updates. OS background notification delivery remains separate.
+
+The collector accepts `ORIALIS_NEWS_PUBLISHER_USER_ID` (legacy
+`ORIALIS_AGENT_USER_ID` remains a fallback). Each AIHot dataset fails independently;
+empty or invalid data does not overwrite a previous cache. In `all` mode a failed
+channel does not prevent collecting healthy channels, but the overall exit status
+still reports failure. GitHub empty source rankings cannot trigger analysis or
+publication. Use `integrations/news/local-worker.env.example` for the existing
+local Codex Runner without overriding model/login settings. The historical Nagi
+absolute executable path is no longer present and must not be treated as ready.
+
+Verification commands: `cargo test -p orialis-server --bin orialis-server news::tests`,
+`python3 -m unittest discover -s integrations/news/tests`, and
+`python3 scripts/verify-news-realtime.py --sources <reviewed-source-facts.json>`.
+The HTTP verifier creates a disposable local database, checks two live SSE
+clients, publishes both periods, verifies ranking/brief readback, and restarts the
+service to check persisted recovery. It never calls production.
+
+
+For separate deterministic GitHub workers, pass `--github-daily-agent-id` and
+`--github-weekly-agent-id` to `integrations.news.paperclip_setup`. The legacy
+`--github-agent-id` remains supported for a shared Runner. Process workers must
+match their exact period and include `--publish`; mismatches are rejected before
+API writes. Existing routine assignments require an explicit reviewed reassignment
+before setup can enable triggers. The three-channel rollout draft does not touch
+the Projects schedule or change the existing Hermes researcher's role.

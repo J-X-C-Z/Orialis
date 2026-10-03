@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh Orialis News AIHot sources every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=15s
+Unit=orialis-news-aihot.service
+
+[Install]
+WantedBy=timers.target
+

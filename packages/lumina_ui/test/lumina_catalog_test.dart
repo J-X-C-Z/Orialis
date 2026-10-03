@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lumina_ui/lumina_ui.dart';
 
 void main() {
-  testWidgets('page title stays centered while content scrolls behind glass', (
+  testWidgets('page title stays centered in a card while content scrolls', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -45,7 +45,8 @@ void main() {
     final before = tester.getCenter(title);
     final width = tester.getSize(find.byType(LuminaTopBar)).width;
     expect((before.dx - width / 2).abs(), lessThan(1));
-    expect(find.byType(BackdropFilter), findsWidgets);
+    expect(find.byType(BackdropFilter), findsNothing);
+    expect(find.byType(LuminaCardScope), findsOneWidget);
     await tester.drag(find.byType(m.ListView), const m.Offset(0, -120));
     await tester.pumpAndSettle();
     expect(tester.getCenter(title), before);

@@ -160,6 +160,22 @@ The catalog wrappers retain public constructors and use the active light/dark
 palette, sculpted/clear-glass setting and accessibility substitutions.
 
 Popup menus, tooltips, dialogs, sheets and messages capture Lumina theme and
-MediaQuery preferences from their triggering context. Navigation visibility
-scrolls the component's own viewport without changing the containing page.
+MediaQuery preferences from their triggering context. Dialogs (including date and
+time pickers), bottom sheets and popup menu containers use an opaque raised
+card even when clear glass is enabled globally. Only their container opts out via
+`LuminaSurface(liquidGlass: false)`; child controls keep the triggering theme.
+Interactive list rows inside sheets also use opaque card surfaces; attachment
+pickers and action menus never turn those rows into glass merely because they
+have a tap callback. Rows outside a sheet continue to follow the page theme.
+Navigation visibility scrolls the component's own viewport without changing the containing page.
 State examples and verification boundaries live in material3-coverage.md.
+
+### Card overlay controls and top tabs
+
+Bottom sheet contents enter `LuminaCardScope`, which gives all descendant
+button and icon surfaces opaque card paint without changing the page theme.
+The scope also disables the selection well/lens glass painters and refraction.
+`LuminaTabs` and `LuminaSegmented` use this material for their shell and selected
+state. Calendar view selection opts into its translucent well and lens with
+`LuminaSegmented(transparent: true)`. Ordinary page buttons keep their configured
+material.

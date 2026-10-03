@@ -205,6 +205,20 @@ final syncCoordinatorProvider = Provider<SyncCoordinator>((ref) {
     localChanges: ref.watch(desktopModeProvider)
         ? watchDesktopLocalChanges(ref.watch(databaseProvider))
         : null,
+    onChatMessage: ref.watch(desktopModeProvider)
+        ? null
+        : (payload) async {
+            await ref
+                .read(systemIntegrationProvider)
+                ?.notifyChatMessage(payload);
+          },
+    onScheduleUpdate: ref.watch(desktopModeProvider)
+        ? null
+        : (payload) async {
+            await ref
+                .read(systemIntegrationProvider)
+                ?.notifyScheduleUpdate(payload);
+          },
   );
   ref.onDispose(coordinator.dispose);
   return coordinator;

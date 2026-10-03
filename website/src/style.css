@@ -442,6 +442,7 @@ body.reduced .scroll-reminder { display: none; }
   .chapter-copy h2 { font-size: 33px; }
   .chapter-kicker { margin-bottom: 10px; }
   .demo-caption { display: none; }
+  .orbit-chip { display: none; }
   .product-stage, .news-stage { top: 45%; transform: translateY(var(--chapter-lift)) scale(.81); transform-origin: center top; }
   .everyday-copy { top: 15%; }
   .everyday-copy h2 { font-size: 32px; }

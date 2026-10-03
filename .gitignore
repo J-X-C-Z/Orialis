@@ -50,3 +50,7 @@ mobile/*.iml
 
 # Kotlin incremental compiler state
 /mobile/android/.kotlin/
+
+# Local News worker state and mobile release output
+/.news-cache/
+/mobile/dist/

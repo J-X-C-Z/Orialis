@@ -35,6 +35,7 @@ class LuminaTextField extends StatefulWidget {
 }
 
 class _LuminaTextFieldState extends State<LuminaTextField> {
+  final _editorKey = GlobalKey<EditableTextState>();
   late final FocusNode ownFocus = FocusNode();
   FocusNode get focus => widget.focusNode ?? ownFocus;
   @override
@@ -61,7 +62,14 @@ class _LuminaTextFieldState extends State<LuminaTextField> {
           builder: (context, _) => GestureDetector(
             onTap: widget.enabled
                 ? () {
-                    focus.requestFocus();
+                    // Android may hide the IME while this field keeps focus.
+                    // Request the editor connection again, including when the
+                    // tap lands in the input's padding rather than its text.
+                    if (widget.readOnly) {
+                      focus.requestFocus();
+                    } else {
+                      _editorKey.currentState?.requestKeyboard();
+                    }
                     widget.onTap?.call();
                   }
                 : null,
@@ -100,6 +108,7 @@ class _LuminaTextFieldState extends State<LuminaTextField> {
                       child: IgnorePointer(
                         ignoring: !widget.enabled,
                         child: EditableText(
+                          key: _editorKey,
                           controller: widget.controller,
                           focusNode: focus,
                           style: LuminaTheme.of(context).textTheme.bodyMedium,
@@ -406,8 +415,7 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
     required MagnifierDecoration decoration,
     required Widget child,
   }) {
-    if (LuminaTheme.of(context).highPerformanceMode ||
-        LuminaTheme.motionReducedOf(context)) {
+    if (LuminaCardScope.of(context) || LuminaTheme.motionReducedOf(context)) {
       return SizedBox.fromSize(size: size, child: child);
     }
     return RawMagnifier(
@@ -419,129 +427,140 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
   }
 
   @override
-  Widget build(BuildContext context) => Stack(
-    children: [
-      Positioned.fill(child: _LuminaSelectionWell(backdrop: widget.backdrop)),
-      if (widget.onDragEnd == null)
-        widget.child
-      else
-        GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onLongPressStart: _startDrag,
-          onLongPressMoveUpdate: (details) => _moveDrag(details.localPosition),
-          onLongPressEnd: (details) => _endDrag(details.localPosition),
-          onLongPressCancel: _cancelDrag,
-          child: widget.child,
-        ),
-      Positioned.fill(
-        child: IgnorePointer(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final width = constraints.maxWidth / widget.count;
-              final rtl = Directionality.of(context) == TextDirection.rtl;
-              return AnimatedBuilder(
-                animation: position,
-                child: _magnifier(
-                  size: Size(width, constraints.maxHeight),
-                  magnificationScale:
-                      LuminaTheme.of(context).reduceTransparency ||
-                          MediaQuery.highContrastOf(context)
-                      ? 1
-                      : 1.08,
-                  decoration: const MagnifierDecoration(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.all(
-                        Radius.circular(LuminaControlSize.capsuleRadius),
-                      ),
+  Widget build(BuildContext context) {
+    final content = widget.onDragEnd == null
+        ? widget.child
+        : GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onLongPressStart: _startDrag,
+            onLongPressMoveUpdate: (details) =>
+                _moveDrag(details.localPosition),
+            onLongPressEnd: (details) => _endDrag(details.localPosition),
+            onLongPressCancel: _cancelDrag,
+            child: widget.child,
+          );
+    final lens = Positioned.fill(
+      child: IgnorePointer(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth / widget.count;
+            final rtl = Directionality.of(context) == TextDirection.rtl;
+            return AnimatedBuilder(
+              animation: position,
+              child: _magnifier(
+                size: Size(width, constraints.maxHeight),
+                magnificationScale:
+                    LuminaTheme.of(context).reduceTransparency ||
+                        MediaQuery.highContrastOf(context)
+                    ? 1
+                    : 1.08,
+                decoration: const MagnifierDecoration(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(
+                      Radius.circular(LuminaControlSize.capsuleRadius),
                     ),
-                  ),
-                  child: CustomPaint(
-                    key: const ValueKey('lumina-selection-lens'),
-                    painter: _LuminaMaterial(
-                      colors: LuminaTheme.of(context).colors,
-                      tint: widget.confirmed
-                          ? LuminaTheme.of(context).colors.accent
-                                .withValues(alpha: .62)
-                          : LuminaTheme.of(context).colors.accentSoft
-                                .withValues(alpha: .14),
-                      radius: LuminaControlSize.capsuleRadius,
-                      depth: LuminaSurfaceDepth.raised,
-                      shoulder: false,
-                      contrast:
-                          MediaQuery.highContrastOf(context) ||
-                          (LuminaTheme.of(context).data.liquidGlass &&
-                              LuminaTheme.of(context).reduceTransparency),
-                      focused: false,
-                      pressed: false,
-                      glass: true,
-                      diffuseGlass: false,
-                      liquidGlass: LuminaTheme.of(context).data.liquidGlass,
-                      cheapShadow: true,
-                    ),
-                    child: widget.confirmed
-                        ? Center(
-                            child: LuminaIcon(
-                              LuminaIcons.check,
-                              size: 16,
-                              color:
-                                  MediaQuery.highContrastOf(context) ||
-                                      LuminaTheme.of(context).reduceTransparency
-                                  ? LuminaTheme.of(context).colors.ink
-                                  : LuminaTheme.of(context).colors.surface,
-                            ),
-                          )
-                        : const SizedBox.expand(),
                   ),
                 ),
-                builder: (context, child) {
-                  final x = position.value.clamp(
-                    -.18,
-                    widget.count - 1.0 + .18,
-                  );
-                  final overshoot = x < 0
-                      ? -x
-                      : math.max(0.0, x - widget.count + 1);
-                  final squeeze = LuminaTheme.motionReducedOf(context)
-                      ? 0.0
-                      : (overshoot * .7).clamp(0.0, .12);
-                  final stretch = LuminaTheme.motionReducedOf(context)
-                      ? 0.0
-                      : (position.velocity.abs() * .004).clamp(0.0, .035);
-                  return Align(
-                    alignment: Alignment.centerLeft,
-                    child: Transform.translate(
-                      offset: Offset(
-                        (rtl
-                                ? widget.count -
-                                      1 -
-                                      x.clamp(0.0, widget.count - 1.0)
-                                : x.clamp(0.0, widget.count - 1.0)) *
-                            width,
-                        0,
-                      ),
-                      child: Transform.scale(
-                        key: const ValueKey('lumina-selection-deformation'),
-                        alignment: (x < 0) != rtl
-                            ? Alignment.centerLeft
-                            : Alignment.centerRight,
-                        scaleX: 1 + stretch - squeeze,
-                        scaleY: 1 - stretch * .5 + squeeze * .3,
-                        child: SizedBox(
-                          width: width,
-                          height: constraints.maxHeight,
-                          child: child,
-                        ),
+                child: CustomPaint(
+                  key: const ValueKey('lumina-selection-lens'),
+                  painter: _LuminaMaterial(
+                    colors: LuminaTheme.of(context).colors,
+                    tint: LuminaCardScope.of(context)
+                        ? (widget.confirmed
+                              ? LuminaTheme.of(context).colors.accent
+                              : LuminaTheme.of(context).colors.accentSoft)
+                        : widget.confirmed
+                        ? LuminaTheme.of(context).colors.accent
+                              .withValues(alpha: .62)
+                        : LuminaTheme.of(context).colors.accentSoft
+                              .withValues(alpha: .14),
+                    radius: LuminaControlSize.capsuleRadius,
+                    depth: LuminaSurfaceDepth.raised,
+                    shoulder: false,
+                    contrast:
+                        MediaQuery.highContrastOf(context) ||
+                        (LuminaTheme.of(context).data.liquidGlass &&
+                            LuminaTheme.of(context).reduceTransparency),
+                    focused: false,
+                    pressed: false,
+                    glass: !LuminaCardScope.of(context),
+                    diffuseGlass: false,
+                    liquidGlass:
+                        !LuminaCardScope.of(context) &&
+                        LuminaTheme.of(context).data.liquidGlass,
+                    cheapShadow: true,
+                  ),
+                  child: widget.confirmed
+                      ? Center(
+                          child: LuminaIcon(
+                            LuminaIcons.check,
+                            size: 16,
+                            color:
+                                MediaQuery.highContrastOf(context) ||
+                                    LuminaTheme.of(context).reduceTransparency
+                                ? LuminaTheme.of(context).colors.ink
+                                : LuminaTheme.of(context).colors.surface,
+                          ),
+                        )
+                      : const SizedBox.expand(),
+                ),
+              ),
+              builder: (context, child) {
+                final x = position.value.clamp(-.18, widget.count - 1.0 + .18);
+                final overshoot = x < 0
+                    ? -x
+                    : math.max(0.0, x - widget.count + 1);
+                final squeeze = LuminaTheme.motionReducedOf(context)
+                    ? 0.0
+                    : (overshoot * .7).clamp(0.0, .12);
+                final stretch = LuminaTheme.motionReducedOf(context)
+                    ? 0.0
+                    : (position.velocity.abs() * .004).clamp(0.0, .035);
+                return Align(
+                  alignment: Alignment.centerLeft,
+                  child: Transform.translate(
+                    offset: Offset(
+                      (rtl
+                              ? widget.count -
+                                    1 -
+                                    x.clamp(0.0, widget.count - 1.0)
+                              : x.clamp(0.0, widget.count - 1.0)) *
+                          width,
+                      0,
+                    ),
+                    child: Transform.scale(
+                      key: const ValueKey('lumina-selection-deformation'),
+                      alignment: (x < 0) != rtl
+                          ? Alignment.centerLeft
+                          : Alignment.centerRight,
+                      scaleX: 1 + stretch - squeeze,
+                      scaleY: 1 - stretch * .5 + squeeze * .3,
+                      child: SizedBox(
+                        width: width,
+                        height: constraints.maxHeight,
+                        child: child,
                       ),
                     ),
-                  );
-                },
-              );
-            },
-          ),
+                  ),
+                );
+              },
+            );
+          },
         ),
       ),
-    ],
-  );
+    );
+    // Opaque card lenses cannot magnify the label beneath them. Paint their
+    // selection surface first, keeping the interactive label above it.
+    final card = LuminaCardScope.of(context);
+    return Stack(
+      children: [
+        Positioned.fill(child: _LuminaSelectionWell(backdrop: widget.backdrop)),
+        if (!card) content,
+        lens,
+        if (card) content,
+      ],
+    );
+  }
 }
 
 /// One clipped, stationary glass well per sliding control. The small fixed
@@ -561,8 +580,9 @@ class _LuminaSelectionWell extends StatelessWidget {
 
   Widget _buildWell(BuildContext context, LuminaBlurConfig budget) {
     final theme = LuminaTheme.of(context);
+    final card = LuminaCardScope.of(context);
     final opaque =
-        theme.reduceTransparency || MediaQuery.highContrastOf(context);
+        card || theme.reduceTransparency || MediaQuery.highContrastOf(context);
     final config =
         theme.highPerformanceMode &&
             budget.level.index > LuminaBlurLevel.blurS.index
@@ -603,7 +623,7 @@ class _LuminaSelectionWell extends StatelessWidget {
                 pressed: false,
                 glass: !opaque,
                 diffuseGlass: true,
-                liquidGlass: theme.data.liquidGlass,
+                liquidGlass: !card && theme.data.liquidGlass,
                 cheapShadow: theme.highPerformanceMode,
                 blurCompensation: opaque ? 0 : config.compensation,
               ),
@@ -620,52 +640,63 @@ class LuminaSegmented<T> extends StatelessWidget {
     required this.items,
     required this.value,
     required this.onChanged,
+    this.transparent = false,
     super.key,
   });
   final Map<T, String> items;
   final T value;
+
+  /// Keeps the translucent well and lens, as used by calendar view selection.
+  final bool transparent;
   final ValueChanged<T> onChanged;
   @override
-  Widget build(BuildContext context) => LuminaSurface(
-    depth: LuminaSurfaceDepth.raised,
-    padding: const EdgeInsets.all(4),
-    radius: LuminaControlSize.capsuleRadius,
-    child: LuminaSlidingSelection(
-      index: items.keys.toList().indexOf(value).clamp(0, items.length - 1),
-      count: items.length,
-      onDragEnd: (index) => onChanged(items.keys.elementAt(index)),
-      child: Row(
-        children: items.entries
-            .map(
-              (e) => Expanded(
-                child: Semantics(
-                  selected: e.key == value,
-                  child: LuminaSurface(
-                    color: const Color(0x00000000),
-                    onTap: () => onChanged(e.key),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 11,
-                    ),
-                    radius: LuminaControlSize.capsuleRadius,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 26),
-                      child: Center(
-                        child: Text(
-                          e.value,
-                          textAlign: TextAlign.center,
-                          style: LuminaTheme.of(context).textTheme.labelMedium,
+  Widget build(BuildContext context) {
+    final control = LuminaSurface(
+      depth: LuminaSurfaceDepth.raised,
+      glass: transparent,
+      diffuseGlass: transparent,
+      padding: const EdgeInsets.all(4),
+      radius: LuminaControlSize.capsuleRadius,
+      child: LuminaSlidingSelection(
+        index: items.keys.toList().indexOf(value).clamp(0, items.length - 1),
+        count: items.length,
+        onDragEnd: (index) => onChanged(items.keys.elementAt(index)),
+        child: Row(
+          children: items.entries
+              .map(
+                (e) => Expanded(
+                  child: Semantics(
+                    selected: e.key == value,
+                    child: LuminaSurface(
+                      color: const Color(0x00000000),
+                      onTap: () => onChanged(e.key),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 11,
+                      ),
+                      radius: LuminaControlSize.capsuleRadius,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 26),
+                        child: Center(
+                          child: Text(
+                            e.value,
+                            textAlign: TextAlign.center,
+                            style: LuminaTheme.of(context)
+                                .textTheme
+                                .labelMedium,
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            )
-            .toList(),
+              )
+              .toList(),
+        ),
       ),
-    ),
-  );
+    );
+    return transparent ? control : LuminaCardScope(child: control);
+  }
 }
 
 /// A discrete value control built from the same inset glass track and lens.

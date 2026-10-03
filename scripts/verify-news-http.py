@@ -57,11 +57,10 @@ try:
   assert call('GET','/api/v1/news/aihot/events/'+story_id,authorization=sa)['data']
   checks['real_event_detail_roundtrip']=True
  for period in ['daily','weekly']:
-  html,_=src._request('https://github.com/trending?since='+period,headers={'Accept':'text/html'})
-  repos=src.parse_trending_html(html.decode(),period);assert repos
+  repos=src.fetch_github(period,None);assert repos
   enriched=[src.enrich_repository(x,None) for x in repos[:2]]+repos[2:]
-  brief={'title':'HTTP verification '+period,'summary':'Synthetic summary of real collected repositories; not an AI brief','themes':[],'highlights':[],'analysisStatus':'verification','source':'github.com/trending'}
-  body=publish('/publish/github/'+period,{'repositories':enriched,'brief':brief},'github.com/trending',period=period)
+  brief={'title':'HTTP verification '+period,'summary':'Synthetic summary of real collected repositories; not an AI brief','themes':[],'highlights':[],'analysisStatus':'verification','source':'githot.dev'}
+  body=publish('/publish/github/'+period,{'repositories':enriched,'brief':brief},'githot.dev',period=period)
   got=call('GET','/api/v1/news/github/'+period,authorization=sa);assert len(got['data'])==len(repos)
   repo=enriched[0]['repository'];assert call('GET','/api/v1/news/github/repos/'+repo,authorization=sa)['data']['repository']==repo
   call('POST','/api/v1/news/publish/github/'+period,body,'Bearer '+publisher);checks['idempotent_'+period]=True

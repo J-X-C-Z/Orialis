@@ -20,15 +20,18 @@ DEFAULT_CODEX = "/home/JXCZ/.local/bin/codex"
 
 
 def build_ssh_args(*, host: str, remote_port: int, proxy_host: str,
-                   proxy_port: int, codex_path: str, model: str) -> list[str]:
+                   proxy_port: int, codex_path: str, model: str | None = None) -> list[str]:
     remote = [
         "env",
         f"HTTPS_PROXY=http://127.0.0.1:{remote_port}",
         f"HTTP_PROXY=http://127.0.0.1:{remote_port}",
         codex_path,
         "exec", "--ephemeral", "--sandbox", "read-only",
-        "--skip-git-repo-check", "--model", model, "--json", "-",
+        "--skip-git-repo-check",
     ]
+    if model:
+        remote.extend(["--model", model])
+    remote.extend(["--json", "-"])
     return [
         "ssh", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes",
         "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2",
@@ -43,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--proxy-host", default=DEFAULT_PROXY_HOST)
     parser.add_argument("--proxy-port", type=int, default=DEFAULT_PROXY_PORT)
     parser.add_argument("--codex-path", default=DEFAULT_CODEX)
-    parser.add_argument("--model", default="gpt-6-astra")
+    parser.add_argument("--model", help="optional override; omitted uses the remote Codex configuration")
     parser.add_argument("--timeout", type=int, default=180)
     args = parser.parse_args(argv)
     if args.timeout <= 0 or not (1 <= args.proxy_port <= 65535):

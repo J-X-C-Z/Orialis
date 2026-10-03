@@ -113,6 +113,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
         ? _tasks(20)
         : LuminaFloatingHeader(
             header: LuminaSegmented<int>(
+              transparent: true,
               items: const {0: '四象限', 1: '项目'},
               value: _page,
               onChanged: (v) => _pager.animateToPage(
@@ -165,6 +166,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
             children: [
               Expanded(
                 child: LuminaSegmented<String>(
+                  transparent: true,
                   items: const {
                     'active': '待完成',
                     'undated': '无截止',

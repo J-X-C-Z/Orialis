@@ -1,4 +1,6 @@
 import asyncio
+import os
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,8 +55,19 @@ class RoadmapProtocolTests(unittest.TestCase):
 
 class RoadmapAdapterTests(unittest.TestCase):
     def setUp(self):
+        home = tempfile.TemporaryDirectory()
+        cache_type = adapter_module.AttachmentCache
+
+        def isolated_cache(*args):
+            with patch.dict(os.environ, {"HERMES_HOME": home.name}):
+                return cache_type(*args)
+
+        cache_patch = patch.object(adapter_module, "AttachmentCache", isolated_cache)
+        cache_patch.start()
+        self.addCleanup(home.cleanup)
+        self.addCleanup(cache_patch.stop)
         Platform._add_pseudo_member("orialis")
-        self.adapter = OrialisAdapter(SimpleNamespace(extra={}))
+        self.adapter = OrialisAdapter(SimpleNamespace(extra={"server_url": "https://orialis.test"}))
 
     def test_delivery_and_command_events_are_deduplicated(self):
         handled = []
@@ -157,7 +170,7 @@ class RoadmapAdapterTests(unittest.TestCase):
         asyncio.run(self.adapter._handle_wire(event))
         self.assertEqual(len(handled), 1)
 
-    def test_attachment_tempdir_survives_background_claim_and_delivery_namespace_isolated(self):
+    def test_attachment_cache_survives_processing_and_delivery_namespace_isolated(self):
         handled = []
         sent = []
 
@@ -197,4 +210,4 @@ class RoadmapAdapterTests(unittest.TestCase):
         path = Path(handled[0].media_urls[0])
         self.assertTrue(path.exists())
         asyncio.run(self.adapter.on_processing_complete(handled[0], SimpleNamespace(value="success")))
-        self.assertFalse(path.exists())
+        self.assertTrue(path.exists())

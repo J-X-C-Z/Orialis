@@ -11,7 +11,6 @@ from .pipeline import (
     receive_project_report, retry_pending_publication, run_github, run_projects,
     submit_prepared_publication,
 )
-from .paperclip_setup import PaperclipApi
 
 
 def read_json(path: str) -> object:
@@ -48,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     backend = HttpClient()
     try:
         if args.command == "github":
-            result = run_github(args.period, store, CommandRunner(), backend, task_id=args.task_id, publish=args.publish)
+            result = run_github(args.period, store, None, backend, task_id=args.task_id, publish=args.publish)
         elif args.command == "projects" and args.projects_command == "receive":
             body = read_json(args.report_json)
             expected_user = os.getenv("ORIALIS_NEWS_PROJECT_USER_ID", "")
@@ -72,9 +71,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "projects":
             result = run_projects(args.date, store, CommandRunner(), backend, project_user_id=os.getenv("ORIALIS_NEWS_PROJECT_USER_ID"), publish=args.publish, task_id=args.task_id)
         elif args.command == "paperclip" and args.paperclip_command == "read-plan":
+            from .paperclip_setup import PaperclipApi
             api = PaperclipApi(os.getenv("PAPERCLIP_API_URL", "http://127.0.0.1:3100"), os.getenv("PAPERCLIP_API_KEY", ""))
             result = api.request("GET", f"/api/issues/{args.issue_id}/documents/plan")
         else:
+            from .paperclip_setup import PaperclipApi
             payload = read_json(args.payload_json)
             if not isinstance(payload, dict):
                 raise PipelineError("routine payload must be a JSON object")

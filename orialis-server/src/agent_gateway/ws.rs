@@ -556,10 +556,16 @@ async fn handle_text(
             .await;
         }
         Ok(message @ protocol::GatewayMessage::MessageReply { .. }) => {
-            if let Some(message_id) = message.message_id() {
-                let _ = send_message(socket, &protocol::ack(message_id)).await;
+            let message_id = message.message_id().map(ToOwned::to_owned);
+            if state
+                .agent
+                .resolve_reply_for_device(device_id, message)
+                .await
+            {
+                if let Some(message_id) = message_id {
+                    let _ = send_message(socket, &protocol::ack(message_id)).await;
+                }
             }
-            state.agent.resolve_reply(message).await
         }
         Ok(message @ protocol::GatewayMessage::Error { .. }) => {
             // Unsolicited agent errors are diagnostic events, not replies to a
@@ -567,7 +573,10 @@ async fn handle_text(
             // resolver; otherwise they create misleading `without reply_to`
             // warnings and can interfere with delivery diagnostics.
             if message.reply_to().is_some() {
-                state.agent.resolve_reply(message).await
+                state
+                    .agent
+                    .resolve_reply_for_device(device_id, message)
+                    .await;
             } else {
                 tracing::warn!(device_id = %device_id, "received unsolicited Orialis Agent error");
             }

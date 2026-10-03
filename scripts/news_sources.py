@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 AIHOT = "https://aihot.news"
 GITHUB = "https://github.com"
 GITHUB_API = "https://api.github.com"
+GITHOT = "https://githot.dev"
 USER_AGENT = "Orialis-News/0.1 (personal non-commercial; source attribution preserved)"
 MAX_RESPONSE = 8 * 1024 * 1024
 
@@ -216,6 +217,143 @@ def parse_trending_html(document: str, period: str) -> list[dict[str, Any]]:
     return repos
 
 
+class _SourceNode:
+    def __init__(self, tag: str, attrs: dict[str, str] | None = None):
+        self.tag, self.attrs, self.children = tag, attrs or {}, []
+
+
+class _SourceTree(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.root = _SourceNode("root")
+        self.stack = [self.root]
+
+    def handle_starttag(self, tag, attrs):
+        node = _SourceNode(tag, dict(attrs))
+        self.stack[-1].children.append(node)
+        if tag not in {"br", "img", "input", "hr", "meta", "link", "source", "wbr"}:
+            self.stack.append(node)
+
+    def handle_endtag(self, tag):
+        for index in range(len(self.stack) - 1, 0, -1):
+            if self.stack[index].tag == tag:
+                self.stack = self.stack[:index]
+                break
+
+    def handle_data(self, data):
+        self.stack[-1].children.append(data)
+
+
+def _source_markdown(node: _SourceNode | str) -> str:
+    if isinstance(node, str):
+        return re.sub(r"\s+", " ", node)
+    if node.tag in {"script", "style", "svg", "button", "textarea", "input"}:
+        return ""
+    if node.attrs.get("aria-hidden") == "true":
+        return ""
+    value = "".join(_source_markdown(child) for child in node.children).strip()
+    if not value:
+        return ""
+    if node.tag in {"h1", "h2", "h3", "h4"}:
+        return f"\n\n{'#' * int(node.tag[1])} {value}\n\n"
+    if node.tag in {"strong", "b"}:
+        return f"**{value}** "
+    if node.tag == "code":
+        fence = "`" * max(3, max((len(m.group()) for m in re.finditer(r"`+", value)), default=0) + 1)
+        return f"\n\n{fence}\n{value}\n{fence}\n\n" if value.startswith("$ ") else f"`{value}` "
+    if node.tag == "li":
+        return f"\n- {value}\n"
+    if node.tag in {"p", "section", "div", "ul", "ol"}:
+        return f"\n\n{value}\n\n"
+    if node.tag == "br":
+        return "\n"
+    return value + (" " if node.tag in {"span", "small"} else "")
+
+
+def parse_githot_detail(document: str) -> str | None:
+    """Keep visible source sections in order, excluding personal controls/scripts."""
+    tree = _SourceTree()
+    tree.feed(document)
+    sections = []
+    def visit(node):
+        if isinstance(node, str):
+            return
+        classes = set((node.attrs.get("class") or "").split())
+        if node.tag == "section" and classes.intersection({"summary-hero", "summary-section", "setup-section", "history-card"}):
+            sections.append(_source_markdown(node))
+        else:
+            for child in node.children:
+                visit(child)
+    visit(tree.root)
+    content = re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", "\n\n".join(sections)).strip()
+    return content or None
+
+
+def _source_number(value: str) -> int | None:
+    match = re.search(r"([\d,.]+)\s*([kKmM]?)", value)
+    return int(float(match[1].replace(",", "")) * {"k": 1000, "m": 1_000_000}.get(match[2].lower(), 1)) if match else None
+
+
+def parse_githot_html(document: str, period: str) -> list[dict[str, Any]]:
+    """Parse Githot's visible repository cards without executing page scripts."""
+    if period not in {"daily", "weekly"}:
+        raise SourceError("GitHub period must be daily or weekly")
+    repos: list[dict[str, Any]] = []
+    snapshot = re.search(r'<h1\b[^>]*>.*?<span\b[^>]*class="label"[^>]*>(\d{4}-\d{2}-\d{2})</span>', document, re.DOTALL)
+    for fragment in re.findall(r'<article\b[^>]*class="[^"]*\bcard\b[^"]*"[^>]*>.*?</article>', document, re.DOTALL):
+        full_name = re.search(r'\bdata-full-name="([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)"', fragment)
+        if not full_name:
+            continue
+        repository = full_name.group(1)
+        title_match = re.search(r'<h2\b[^>]*class="[^"]*card-title[^"]*"[^>]*>.*?<a\b[^>]*>(.*?)</a>', fragment, re.DOTALL)
+        desc_match = re.search(r'<p\b[^>]*class="[^"]*card-desc[^"]*"[^>]*>(.*?)</p>', fragment, re.DOTALL)
+        language_match = re.search(r'<span\b[^>]*class="[^"]*\blang\b[^"]*"[^>]*>(.*?)</span>', fragment, re.DOTALL)
+        gain_match = re.search(r'<span\b[^>]*class="[^"]*gain-chip[^"]*"[^>]*aria-label="([^"]+)"', fragment)
+        rank_match = re.search(r'<div\b[^>]*class="[^"]*rank-num[^"]*"[^>]*>(.*?)</div>', fragment, re.DOTALL)
+        topics = [_text(value) for value in re.findall(r'<span\b[^>]*class="[^"]*\btopic\b[^"]*"[^>]*>(.*?)</span>', fragment, re.DOTALL)]
+        period_gain = None
+        if gain_match:
+            number = re.search(r'\+([\d,.]+)\s*([kKmM]?)', gain_match.group(1))
+            if number:
+                amount = float(number.group(1).replace(",", ""))
+                scale = {"k": 1000, "m": 1_000_000}.get(number.group(2).lower(), 1)
+                period_gain = int(amount * scale)
+        try:
+            ranking = int(_text(re.sub(r"<[^>]+>", " ", rank_match.group(1)))) if rank_match else len(repos) + 1
+        except ValueError:
+            ranking = len(repos) + 1
+        owner, name = repository.split("/", 1)
+        repos.append({
+            "repository": repository,
+            "ranking": ranking,
+            "period": period,
+            "sourceSnapshotDate": snapshot.group(1) if snapshot else None,
+            "description": None,
+            "sourceTitle": _text(re.sub(r"<[^>]+>", " ", title_match.group(1))) if title_match else None,
+            "sourceSummary": _text(re.sub(r"<[^>]+>", " ", desc_match.group(1))) if desc_match else None,
+            "sourceTopics": topics,
+            "language": _text(re.sub(r"<[^>]+>", " ", language_match.group(1))) if language_match else None,
+            "stars": _source_number(m.group(1)) if (m := re.search(r'Stars:</span>\s*<span[^>]*>([^<]+)', fragment)) else None,
+            "forks": _source_number(m.group(1)) if (m := re.search(r'Forks:</span>\s*<span[^>]*>([^<]+)', fragment)) else None,
+            "setupDifficulty": _text(m.group(1)) if (m := re.search(r'<span[^>]*class="[^"]*setup-chip[^"]*"[^>]*>([^<]+)', fragment)) else None,
+            "rankChanges": [_text(value) for value in re.findall(r'<div[^>]*class="[^"]*rank-change[^"]*"[^>]*>([^<]+)', fragment)],
+            "starsInPeriod": period_gain,
+            "topics": topics,
+            "readme": None,
+            "recentRelease": None,
+            "summary": None,
+            "contentOrigin": "githot.dev",
+            "repositoryUrl": f"{GITHUB}/{quote(owner, safe='')}/{quote(name, safe='')}",
+            "source": "githot.dev",
+            "sourceUrl": f"{GITHOT}/repo/{quote(owner, safe='')}/{quote(name, safe='')}",
+        })
+        if len(repos) >= 25:
+            break
+    if not repos:
+        raise SourceError("could not parse repository cards from githot.dev")
+    return repos
+
+
 def _github_api(path: str, token: str | None) -> dict[str, Any]:
     value, _ = _json(f"{GITHUB_API}{path}", github_token=token)
     return value
@@ -240,6 +378,7 @@ def enrich_repository(item: dict[str, Any], token: str | None) -> dict[str, Any]
             try:
                 body, _ = _request(raw_url, headers={"Accept": "text/plain"}, timeout=15)
                 item["readme"] = body.decode("utf-8", errors="replace")[:12000]
+                item["readmeSource"] = raw_url
             except SourceError:
                 item["readme"] = None
         try:
@@ -299,9 +438,24 @@ def _record_report_success(state: dict[str, Any], period: str) -> None:
 
 
 def fetch_aihot(report_periods: set[str] | None = None) -> dict[str, Any]:
-    hot, _ = _json(f"{AIHOT}/api/v1/hot-topics")
-    items, _ = _json(f"{AIHOT}/api/v1/items?{urlencode({'mode': 'selected', 'window': '7d', 'limit': 100})}")
-    hot_items = normalize_aihot_hot(hot)
+    datasets: list[tuple[str, Any]] = []
+    hot_items: list[dict[str, Any]] = []
+    for kind, endpoint, normalizer in (
+        ("hot", "hot-topics", normalize_aihot_hot),
+        ("items", "items?" + urlencode({"mode": "selected", "window": "7d", "limit": 100}), normalize_aihot_items),
+    ):
+        try:
+            payload, _ = _json(f"{AIHOT}/api/v1/{endpoint}")
+            if not isinstance(payload.get("items"), list):
+                raise SourceError(f"AIHOT {kind} response did not contain an items array")
+            data = normalizer(payload)
+            if not data:
+                raise SourceError(f"AIHOT {kind} returned an empty dataset; keeping the last published cache")
+            datasets.append((kind, data))
+            if kind == "hot":
+                hot_items = data
+        except SourceError as error:
+            datasets.append((kind, {"data": None, "sourceError": str(error)}))
     hot_by_story: dict[str, list[dict[str, Any]]] = {}
     for item in hot_items:
         if item.get("id"):
@@ -327,10 +481,6 @@ def fetch_aihot(report_periods: set[str] | None = None) -> dict[str, Any]:
             events.append(story)
         except SourceError as error:
             event_errors.append({"storyId": story_id, "error": str(error)})
-    datasets: list[tuple[str, Any]] = [
-        ("hot", hot_items),
-        ("items", normalize_aihot_items(items)),
-    ]
     report_periods = {"daily", "weekly", "monthly"} if report_periods is None else report_periods
     for period, endpoint in (("daily", "dailies/latest"), ("weekly", "weeklies/latest"), ("monthly", "monthlies/latest")):
         if period not in report_periods:
@@ -349,13 +499,17 @@ def fetch_aihot(report_periods: set[str] | None = None) -> dict[str, Any]:
 def fetch_github(period: str, token: str | None) -> list[dict[str, Any]]:
     if period not in {"daily", "weekly"}:
         raise SourceError("GitHub period must be daily or weekly")
-    body, _ = _request(f"{GITHUB}/trending?since={period}", headers={"Accept": "text/html"})
-    repos = parse_trending_html(body.decode("utf-8", errors="replace"), period)
-    # Full metadata for the first ten; every trending entry remains in the
-    # persisted ranking even when API rate limits prevent enrichment.
-    for item in repos[:10]:
-        enrich_repository(item, token)
-    for item in repos[10:]:
+    source_url = f"{GITHOT}/weekly" if period == "weekly" else f"{GITHOT}/"
+    body, _ = _request(source_url, headers={"Accept": "text/html"})
+    repos = parse_githot_html(body.decode("utf-8", errors="replace"), period)
+    # Source detail is already editorial content; no GitHub API or LLM needed.
+    for item in repos:
+        try:
+            detail, _ = _request(item["sourceUrl"], headers={"Accept": "text/html"})
+            item["sourceContent"] = parse_githot_detail(detail.decode("utf-8", errors="replace"))
+            item["sourceDetailStatus"] = "available" if item["sourceContent"] else "not_available"
+        except SourceError:
+            item["sourceDetailStatus"] = "unavailable"
         item["generatedAt"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     return repos
 
@@ -403,8 +557,18 @@ def _publish_or_print(args: argparse.Namespace, path: str, source: str, result: 
 
 def run_refresh(args: argparse.Namespace) -> None:
     modes = ["aihot", "github-daily", "github-weekly"] if args.refresh == "all" else [args.refresh]
+    errors = []
     for mode in modes:
-      if mode == "aihot":
+        try:
+            _run_refresh_mode(args, mode)
+        except SourceError as error:
+            errors.append(f"{mode}: {error}")
+    if errors:
+        raise SourceError("; ".join(errors))
+
+
+def _run_refresh_mode(args: argparse.Namespace, mode: str) -> None:
+    if mode == "aihot":
         state = _load_state()
         due_periods = {period for period in ("daily", "weekly", "monthly") if _report_due(state, period)}
         try:
@@ -413,12 +577,19 @@ def run_refresh(args: argparse.Namespace) -> None:
             keys = ["aihot:hot", "aihot:items"] + [f"aihot:report:{period}" for period in due_periods]
             _record_failure(args, "aihot.news", keys, str(error))
             raise
+        failures = []
         for kind, data in result["datasets"]:
             if isinstance(data, dict) and data.get("sourceError"):
                 print(json.dumps({"dataset": kind, "error": data["sourceError"], "cacheAction": "preserve-existing"}, ensure_ascii=False), file=sys.stderr)
-                _record_failure(args, "aihot.news", [f"aihot:report:{kind.split('/', 1)[1]}"], data["sourceError"])
+                cache_key = f"aihot:report:{kind.split('/', 1)[1]}" if kind.startswith("reports/") else f"aihot:{kind}"
+                _record_failure(args, "aihot.news", [cache_key], data["sourceError"])
+                failures.append(f"{kind}: {data['sourceError']}")
                 continue
-            response = _publish_or_print(args, f"/publish/aihot/{kind}", "aihot.news", data)
+            try:
+                response = _publish_or_print(args, f"/publish/aihot/{kind}", "aihot.news", data)
+            except SourceError as error:
+                failures.append(f"{kind}: {error}")
+                continue
             if response and kind.startswith("reports/"):
                 _record_report_success(state, kind.split("/", 1)[1])
             if response:
@@ -432,17 +603,21 @@ def run_refresh(args: argparse.Namespace) -> None:
             except SourceError as error:
                 print(json.dumps({"dataset": "event", "eventId": story_id, "error": str(error)}, ensure_ascii=False), file=sys.stderr)
                 _record_failure(args, "aihot.news", [f"aihot:event:{story_id}"], str(error))
+                failures.append(f"event {story_id}: {error}")
         for failure in result["eventErrors"]:
             print(json.dumps({"dataset": "event", "eventId": failure["storyId"], "error": failure["error"], "cacheAction": "preserve-existing"}, ensure_ascii=False), file=sys.stderr)
             _record_failure(args, "aihot.news", [f"aihot:event:{failure['storyId']}"], failure["error"])
-      elif mode.startswith("github-"):
+            failures.append(f"event {failure['storyId']}: {failure['error']}")
+        if failures:
+            raise SourceError("; ".join(failures))
+    elif mode.startswith("github-"):
         period = mode.removeprefix("github-")
         try:
             items = fetch_github(period, args.github_token)
         except SourceError as error:
-            _record_failure(args, "github.com/trending", [f"github:{period}"], str(error))
+            _record_failure(args, "githot.dev", [f"github:{period}"], str(error))
             raise
-        response = _publish_or_print(args, f"/publish/github/{period}", "github.com/trending", items, period=period)
+        response = _publish_or_print(args, f"/publish/github/{period}", "githot.dev", items, period=period)
         if response:
             print(json.dumps({"dataset": f"github/{period}", "count": len(items), "taskId": response["taskId"], "status": response["status"]}, ensure_ascii=False))
 
@@ -451,20 +626,25 @@ def _record_failure(args: argparse.Namespace, source: str, cache_keys: list[str]
     if args.dry_run:
         print(json.dumps({"source": source, "cacheKeys": cache_keys, "error": message, "cacheAction": "preserve-existing"}, ensure_ascii=False), file=sys.stderr)
         return
-    publish(args.base_url, args.publisher_token, "/publish/failure", source, {"cacheKeys": cache_keys}, publisher_user_id=args.publisher_user_id, error=message[:2048], expected_status="failed")
+    try:
+        publish(args.base_url, args.publisher_token, "/publish/failure", source, {"cacheKeys": cache_keys}, publisher_user_id=args.publisher_user_id, error=message[:2048], expected_status="failed")
+    except SourceError as error:
+        # Failure auditing is best effort when the publisher itself is down;
+        # do not block unaffected datasets or the other channel.
+        print(json.dumps({"source": source, "cacheKeys": cache_keys, "auditError": str(error)}, ensure_ascii=False), file=sys.stderr)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--refresh", choices=("aihot", "github-daily", "github-weekly", "all"), required=True)
     parser.add_argument("--dry-run", action="store_true", help="fetch and normalize sources without publishing")
     parser.add_argument("--base-url", default=os.getenv("ORIALIS_NEWS_BASE_URL", "http://127.0.0.1:18443/api/v1/news"))
     parser.add_argument("--publisher-token", default=os.getenv("ORIALIS_NEWS_PUBLISHER_TOKEN"))
-    parser.add_argument("--publisher-user-id", default=os.getenv("ORIALIS_AGENT_USER_ID"))
+    parser.add_argument("--publisher-user-id", default=os.getenv("ORIALIS_NEWS_PUBLISHER_USER_ID") or os.getenv("ORIALIS_AGENT_USER_ID"))
     parser.add_argument("--github-token", default=os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN"))
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.dry_run and (not args.publisher_token or not args.publisher_user_id):
-        parser.error("publisher token and bound publisher user id are required (set ORIALIS_NEWS_PUBLISHER_TOKEN and ORIALIS_AGENT_USER_ID)")
+        parser.error("publisher token and bound publisher user id are required (set ORIALIS_NEWS_PUBLISHER_TOKEN and ORIALIS_NEWS_PUBLISHER_USER_ID)")
     try:
         run_refresh(args)
         return 0

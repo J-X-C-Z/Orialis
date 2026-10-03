@@ -263,7 +263,7 @@ class LuminaNavigationDrawer extends StatelessWidget {
   }
 }
 
-/// Glass tabs share their selection with TabBarView and external controllers.
+/// Card tabs share their selection with TabBarView and external controllers.
 class LuminaTabs extends StatefulWidget {
   const LuminaTabs({required this.tabs, this.controller, super.key});
   final List<Widget> tabs;
@@ -338,24 +338,26 @@ class _LuminaNavTabsState extends State<LuminaTabs> {
       _controller?.length == widget.tabs.length,
       'LuminaTabs and TabController lengths must match.',
     );
-    return LuminaSurface(
-      glass: true,
-      diffuseGlass: true,
-      radius: LuminaControlSize.capsuleRadius,
-      padding: const EdgeInsets.all(5),
-      child: _LuminaNavGroup(
-        selectedIndex: _controller?.index ?? 0,
-        onChanged: _controller == null
-            ? null
-            : (index) => _controller!.animateTo(
-                index,
-                duration: LuminaTheme.motionReducedOf(context)
-                    ? Duration.zero
-                    : null,
-              ),
-        entries: [
-          for (final tab in widget.tabs) _LuminaNavEntry(label: _label(tab)),
-        ],
+    return LuminaCardScope(
+      child: LuminaSurface(
+        glass: true,
+        diffuseGlass: true,
+        radius: LuminaControlSize.capsuleRadius,
+        padding: const EdgeInsets.all(5),
+        child: _LuminaNavGroup(
+          selectedIndex: _controller?.index ?? 0,
+          onChanged: _controller == null
+              ? null
+              : (index) => _controller!.animateTo(
+                  index,
+                  duration: LuminaTheme.motionReducedOf(context)
+                      ? Duration.zero
+                      : null,
+                ),
+          entries: [
+            for (final tab in widget.tabs) _LuminaNavEntry(label: _label(tab)),
+          ],
+        ),
       ),
     );
   }

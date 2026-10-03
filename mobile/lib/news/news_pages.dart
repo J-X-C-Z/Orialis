@@ -5,8 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app/design/lumina_compat.dart';
+import '../features/chat/presentation/safe_markdown.dart';
 import '../core/config/app_config.dart';
 import 'news_data.dart';
+import 'news_motion.dart';
 
 typedef _NewsBuilder =
     Widget Function(
@@ -28,8 +30,17 @@ class _NewsRequest extends ConsumerStatefulWidget {
   ConsumerState<_NewsRequest> createState() => _NewsRequestState();
 }
 
-class _NewsRequestState extends ConsumerState<_NewsRequest> {
-  late Future<List<NewsLoadResult>> _future;
+class _NewsRequestState extends ConsumerState<_NewsRequest>
+    with WidgetsBindingObserver {
+  List<NewsLoadResult>? _results;
+  final Map<String, NewsLoadResult> _resultsByPath = {};
+  Object? _error;
+  StreamSubscription<List<NewsLoadResult>>? _subscription;
+  int _generation = 0;
+  bool _foreground = true;
+  int? _refreshGeneration;
+  Future<void>? _refreshing;
+  int? _refreshingGeneration;
   late final AppConfig _config;
   late final Future<void> Function() _identityChanging =
       _invalidateForIdentityChange;
@@ -39,24 +50,39 @@ class _NewsRequestState extends ConsumerState<_NewsRequest> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _config = ref.read(newsConfigProvider);
     _config.addIdentityListener(_identityChanging);
     _config.addIdentityCommittedListener(_identityCommitted);
     _load();
   }
 
-  Future<void> _invalidateForIdentityChange() {
-    if (!mounted) return Future.value();
-    setState(() {
-      _future = Completer<List<NewsLoadResult>>().future;
-    });
-    return Future.value();
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final generation = NewsRefreshScope.of(context);
+    if (_refreshGeneration != null && generation != _refreshGeneration) {
+      unawaited(_refresh());
+    }
+    _refreshGeneration = generation;
   }
 
-  Future<void> _reloadForIdentityChange() {
-    if (!mounted) return Future.value();
-    setState(_load);
-    return Future.value();
+  Future<void> _invalidateForIdentityChange() async {
+    _generation++;
+    _resultsByPath.clear();
+    final subscription = _subscription;
+    _subscription = null;
+    if (mounted) {
+      setState(() {
+        _results = null;
+        _error = null;
+      });
+    }
+    unawaited(subscription?.cancel());
+  }
+
+  Future<void> _reloadForIdentityChange() async {
+    if (mounted && _foreground) _load();
   }
 
   @override
@@ -64,49 +90,153 @@ class _NewsRequestState extends ConsumerState<_NewsRequest> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.paths.join('|') != widget.paths.join('|') ||
         oldWidget.requireSession != widget.requireSession) {
+      final previous = _results;
+      if (oldWidget.requireSession != widget.requireSession) {
+        _resultsByPath.clear();
+      }
+      _results =
+          previous == null || oldWidget.requireSession != widget.requireSession
+          ? null
+          : [
+              for (final path in widget.paths)
+                if (oldWidget.paths.indexOf(path) case final index
+                    when index >= 0)
+                  previous[index]
+                else
+                  _resultsByPath[path] ??
+                      const NewsLoadResult(NewsLoadKind.loading),
+            ];
+      _error = null;
       _load();
     }
   }
 
-  void _load() {
-    _future = Future.wait(
-      widget.paths.map(
-        (path) => ref
-            .read(newsRepositoryProvider)
-            .get(path, requireSession: widget.requireSession),
-      ),
-    );
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    if (_foreground) {
+      _load();
+    } else {
+      _generation++;
+      unawaited(_subscription?.cancel());
+      _subscription = null;
+    }
   }
 
-  Future<void> _refresh() async {
-    setState(_load);
-    await _future;
+  void _remember(List<NewsLoadResult> results) {
+    for (var i = 0; i < results.length; i++) {
+      if (results[i].payload != null) {
+        _resultsByPath[widget.paths[i]] = results[i];
+      }
+    }
+  }
+
+  void _load() {
+    final generation = ++_generation;
+    unawaited(_subscription?.cancel());
+    if (!_foreground) return;
+    _subscription = ref
+        .read(newsRepositoryProvider)
+        .watch(widget.paths, requireSession: widget.requireSession)
+        .listen(
+          (results) {
+            if (mounted && generation == _generation) {
+              setState(() {
+                _remember(results);
+                _results = results;
+                _error = null;
+              });
+            }
+          },
+          onError: (Object error) {
+            if (mounted && generation == _generation) {
+              setState(() {
+                _error = error;
+                _results = _results
+                    ?.map(
+                      (result) => result.kind == NewsLoadKind.loading
+                          ? NewsLoadResult(
+                              NewsLoadKind.error,
+                              message: error.toString(),
+                            )
+                          : result,
+                    )
+                    .toList();
+              });
+            }
+          },
+        );
+  }
+
+  Future<void> _refresh() {
+    if (_refreshing != null && _refreshingGeneration == _generation) {
+      return _refreshing!;
+    }
+    final generation = _generation;
+    _refreshingGeneration = generation;
+    return _refreshing = _performRefresh().whenComplete(() {
+      if (_refreshingGeneration == generation) _refreshing = null;
+    });
+  }
+
+  Future<void> _performRefresh() async {
+    final generation = _generation;
+    try {
+      final results = await Future.wait(
+        widget.paths.map(
+          (path) => ref
+              .read(newsRepositoryProvider)
+              .get(path, requireSession: widget.requireSession),
+        ),
+      );
+      if (mounted && generation == _generation) {
+        setState(() {
+          _remember(results);
+          _results = results;
+          _error = null;
+        });
+      }
+    } catch (error) {
+      if (mounted && generation == _generation) {
+        setState(() {
+          _error = error;
+          _results = _results
+              ?.map(
+                (result) => result.kind == NewsLoadKind.loading
+                    ? NewsLoadResult(
+                        NewsLoadKind.error,
+                        message: error.toString(),
+                      )
+                    : result,
+              )
+              .toList();
+        });
+      }
+    }
   }
 
   @override
   void dispose() {
+    _generation++;
+    unawaited(_subscription?.cancel());
+    WidgetsBinding.instance.removeObserver(this);
     _config.removeIdentityListener(_identityChanging);
     _config.removeIdentityCommittedListener(_identityCommitted);
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<List<NewsLoadResult>>(
-    future: _future,
-    builder: (context, snapshot) {
-      if (snapshot.connectionState != ConnectionState.done) {
-        return const _LoadingState();
-      }
-      if (snapshot.hasError) {
-        return _StateCard(
-          kind: NewsLoadKind.error,
-          message: snapshot.error.toString(),
-          onRetry: _refresh,
-        );
-      }
-      return widget.builder(context, snapshot.data ?? const [], _refresh);
-    },
-  );
+  Widget build(BuildContext context) {
+    if (_results != null) return widget.builder(context, _results!, _refresh);
+    if (_error != null) {
+      return _StateCard(
+        kind: NewsLoadKind.error,
+        message: _error.toString(),
+        onRetry: _refresh,
+      );
+    }
+    return const _LoadingState();
+  }
 }
 
 class AihotPage extends StatefulWidget {
@@ -137,104 +267,115 @@ class _AihotPageState extends State<AihotPage> {
         child: _ResponsiveContent(
           children: [
             if (_statusFor(hot) != null)
-              _StateCard.fromResult(hot, onRetry: refresh),
+              LuminaSection(
+                raised: true,
+                title: '实时热点',
+                child: _StateCard.fromResult(hot, onRetry: refresh),
+              ),
             if (hot.payload?.stale == true)
               _UpdateNote(
                 payload: hot.payload!,
                 offline: hot.kind == NewsLoadKind.offline,
               ),
             if (_statusFor(hot) == null)
-              LuminaSection(
+              _LazyNewsSection(
                 title: '实时热点',
                 trailing: Text(
                   '${events.length} 条',
                   style: LuminaTheme.of(context).textTheme.bodySmall,
                 ),
-                child: events.isEmpty
+                itemCount: events.isEmpty ? 1 : events.length,
+                itemBuilder: (context, i) => events.isEmpty
                     ? const LuminaEmptyState(text: '暂无 AI 热点')
-                    : Column(
-                        children: [
-                          for (var i = 0; i < events.length; i++)
-                            _NewsItemCard(
-                              item: events[i],
-                              rank:
-                                  _int(events[i]['rank']) ??
-                                  _int(events[i]['ranking']) ??
-                                  i + 1,
-                              accent: i < 3,
-                              onTap: () => _openAihotEvent(context, events[i]),
-                            ),
-                        ],
+                    : _NewsItemCard(
+                        item: events[i],
+                        rank:
+                            _int(events[i]['rank']) ??
+                            _int(events[i]['ranking']) ??
+                            i + 1,
+                        accent: i < 3,
+                        onTap: () => _openAihotEvent(context, events[i]),
                       ),
               ),
-            LuminaSection(
-              title: '精选资讯',
-              child: _statusFor(items) != null
-                  ? _StateCard.fromResult(items, onRetry: refresh)
-                  : articles.isEmpty
-                  ? const LuminaEmptyState(text: '暂无精选资讯')
-                  : Column(
-                      children: [
-                        if (items.payload?.stale == true)
-                          _UpdateNote(
-                            payload: items.payload!,
-                            offline: items.kind == NewsLoadKind.offline,
-                          ),
-                        for (final item in visibleArticles)
-                          _NewsItemCard(
-                            item: item,
-                            onTap: () => _openArticle(context, item),
-                          ),
-                        if (!isDesktop && articles.length > 5)
-                          Align(
-                            alignment: Alignment.center,
-                            child: TextButton.icon(
-                              onPressed: () => setState(
-                                () => _showAllArticles = !_showAllArticles,
-                              ),
-                              icon: Icon(
-                                _showAllArticles
-                                    ? Icons.expand_less_rounded
-                                    : Icons.expand_more_rounded,
-                              ),
-                              label: Text(
-                                _showAllArticles
-                                    ? '收起精选'
-                                    : '展开全部 ${articles.length} 条精选',
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-            ),
-            LuminaSection(
-              title: 'AI 报告',
-              trailing: SizedBox(
-                width: 220,
-                child: _PeriodSelector(
-                  value: _period,
-                  values: const {
-                    'daily': '日报',
-                    'weekly': '周报',
-                    'monthly': '月报',
-                  },
-                  onChanged: (value) => setState(() => _period = value),
+            if (_statusFor(items) != null || articles.isEmpty)
+              LuminaSection(
+                raised: true,
+                title: '精选资讯',
+                child: _statusFor(items) != null
+                    ? _StateCard.fromResult(items, onRetry: refresh)
+                    : const LuminaEmptyState(text: '暂无精选资讯'),
+              )
+            else
+              _LazyNewsSection(
+                title: '精选资讯',
+                leading: items.payload?.stale == true
+                    ? _UpdateNote(
+                        payload: items.payload!,
+                        offline: items.kind == NewsLoadKind.offline,
+                      )
+                    : null,
+                itemCount: visibleArticles.length,
+                itemBuilder: (context, index) => _NewsItemCard(
+                  item: visibleArticles[index],
+                  onTap: () => _openArticle(context, visibleArticles[index]),
                 ),
+                footer: !isDesktop && articles.length > 5
+                    ? Align(
+                        alignment: Alignment.center,
+                        child: LuminaButton(
+                          primary: false,
+                          onPressed: () => setState(
+                            () => _showAllArticles = !_showAllArticles,
+                          ),
+                          icon: AnimatedRotation(
+                            turns: _showAllArticles ? .5 : 0,
+                            duration: LuminaTheme.motionReducedOf(context)
+                                ? Duration.zero
+                                : LuminaMotion.standard,
+                            curve: luminaEaseOut,
+                            child: const Icon(Icons.expand_more_rounded),
+                          ),
+                          child: Text(
+                            _showAllArticles
+                                ? '收起精选'
+                                : '展开全部 ${articles.length} 条精选',
+                          ),
+                        ),
+                      )
+                    : null,
               ),
-              child: _ReportSummary(
-                result: report,
-                title:
-                    _str(reportData['title']) ??
-                    '${_periodLabel(_period)} AI 报告',
-                onOpen: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => _ReportDetailPage(
-                      title: '${_periodLabel(_period)} AI 报告',
-                      path: 'aihot/reports/$_period',
-                    ),
+            LuminaSection(
+              raised: true,
+              title: 'AI 报告',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _PeriodSelector(
+                    value: _period,
+                    values: const {
+                      'daily': '日报',
+                      'weekly': '周报',
+                      'monthly': '月报',
+                    },
+                    onChanged: (value) => setState(() => _period = value),
                   ),
-                ),
-                onRetry: refresh,
+                  const SizedBox(height: 16),
+                  _ReportSummary(
+                    result: report,
+                    title:
+                        _str(reportData['title']) ??
+                        '${_periodLabel(_period)} AI 报告',
+                    onOpen: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => _ReportDetailPage(
+                          title: '${_periodLabel(_period)} AI 报告',
+                          path: 'aihot/reports/$_period',
+                        ),
+                      ),
+                    ),
+                    onRetry: refresh,
+                  ),
+                ],
               ),
             ),
           ],
@@ -259,47 +400,64 @@ class _GithubPageState extends State<GithubPage> {
       final result = results[0];
       final brief = results[1];
       final repos = result.payload?.items ?? const <Map<String, dynamic>>[];
+      final directContent =
+          repos.any(_isSourceRepository) ||
+          brief.payload?.object['analysisStatus'] == 'not_required';
       return RefreshIndicator(
         onRefresh: refresh,
         child: _ResponsiveContent(
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'GitHub Trending',
-                    style: LuminaTheme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                SizedBox(
-                  width: 180,
-                  child: _PeriodSelector(
+            LuminaSection(
+              raised: true,
+              title: 'GitHub Trending',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _PeriodSelector(
                     value: _period,
                     values: const {'daily': '日榜', 'weekly': '周榜'},
                     onChanged: (value) => setState(() => _period = value),
                   ),
-                ),
-              ],
-            ),
-            if (result.payload != null)
-              _UpdateNote(
-                payload: result.payload!,
-                offline: result.kind == NewsLoadKind.offline,
+                  if (result.payload != null)
+                    _UpdateNote(
+                      payload: result.payload!,
+                      offline: result.kind == NewsLoadKind.offline,
+                    ),
+                  if (directContent)
+                    _ExternalLink(
+                      label: '来源：githot.dev',
+                      url: _period == 'weekly'
+                          ? 'https://githot.dev/weekly'
+                          : 'https://githot.dev/',
+                    ),
+                ],
               ),
+            ),
             if (_statusFor(result) != null)
               _StateCard.fromResult(result, onRetry: refresh)
             else ...[
-              _GithubBriefSummary(result: brief, period: _period),
+              if (!directContent)
+                LuminaSection(
+                  raised: true,
+                  title: 'GitHub 总览',
+                  child: _GithubBriefSummary(result: brief, period: _period),
+                ),
               if (repos.isEmpty)
                 const LuminaEmptyState(text: '当前榜单还没有数据')
-              else ...[
-                for (var i = 0; i < repos.length; i++)
-                  _RepoCard(
+              else
+                _LazyNewsSection(
+                  title: '热门仓库',
+                  trailing: Text(
+                    '${repos.length} 条',
+                    style: LuminaTheme.of(context).textTheme.bodySmall,
+                  ),
+                  itemCount: repos.length,
+                  itemBuilder: (context, i) => _RepoCard(
                     repo: repos[i],
                     ranking: _int(repos[i]['ranking']) ?? i + 1,
                     onTap: () => _openRepository(context, repos[i]),
                   ),
-              ],
+                ),
             ],
           ],
         ),
@@ -315,6 +473,9 @@ class _GithubBriefSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (result.kind == NewsLoadKind.loading) {
+      return const _StateCard(kind: NewsLoadKind.loading);
+    }
     final data = result.payload?.object ?? const <String, dynamic>{};
     final failed = _statusFor(result) != null;
     final title = _str(data['title']) ?? '${_periodLabel(period)} GitHub 总览';
@@ -323,6 +484,8 @@ class _GithubBriefSummary extends StatelessWidget {
     final highlights = data['highlights'];
     final hasBrief = data.isNotEmpty;
     return LuminaSurface(
+      depth: LuminaSurfaceDepth.recessed,
+      radius: LuminaRadius.card,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -426,32 +589,28 @@ class ProjectsNewsPage extends StatelessWidget {
             if (_statusFor(projectsResult) != null)
               _StateCard.fromResult(projectsResult, onRetry: refresh)
             else
-              LuminaSection(
+              _LazyNewsSection(
                 title: '项目进展',
                 trailing: Text(
                   '${_int(daily['activeProjects']) ?? projects.length} 个活跃项目',
                   style: LuminaTheme.of(context).textTheme.bodySmall,
                 ),
-                child: Column(
-                  children: [
-                    if (projectsResult.payload?.stale == true)
-                      _UpdateNote(
+                leading: projectsResult.payload?.stale == true
+                    ? _UpdateNote(
                         payload: projectsResult.payload!,
                         offline: projectsResult.kind == NewsLoadKind.offline,
+                      )
+                    : null,
+                itemCount: projects.isEmpty ? 1 : projects.length,
+                itemBuilder: (context, index) => projects.isEmpty
+                    ? const LuminaEmptyState(text: '尚未收到该账号的项目秘书报告')
+                    : _ProjectCard(
+                        project: projects[index],
+                        onTap: () => _openProject(context, projects[index]),
                       ),
-                    if (projects.isEmpty)
-                      const LuminaEmptyState(text: '尚未收到该账号的项目秘书报告')
-                    else ...[
-                      for (final project in projects)
-                        _ProjectCard(
-                          project: project,
-                          onTap: () => _openProject(context, project),
-                        ),
-                    ],
-                  ],
-                ),
               ),
             LuminaSection(
+              raised: true,
               title: '今日项目总报',
               child: _statusFor(dailyResult) != null
                   ? _StateCard.fromResult(dailyResult, onRetry: refresh)
@@ -483,18 +642,137 @@ class ProjectsNewsPage extends StatelessWidget {
   );
 }
 
+// Slivers keep article/repository rows outside the viewport unmounted, including
+// rows inside a visual section. A shrink-wrapped nested list would lay them all out.
+class _LazyNewsSection extends StatefulWidget {
+  const _LazyNewsSection({
+    this.title,
+    this.trailing,
+    this.leading,
+    this.footer,
+    required this.itemCount,
+    required this.itemBuilder,
+  });
+  final String? title;
+  final Widget? trailing;
+  final Widget? leading;
+  final Widget? footer;
+  final int itemCount;
+  final IndexedWidgetBuilder itemBuilder;
+
+  @override
+  State<_LazyNewsSection> createState() => _LazyNewsSectionState();
+}
+
+class _LazyNewsSectionState extends State<_LazyNewsSection> {
+  late bool _expanded =
+      widget.title == null ||
+      LuminaCardMemory.expanded('section:${widget.title}');
+
+  void _toggle() {
+    setState(() => _expanded = !_expanded);
+    LuminaCardMemory.save('section:${widget.title}', _expanded);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final titled = widget.title != null;
+    final rows = SliverMainAxisGroup(
+      slivers: [
+        if (widget.leading != null) SliverToBoxAdapter(child: widget.leading!),
+        SliverPadding(
+          padding: EdgeInsets.symmetric(horizontal: titled ? 16 : 0),
+          sliver: SliverList.builder(
+            itemCount: widget.itemCount,
+            itemBuilder: widget.itemBuilder,
+          ),
+        ),
+        if (widget.footer != null)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: widget.footer,
+            ),
+          ),
+      ],
+    );
+    if (!titled) return rows;
+    return LuminaCardHost(
+      child: DecoratedSliver(
+        decoration: LuminaCardDecoration.of(
+          context,
+          title: widget.title,
+          shoulder: true,
+          shoulderTrailingSpace: widget.trailing == null ? 26 : 90,
+        ),
+        sliver: SliverMainAxisGroup(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: LuminaCardHeader(
+                  title: widget.title!,
+                  trailing: widget.trailing,
+                  expanded: _expanded,
+                  onTitleTap: _toggle,
+                ),
+              ),
+            ),
+            NewsSliverReveal(
+              visible: _expanded,
+              sliver: SliverPadding(
+                padding: const EdgeInsets.only(
+                  top: LuminaCardMetrics.titleToContent,
+                  bottom: 16,
+                ),
+                sliver: rows,
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: LuminaReveal(
+                visible: !_expanded,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+                  child: Text(
+                    LuminaLocalizations.of(context).collapsed,
+                    style: LuminaTheme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ResponsiveContent extends StatelessWidget {
   const _ResponsiveContent({required this.children});
   final List<Widget> children;
   @override
-  Widget build(BuildContext context) => ListView.separated(
-    padding: EdgeInsets.only(
-      top: LuminaPageHeaderInset.of(context) + 12,
-      bottom: 20,
-    ),
-    itemCount: children.length,
-    itemBuilder: (context, index) => children[index],
-    separatorBuilder: (_, _) => const SizedBox(height: 20),
+  Widget build(BuildContext context) => CustomScrollView(
+    physics: const AlwaysScrollableScrollPhysics(),
+    slivers: [
+      SliverPadding(
+        padding: EdgeInsets.only(top: LuminaPageHeaderInset.of(context) + 12),
+      ),
+      for (var i = 0; i < children.length; i++) ...[
+        if (i > 0) const SliverToBoxAdapter(child: SizedBox(height: 20)),
+        if (children[i] is _LazyNewsSection)
+          children[i]
+        else
+          SliverToBoxAdapter(child: children[i]),
+      ],
+      SliverPadding(
+        padding: EdgeInsets.only(
+          bottom:
+              LuminaNavigationInset.of(context) +
+              MediaQuery.paddingOf(context).bottom +
+              20,
+        ),
+      ),
+    ],
   );
 }
 
@@ -508,7 +786,10 @@ class _LoadingState extends StatelessWidget {
     return ListView(
       padding: EdgeInsets.only(
         top: LuminaPageHeaderInset.of(context) + 12,
-        bottom: 20,
+        bottom:
+            LuminaNavigationInset.of(context) +
+            MediaQuery.paddingOf(context).bottom +
+            20,
       ),
       children: [
         for (var card = 0; card < 3; card++)
@@ -577,6 +858,11 @@ class _StateCard extends StatelessWidget {
   final Future<void> Function()? onRetry;
   @override
   Widget build(BuildContext context) {
+    if (kind == NewsLoadKind.loading) {
+      return const LuminaSurface(
+        child: Padding(padding: EdgeInsets.all(16), child: Text('正在加载…')),
+      );
+    }
     final title = switch (kind) {
       NewsLoadKind.offline => '离线内容',
       NewsLoadKind.needsSession => '需要登录',
@@ -584,6 +870,7 @@ class _StateCard extends StatelessWidget {
       _ => '暂时无法加载',
     };
     return LuminaSurface(
+      depth: LuminaSurfaceDepth.recessed,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -606,13 +893,16 @@ class _StateCard extends StatelessWidget {
                   ),
                   if (message != null)
                     Text(
-                      message!,
+                      message == 'no published cache is available'
+                          ? '暂未发布资讯，稍后刷新即可。'
+                          : message!,
                       style: LuminaTheme.of(context).textTheme.bodySmall,
                     ),
                   if (onRetry != null)
                     Align(
                       alignment: Alignment.centerRight,
-                      child: TextButton(
+                      child: LuminaButton(
+                        primary: false,
                         onPressed: onRetry,
                         child: const Text('重试'),
                       ),
@@ -634,7 +924,9 @@ class _UpdateNote extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 8, bottom: 12),
-    child: Row(
+    child: Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 4,
       children: [
         if (payload.stale)
           Icon(
@@ -677,86 +969,78 @@ class _NewsItemCard extends StatelessWidget {
     final heat = _str(item['heat']) ?? _str(item['score']);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
+      child: LuminaSurface(
+        depth: LuminaSurfaceDepth.recessed,
         onTap: onTap,
-        child: LuminaSurface(
-          radius: 20,
-          color: accent
-              ? LuminaCardPalette.ocean
-                    .colors(dark: LuminaTheme.of(context).colors.dark)
-                    .raisedSurface
-              : null,
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  if (rank != null)
-                    Text(
-                      '#$rank  ',
-                      style: LuminaTheme.of(context).textTheme.labelMedium
-                          .copyWith(
-                            color: LuminaTheme.of(context).colors.accent,
-                          ),
-                    ),
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: accent ? 3 : 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: LuminaTheme.of(context).textTheme.cardTitle,
-                    ),
+        radius: 16,
+        liquidGlass: false,
+
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (rank != null)
+                  Text(
+                    '#$rank  ',
+                    style: LuminaTheme.of(context).textTheme.labelMedium
+                        .copyWith(color: LuminaTheme.of(context).colors.accent),
                   ),
-                  if (heat != null)
-                    Text(
-                      heat,
-                      style: LuminaTheme.of(context).textTheme.labelMedium,
-                    ),
-                ],
-              ),
-              if (summary != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 7),
+                Expanded(
                   child: Text(
-                    summary,
-                    maxLines: 3,
+                    title,
+                    maxLines: accent ? 3 : 2,
                     overflow: TextOverflow.ellipsis,
-                    style: LuminaTheme.of(context).textTheme.bodySmall,
+                    style: LuminaTheme.of(context).textTheme.cardTitle,
                   ),
                 ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 12,
-                runSpacing: 4,
-                children: [
-                  if (_str(item['category']) != null)
-                    _MetaLabel(_str(item['category'])!),
-                  if (_str(item['source']) != null)
-                    _MetaLabel(_str(item['source'])!),
-                  if (_str(item['publishedAt']) != null ||
-                      _str(item['createdAt']) != null)
-                    _MetaLabel(
-                      _date(
-                        DateTime.tryParse(
-                          (_str(item['publishedAt']) ??
-                              _str(item['createdAt']))!,
-                        ),
+                if (heat != null)
+                  Text(
+                    heat,
+                    style: LuminaTheme.of(context).textTheme.labelMedium,
+                  ),
+              ],
+            ),
+            if (summary != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 7),
+                child: Text(
+                  summary,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: LuminaTheme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 12,
+              runSpacing: 4,
+              children: [
+                if (_str(item['category']) != null)
+                  _MetaLabel(_str(item['category'])!),
+                if (_str(item['source']) != null)
+                  _MetaLabel(_str(item['source'])!),
+                if (_str(item['publishedAt']) != null ||
+                    _str(item['createdAt']) != null)
+                  _MetaLabel(
+                    _date(
+                      DateTime.tryParse(
+                        (_str(item['publishedAt']) ?? _str(item['createdAt']))!,
                       ),
                     ),
-                  if (_int(item['sourceCount']) != null)
-                    _MetaLabel('${item['sourceCount']} 个来源'),
-                  if (_str(item['trend']) != null)
-                    _MetaLabel('趋势 ${item['trend']}'),
-                  if (_str(item['status']) != null)
-                    _MetaLabel('状态 ${item['status']}'),
-                  if (_str(item['latestUpdate']) != null)
-                    _MetaLabel('最新进展 ${item['latestUpdate']}'),
-                ],
-              ),
-            ],
-          ),
+                  ),
+                if (_int(item['sourceCount']) != null)
+                  _MetaLabel('${item['sourceCount']} 个来源'),
+                if (_str(item['trend']) != null)
+                  _MetaLabel('趋势 ${item['trend']}'),
+                if (_str(item['status']) != null)
+                  _MetaLabel('状态 ${item['status']}'),
+                if (_str(item['latestUpdate']) != null)
+                  _MetaLabel('最新进展 ${item['latestUpdate']}'),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -776,60 +1060,79 @@ class _RepoCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final owner = _str(repo['owner']) ?? '';
     final name = _str(repo['name']) ?? _str(repo['repository']) ?? 'repository';
-    final title = name.contains('/') ? name : '$owner/$name';
-    final summary = _str(repo['summary']) ?? _str(repo['description']);
+    final repository = name.contains('/') ? name : '$owner/$name';
+    final title = _str(repo['sourceTitle']) ?? repository;
+    final summary =
+        _str(repo['sourceSummary']) ??
+        (_isSourceRepository(repo) ? null : _str(repo['summary'])) ??
+        _str(repo['description']);
+    final topics = repo['sourceTopics'] ?? repo['topics'];
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
+      child: LuminaSurface(
+        depth: LuminaSurfaceDepth.recessed,
+        radius: 16,
+        liquidGlass: false,
+
         onTap: onTap,
-        child: LuminaSurface(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    '#$ranking',
-                    style: LuminaTheme.of(context).textTheme.labelMedium
-                        .copyWith(color: LuminaTheme.of(context).colors.accent),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: LuminaTheme.of(context).textTheme.cardTitle,
-                    ),
-                  ),
-                  const Icon(Icons.chevron_right_rounded),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 12,
-                children: [
-                  if (_str(repo['language']) != null)
-                    _MetaLabel(_str(repo['language'])!),
-                  _MetaLabel('★ ${_number(repo['stars']) ?? '—'}'),
-                  if (_number(repo['starsInPeriod']) != null)
-                    _MetaLabel('+${_number(repo['starsInPeriod'])} 本期'),
-                ],
-              ),
-              if (summary != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    summary,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: LuminaTheme.of(context).textTheme.bodySmall,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  '#$ranking  ',
+                  style: LuminaTheme.of(context).textTheme.labelMedium.copyWith(
+                    color: LuminaTheme.of(context).colors.accent,
                   ),
                 ),
-            ],
-          ),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: ranking <= 3 ? 3 : 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: LuminaTheme.of(context).textTheme.cardTitle,
+                  ),
+                ),
+              ],
+            ),
+            if (summary != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 7),
+                child: Text(
+                  summary,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: LuminaTheme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 12,
+              runSpacing: 4,
+              children: [
+                if (title != repository) _MetaLabel(repository),
+                if (_str(repo['language']) != null)
+                  _MetaLabel(_str(repo['language'])!),
+                _MetaLabel('★ ${_number(repo['stars']) ?? '—'}'),
+                if (_number(repo['starsInPeriod']) != null)
+                  _MetaLabel('+${_number(repo['starsInPeriod'])} 本期'),
+              ],
+            ),
+            if (topics is List && topics.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Wrap(
+                  spacing: 12,
+                  runSpacing: 4,
+                  children: [
+                    for (final topic in topics.whereType<String>())
+                      _MetaLabel(topic),
+                  ],
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -847,44 +1150,44 @@ class _ProjectCard extends StatelessWidget {
         _int(project['updatesToday']) ?? _int(project['updateCount']);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: InkWell(
+      child: LuminaSurface(
+        depth: LuminaSurfaceDepth.recessed,
+        radius: 16,
+        liquidGlass: false,
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: LuminaSurface(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      name,
-                      style: LuminaTheme.of(context).textTheme.cardTitle,
-                    ),
-                  ),
-                  if (updates != null) _MetaLabel('$updates 项更新'),
-                  const Icon(Icons.chevron_right_rounded),
-                ],
-              ),
-              if (_str(project['summary']) != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
                   child: Text(
-                    _str(project['summary'])!,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: LuminaTheme.of(context).textTheme.bodySmall,
+                    name,
+                    style: LuminaTheme.of(context).textTheme.cardTitle,
                   ),
                 ),
-              if (project['completed'] is List)
-                _BulletPreview(label: '完成', values: project['completed']),
-              if (project['inProgress'] is List)
-                _BulletPreview(label: '进行中', values: project['inProgress']),
-              if (project['issues'] is List)
-                _BulletPreview(label: '问题', values: project['issues']),
-            ],
-          ),
+                if (updates != null) _MetaLabel('$updates 项更新'),
+                const LuminaIcon(LuminaIcons.chevronRight),
+              ],
+            ),
+            if (_str(project['summary']) != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  _str(project['summary'])!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: LuminaTheme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            if (project['completed'] is List)
+              _BulletPreview(label: '完成', values: project['completed']),
+            if (project['inProgress'] is List)
+              _BulletPreview(label: '进行中', values: project['inProgress']),
+            if (project['issues'] is List)
+              _BulletPreview(label: '问题', values: project['issues']),
+          ],
         ),
       ),
     );
@@ -967,6 +1270,9 @@ class _GenericReportCard extends StatelessWidget {
         '${data['attentionCount']} 项待关注',
     ].join(' · ');
     return LuminaSurface(
+      depth: LuminaSurfaceDepth.recessed,
+      radius: 16,
+      liquidGlass: false,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -992,10 +1298,11 @@ class _GenericReportCard extends StatelessWidget {
             ),
           Align(
             alignment: Alignment.centerRight,
-            child: TextButton.icon(
+            child: LuminaButton(
+              primary: false,
               onPressed: onOpen,
-              icon: const Icon(Icons.arrow_forward_rounded),
-              label: const Text('查看报告'),
+              icon: const LuminaIcon(LuminaIcons.arrowRight),
+              child: const Text('查看报告'),
             ),
           ),
         ],
@@ -1018,6 +1325,7 @@ class _ProjectDailySummary extends StatelessWidget {
         _str(data['overview']) ??
         _str(data['content']);
     return LuminaSurface(
+      depth: LuminaSurfaceDepth.recessed,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1043,10 +1351,11 @@ class _ProjectDailySummary extends StatelessWidget {
             ),
           Align(
             alignment: Alignment.centerRight,
-            child: TextButton.icon(
+            child: LuminaButton(
+              primary: false,
               onPressed: onOpen,
-              icon: const Icon(Icons.arrow_forward_rounded),
-              label: const Text('查看报告'),
+              icon: const LuminaIcon(LuminaIcons.arrowRight),
+              child: const Text('查看报告'),
             ),
           ),
         ],
@@ -1066,6 +1375,7 @@ class _PeriodSelector extends StatelessWidget {
   final ValueChanged<String> onChanged;
   @override
   Widget build(BuildContext context) => LuminaSegmented<String>(
+    transparent: true,
     items: values,
     value: value,
     onChanged: onChanged,
@@ -1103,7 +1413,7 @@ void _openRepository(BuildContext context, Map<String, dynamic> repo) {
   Navigator.of(context).push(
     MaterialPageRoute(
       builder: (_) => _DetailPage(
-        title: repository,
+        title: _str(repo['sourceTitle']) ?? repository,
         path:
             'github/repos/${Uri.encodeComponent(parts[0])}/${Uri.encodeComponent(parts[1])}',
       ),
@@ -1177,10 +1487,10 @@ class _DetailRequestPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LuminaPageScaffold(
     title: title,
-    leading: IconButton(
+    leading: LuminaIconButton(
       tooltip: '返回',
       onPressed: () => Navigator.of(context).maybePop(),
-      icon: const Icon(Icons.arrow_back_rounded),
+      icon: const LuminaIcon(LuminaIcons.back),
     ),
     body: _NewsRequest(
       paths: paths,
@@ -1483,6 +1793,87 @@ Map<String, dynamic> _payloadAsObject(NewsPayload? payload) {
   return const {};
 }
 
+bool _isSourceRepository(Map<String, dynamic> repository) =>
+    repository['contentOrigin'] == 'githot.dev' ||
+    repository['analysisStatus'] == 'not_required' ||
+    _str(repository['sourceContent']) != null;
+
+class _RepositoryDetail extends StatelessWidget {
+  const _RepositoryDetail({
+    required this.data,
+    this.payload,
+    this.offline = false,
+  });
+  final Map<String, dynamic> data;
+  final NewsPayload? payload;
+  final bool offline;
+
+  @override
+  Widget build(BuildContext context) {
+    final repository = _str(data['repository']) ?? _str(data['fullName'])!;
+    final sourceTitle = _str(data['sourceTitle']);
+    final content = _str(data['sourceContent']);
+    final summary =
+        _str(data['sourceSummary']) ??
+        (_isSourceRepository(data) ? null : _str(data['summary'])) ??
+        _str(data['description']);
+    final readme = _str(data['readme']);
+    final topics = data['sourceTopics'] ?? data['topics'];
+    final sourceUrl = _str(data['sourceUrl']);
+    final repositoryUrl =
+        _str(data['repositoryUrl']) ??
+        _str(data['htmlUrl']) ??
+        'https://github.com/$repository';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (payload != null) _UpdateNote(payload: payload!, offline: offline),
+        Text(
+          sourceTitle ?? repository,
+          style: LuminaTheme.of(context).textTheme.cardTitle,
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 12,
+          runSpacing: 4,
+          children: [
+            if (sourceTitle != null) _MetaLabel(repository),
+            if (_str(data['language']) != null)
+              _MetaLabel(_str(data['language'])!),
+            _MetaLabel('★ ${_number(data['stars']) ?? '—'}'),
+            if (_number(data['starsInPeriod']) != null)
+              _MetaLabel('+${_number(data['starsInPeriod'])} 本期'),
+            if (topics is List)
+              for (final topic in topics.whereType<String>()) _MetaLabel(topic),
+          ],
+        ),
+        if (content != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: SafeMarkdownView(source: content),
+          )
+        else if (summary != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: Text(
+              summary,
+              style: LuminaTheme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+        if (sourceUrl != null) _ExternalLink(label: '查看来源原文', url: sourceUrl),
+        _ExternalLink(label: '打开 GitHub 仓库', url: repositoryUrl),
+        if (readme != null)
+          LuminaSection(
+            title: 'README',
+            child: SafeMarkdownView(source: readme),
+          ),
+        if (content == null && summary == null && readme == null)
+          const LuminaEmptyState(text: '暂未提供仓库正文，可查看来源原文。', card: false),
+      ],
+    );
+  }
+}
+
 class _DataDetail extends StatelessWidget {
   const _DataDetail({
     required this.data,
@@ -1496,6 +1887,9 @@ class _DataDetail extends StatelessWidget {
   final bool offline;
   @override
   Widget build(BuildContext context) {
+    if (_str(data['repository']) != null || _str(data['fullName']) != null) {
+      return _RepositoryDetail(data: data, payload: payload, offline: offline);
+    }
     final timeline = newsEventTimeline(data);
     final sources = newsEventSources(data);
     final links = data['links'];
@@ -1659,25 +2053,47 @@ class _ProjectReportEntry extends StatelessWidget {
               ),
             _JsonContent(data: report),
             if (rawReports is List && rawReports.isNotEmpty)
-              ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                title: Text('原始秘书报告（${rawReports.length}）'),
-                children: [
-                  for (var i = 0; i < rawReports.length; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: SelectableText(_displayValue(rawReports[i])),
-                      ),
-                    ),
-                ],
-              ),
+              _RawReportsDisclosure(reports: rawReports),
           ],
         ),
       ),
     );
   }
+}
+
+class _RawReportsDisclosure extends StatefulWidget {
+  const _RawReportsDisclosure({required this.reports});
+  final List<dynamic> reports;
+  @override
+  State<_RawReportsDisclosure> createState() => _RawReportsDisclosureState();
+}
+
+class _RawReportsDisclosureState extends State<_RawReportsDisclosure> {
+  bool _expanded = false;
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const SizedBox(height: 12),
+      Semantics(
+        expanded: _expanded,
+        child: LuminaButton(
+          primary: false,
+          onPressed: () => setState(() => _expanded = !_expanded),
+          icon: const LuminaIcon(LuminaIcons.chevronDown),
+          child: Text(
+            '${_expanded ? '收起' : '展开'}原始秘书报告（${widget.reports.length}）',
+          ),
+        ),
+      ),
+      if (_expanded)
+        for (final report in widget.reports)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: SelectableText(_displayValue(report)),
+          ),
+    ],
+  );
 }
 
 class _TimelineEntry extends StatelessWidget {
@@ -1724,10 +2140,10 @@ class _StaticDetailPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LuminaPageScaffold(
     title: title,
-    leading: IconButton(
+    leading: LuminaIconButton(
       tooltip: '返回',
       onPressed: () => Navigator.of(context).maybePop(),
-      icon: const Icon(Icons.arrow_back_rounded),
+      icon: const LuminaIcon(LuminaIcons.back),
     ),
     body: _ResponsiveContent(
       children: [
@@ -1751,25 +2167,22 @@ class _ExternalLink extends StatelessWidget {
       alignment: Alignment.centerLeft,
       child: Padding(
         padding: const EdgeInsets.only(top: 4, bottom: 8),
-        child: TextButton.icon(
+        child: LuminaButton(
+          primary: false,
           onPressed: () async {
             try {
               final opened = await launchNewsLink(url);
               if (!opened && context.mounted) {
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('无法打开此链接')));
+                showLuminaMessage(context, '无法打开此链接');
               }
             } catch (_) {
               if (context.mounted) {
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('无法打开此链接')));
+                showLuminaMessage(context, '无法打开此链接');
               }
             }
           },
           icon: const Icon(Icons.open_in_new_rounded),
-          label: Text(label),
+          child: Text(label),
         ),
       ),
     );
@@ -1899,15 +2312,17 @@ class _JsonContent extends StatelessWidget {
   };
   @override
   Widget build(BuildContext context) {
+    final readme = _str(data['readme']);
     final entries = data.entries
         .where(
           (entry) =>
               !_hidden.contains(entry.key) &&
+              entry.key != 'readme' &&
               entry.value != null &&
               entry.value != '',
         )
         .toList();
-    if (entries.isEmpty) {
+    if (entries.isEmpty && readme == null) {
       return const LuminaEmptyState(text: '服务端暂未提供已整理的内容', card: false);
     }
     return Column(
@@ -1949,6 +2364,11 @@ class _JsonContent extends StatelessWidget {
                 ],
               ),
             ),
+        if (readme != null)
+          LuminaSection(
+            title: 'README',
+            child: SafeMarkdownView(source: readme),
+          ),
       ],
     );
   }

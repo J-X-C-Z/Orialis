@@ -13,7 +13,15 @@ description: >
   conversations, and messages).
 author: Orialis
 provides_tools:
+  - create_messages
+  - create_conversations
+  - create_milestones
+  - create_projects
+  - create_tasks
+  - create_calendar_events
+  - create_schedules
   - orialis_capabilities
+  - news.publish
   - list_tasks
   - create_task
   - update_task
@@ -54,9 +62,17 @@ requires_env:
     prompt: "Orialis device ID"
     password: false
 optional_env:
+  - name: ORIALIS_ALLOWED_USERS
+    description: "Sender allowlist; set to this gateway ORIALIS_DEVICE_ID for authenticated Orialis chat"
+    prompt: "Allowed Orialis sender (this device ID)"
+    password: false
   - name: ORIALIS_DEVICE_TOKEN
-    description: "Orialis Agent bearer token; required for chat-based Schedule creation and when Agent authentication is enabled"
+    description: "Account-bound Orialis Agent bearer token; required for user-domain HTTP tools and Agent authentication"
     prompt: "Orialis device token (or empty)"
+    password: true
+  - name: ORIALIS_NEWS_PUBLISHER_TOKEN
+    description: "Separate account-bound news publisher bearer token, required for news.publish"
+    prompt: "Orialis news publisher token (or empty)"
     password: true
   - name: ORIALIS_HOME_CHANNEL
     description: "Conversation ID used by standalone Hermes cron delivery"

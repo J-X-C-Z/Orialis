@@ -209,6 +209,7 @@ class LuminaThemeModeSelector extends StatelessWidget {
     final chinese =
         m.Localizations.maybeLocaleOf(context)?.languageCode != 'en';
     return LuminaSegmented<m.ThemeMode>(
+      transparent: true,
       items: {
         m.ThemeMode.system: systemLabel ?? (chinese ? '跟随系统' : 'System'),
         m.ThemeMode.light: lightLabel ?? (chinese ? '浅色' : 'Light'),

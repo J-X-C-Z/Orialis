@@ -71,7 +71,7 @@ class LuminaDialog extends StatelessWidget {
   final List<Widget> actions;
   @override
   Widget build(BuildContext context) => LuminaSurface(
-    glass: true,
+    liquidGlass: false,
     depth: LuminaSurfaceDepth.raised,
     padding: const EdgeInsets.all(24),
     radius: 28,
@@ -148,7 +148,7 @@ Future<T?> showLuminaSheet<T>({
                   maxHeight: MediaQuery.sizeOf(c).height * .85,
                 ),
                 child: LuminaSurface(
-                  glass: true,
+                  liquidGlass: false,
                   depth: LuminaSurfaceDepth.raised,
                   radius: 28,
                   padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
@@ -173,7 +173,9 @@ Future<T?> showLuminaSheet<T>({
                               removeTop: true,
                               removeBottom: true,
                               child: _LuminaSheetScope(
-                                child: Builder(builder: builder),
+                                child: LuminaCardScope(
+                                  child: Builder(builder: builder),
+                                ),
                               ),
                             ),
                           ),

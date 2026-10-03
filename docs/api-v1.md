@@ -606,7 +606,7 @@ Rust 结构化事件使用协议目录中的 `event-v1.schema.json`：通用 `ev
 不得被当作成功；客户端应按 [Agent Gateway fallback 规则](../protocol/agent-gateway/README.md#v012-capabilities-与-fallback)
 降级或恢复 HTTP 状态。v0.10 Voice 明确未实现且有意排除。
 
-### 7.4 Hermes 设备切换
+### 7.4 Agent 设备与旧会话默认目标
 
 ```http
 GET /api/v1/agent/devices
@@ -641,6 +641,34 @@ Authorization: Session <accessToken>
 
 设备上线、下线和选择变化会通过手机 WebSocket 发送 `event`，其中
 `payload.kind` 为 `agent_devices_changed`；客户端收到后重新查询上述 HTTP 接口。
+
+### 7.5 固定设备的独立会话
+
+手机“与设备对话”读取真实 Agent registry，创建新会话并在显示前绑定设备。
+Node/Control 配对与该聊天 registry 独立，不赋予聊天执行能力。
+
+```http
+GET /api/v1/conversations/{conversation_id}/agent-device
+PUT /api/v1/conversations/{conversation_id}/agent-device
+Authorization: Session <accessToken>
+Content-Type: application/json
+
+{"deviceId":"JXCZ_AOZORA_Codex"}
+```
+
+GET/PUT 响应：`{"conversationId":"…","deviceId":"…"}`；未绑定 GET 的
+`deviceId` 为 null。当前 Agent Bearer 也按配置的账号归属认证。不存在或非本人
+会话/设备返回404，空设备ID返回400。已有绑定只能同目标幂等；不同目标返回409。
+未绑定但已有用户消息的会话返回409，避免历史排队消息被新目标捕获。
+
+绑定不改变 conversation 内容 version。绑定后消息、会话命令、确认、审批只发
+指定设备；离线保持队列或明确失败，不回落另一设备。回复/错误必须来自请求
+目标设备，其他连接不能消费其 pending 请求。旧未绑定会话维持旧默认选择行为。
+
+Aozora `JXCZ_AOZORA_Codex` 使用独立 Codex CLI Gateway，仅支持文字回复；
+每个 conversation 使用独立显式 thread ID。重复请求重放已落盘回复，崩溃中的
+执行返回不确定错误并不重复运行。CLI 使用 read-only/approval never，不复制
+其他 Agent 的会话历史；Hermes 命令与附件明确不支持。
 
 ## 8. 增量同步事件
 
@@ -853,3 +881,15 @@ JSON 解析失败等由 Axum 提取器直接生成的错误，当前不一定符
 - 方寸导入使用 `scripts/import-fangcun.py`，先执行 `--dry-run`；历史导入不伪造
   `sync_events`，报告保存在 `migration_batches`。
 - 网页、内置 LLM、第三方日历连接和循环任务执行器不属于当前服务端路线图。
+
+
+### News realtime invalidation (additive)
+
+`GET /api/v1/news/stream` uses Session authentication and returns
+`text/event-stream`. Event `news.updated` carries `channels` (`aihot`, `github`,
+`projects`) and `revision`; the SSE `id` equals the revision. Supply
+`Last-Event-ID` on reconnect. An outdated cursor receives the latest invalidation;
+a matching cursor waits for change. Read the normal channel APIs to reconcile the
+current snapshot. Private project metadata is user-scoped; events expose no report
+body. Revoked/expired sessions close the stream. This API provides in-app refresh,
+with no historical event replay or OS notification guarantee.

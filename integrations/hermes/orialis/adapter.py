@@ -9,7 +9,6 @@ import logging
 import os
 import re
 import platform as host_platform
-import tempfile
 import time
 import uuid
 from collections import OrderedDict
@@ -30,6 +29,7 @@ from gateway.config import Platform
 from gateway.platforms.base import BasePlatformAdapter, SendResult
 from gateway.platforms.event import MessageEvent, MessageType
 from .config import OrialisConfig, env_enablement, validate
+from .attachment_cache import AttachmentCache
 from .conversation import chat_id_for_conversation, conversation_id_for_chat_id
 from . import protocol
 
@@ -202,7 +202,9 @@ class OrialisAdapter(BasePlatformAdapter):
         self._active_streams: Dict[str, Dict[str, Any]] = {}
         self._stream_context: Dict[str, Any] = {}
         self._scheduled_wire_tasks: set[asyncio.Task] = set()
-        self._inbound_tempdirs: Dict[str, tempfile.TemporaryDirectory] = {}
+        self._attachment_cache = AttachmentCache(
+            self._orialis.server_url, self._orialis.device_id, self._orialis.device_token
+        )
         self._session_id = f"session_{uuid.uuid4().hex[:16]}"
         self._event_seq = 0
         self._capability_probe_task: Optional[asyncio.Task] = None
@@ -296,8 +298,6 @@ class OrialisAdapter(BasePlatformAdapter):
         await self._close_socket()
         self._fail_ack_waiters(ConnectionError("Orialis Server connection closed"))
         self._fail_request_waiters(ConnectionError("Orialis Server connection closed"))
-        for message_id in list(self._inbound_tempdirs):
-            self._release_inbound_tempdir(message_id)
         logger.info("[%s] disconnected from Orialis Server", self.name)
 
     def _schedule_reconnect(self) -> None:
@@ -357,10 +357,8 @@ class OrialisAdapter(BasePlatformAdapter):
                 waiter.set_exception(error)
         self._request_waiters.clear()
 
-    def _release_inbound_tempdir(self, message_id: str) -> None:
-        temp_dir = self._inbound_tempdirs.pop(message_id, None)
-        if temp_dir is not None:
-            temp_dir.cleanup()
+    def _release_inbound_attachments(self, message_id: str) -> None:
+        self._attachment_cache.release(message_id)
 
     def supports_feature(self, feature: str) -> bool:
         """Return whether the connected peer explicitly negotiated *feature*.
@@ -421,8 +419,6 @@ class OrialisAdapter(BasePlatformAdapter):
             await self._close_socket()
             self._fail_ack_waiters(ConnectionError("Orialis Server connection closed"))
             self._fail_request_waiters(ConnectionError("Orialis Server connection closed"))
-            for message_id in list(self._inbound_tempdirs):
-                self._release_inbound_tempdir(message_id)
             if not self._manual_disconnect:
                 self._connection_state = "disconnected"
                 self._schedule_reconnect()
@@ -581,31 +577,46 @@ class OrialisAdapter(BasePlatformAdapter):
             message_id=message_id,
         )
         attachments = message.get("attachments", [])
-        temp_dir = tempfile.TemporaryDirectory(prefix="orialis-inbound-")
+        directory = (self._attachment_cache.acquire(conversation_id, message_id)
+                     if attachments else None)
         paths: list[str] = []
         media_types: list[str] = []
         failed = False
         for index, item in enumerate(attachments):
             try:
                 name = _safe_filename(item["name"], f"attachment-{index + 1}")
-                path = Path(temp_dir.name) / name
-                media_types.append(await asyncio.to_thread(
-                    _download_attachment, item, self._orialis.server_url, path,
-                    self._orialis.device_token, self._orialis.device_id
-                ))
+                # Include metadata identity and position: same-name files stay distinct.
+                identity = hashlib.sha256(repr(sorted(item.items())).encode()).hexdigest()[:24]
+                path = directory / f"{index}-{identity}-{name}"
+                declared = item["mime_type"].lower().split(";", 1)[0].strip()
+                if not _same_server(item["download_url"], self._orialis.server_url) or not _allowed_mime(declared):
+                    raise ValueError("invalid attachment source or MIME type")
+                if not path.is_file() or not 0 < path.stat().st_size <= ATTACHMENT_MAX_BYTES:
+                    partial = path.with_name(path.name + ".part")
+                    try:
+                        await asyncio.to_thread(
+                            _download_attachment, item, self._orialis.server_url, partial,
+                            self._orialis.device_token, self._orialis.device_id
+                        )
+                        partial.chmod(0o600)
+                        partial.replace(path)
+                    finally:
+                        partial.unlink(missing_ok=True)
+                media_types.append(declared)
                 paths.append(str(path))
             except (OSError, ValueError, HTTPError, URLError, TimeoutError) as exc:
                 failed = True
                 logger.warning("[%s] attachment %s was not downloaded: %s", self.name, index, exc)
         if failed:
-            temp_dir.cleanup()
+            self._seen_message_ids.discard(message_id)
+            self._seen_message_order.remove(message_id)
+            self._release_inbound_attachments(message_id)
             await self._send_wire(protocol.error(
                 "ATTACHMENT_UNAVAILABLE",
                 "one or more Orialis attachments could not be downloaded",
                 reply_to=message_id,
             ))
             return
-        self._inbound_tempdirs[message_id] = temp_dir
         event = MessageEvent(
             text=message.get("content", ""),
             message_type=(MessageType.PHOTO if media_types and media_types[0].startswith("image/")
@@ -626,12 +637,12 @@ class OrialisAdapter(BasePlatformAdapter):
         try:
             await self.handle_message(event)
             # BasePlatformAdapter.handle_message returns immediately after it
-            # claims the event. Keep files for the background turn; release
-            # them immediately when no handler accepted it.
+            # claims the event. Pin files during the background turn; unpin
+            # without deleting when no handler accepted it.
             if not getattr(event, "_gateway_accepted", False):
-                self._release_inbound_tempdir(message_id)
+                self._release_inbound_attachments(message_id)
         except Exception:
-            self._release_inbound_tempdir(message_id)
+            self._release_inbound_attachments(message_id)
             raise
         finally:
             self._reply_anchors.pop(chat_id, None)
@@ -1233,7 +1244,7 @@ class OrialisAdapter(BasePlatformAdapter):
     async def on_processing_complete(self, event: MessageEvent, outcome: Any) -> None:
         await super().on_processing_complete(event, outcome)
         if getattr(event, "message_id", None):
-            self._release_inbound_tempdir(event.message_id)
+            self._release_inbound_attachments(event.message_id)
         chat_id = getattr(getattr(event, "source", None), "chat_id", None)
         if chat_id:
             state = getattr(outcome, "value", str(outcome)).lower()

@@ -1,0 +1,25 @@
+[Unit]
+Description=Orialis News Githot daily source collection and publication
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hermes
+Group=hermes
+WorkingDirectory=/opt/orialis-news/current
+EnvironmentFile=/etc/orialis-news/worker.env
+ExecStart=/usr/bin/python3 -m integrations.news.cli github daily --publish
+TimeoutStartSec=900
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/hermes/.hermes /var/lib/orialis-news
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true

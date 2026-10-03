@@ -1,0 +1,26 @@
+[
+  {
+    "id": "paperclip",
+    "name": "Paperclip",
+    "description": "项目、组织与 Agent 管理",
+    "url": "",
+    "desktopUrl": "http://127.0.0.1:3100/ORI/dashboard",
+    "icon": "paperclip"
+  },
+  {
+    "id": "server-monitor",
+    "name": "服务器监控",
+    "description": "CPU、内存、磁盘与网络",
+    "url": "",
+    "icon": "server",
+    "desktopUrl": "http://127.0.0.1:8876"
+  },
+  {
+    "id": "hindsight",
+    "name": "Hindsight",
+    "description": "长期记忆与记忆库管理",
+    "url": "",
+    "desktopUrl": "http://127.0.0.1:29999/dashboard",
+    "icon": "memory"
+  }
+]

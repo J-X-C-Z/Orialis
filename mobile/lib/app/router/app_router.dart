@@ -15,6 +15,7 @@ import '../../features/devices/presentation/device_center_page.dart';
 import '../../features/wear/wear_connection_page.dart';
 import '../../pages/profile/system_settings_page.dart';
 import '../../news/news_app.dart';
+import '../../features/web_services/web_services_page.dart';
 
 GoRouter buildRouter({bool desktop = false}) {
   return GoRouter(
@@ -62,9 +63,18 @@ GoRouter buildRouter({bool desktop = false}) {
               routes: [
                 GoRoute(
                   path: '/chat',
-                  builder: (_, _) => Consumer(
-                    builder: (context, ref, _) =>
-                        ChatPage(repository: ref.watch(chatRepositoryProvider)),
+                  builder: (context, state) => Consumer(
+                    builder: (context, ref, _) {
+                      final conversationId =
+                          state.uri.queryParameters['conversationId'] ??
+                          'default';
+                      return ChatPage(
+                        key: ValueKey(conversationId),
+                        repository: ref.watch(chatRepositoryProvider),
+                        conversationId: conversationId,
+                        messageId: state.uri.queryParameters['messageId'],
+                      );
+                    },
                   ),
                 ),
               ],
@@ -119,6 +129,14 @@ GoRouter buildRouter({bool desktop = false}) {
                   builder: (_, _) => const DesktopNewsPage(
                     section: DesktopNewsSection.project,
                   ),
+                ),
+              ],
+            ),
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/services',
+                  builder: (_, _) => const WebServicesPage(),
                 ),
               ],
             ),

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/app.dart';
 import '../../app/design/design_components.dart';
+import '../chat/chat_page.dart' show agentChatServiceProvider;
 import '../shared/page_parts.dart';
 
 class SystemSettingsPage extends ConsumerStatefulWidget {
@@ -63,6 +64,31 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
     } finally {
       if (mounted) await _load();
     }
+  }
+
+  Future<bool> _previewChatNotification() async {
+    final system = ref.read(systemIntegrationProvider);
+    if (system == null) return false;
+    final repository = ref.read(chatRepositoryProvider);
+    final service = ref.read(agentChatServiceProvider);
+    final conversations = await repository.watchConversations().first;
+    for (final conversation in conversations) {
+      final target = await service.target(conversation.id);
+      if (!service.isAllowedTarget(target)) continue;
+      final messages = await repository.watchMessages(conversation.id).first;
+      if (messages.isEmpty) continue;
+      return system.notifyChatMessage({
+        'notificationId': 'test-${DateTime.now().microsecondsSinceEpoch}',
+        'messageId': messages.last.id,
+        'conversationId': conversation.id,
+        'sender': 'Orialis 测试消息',
+        'content': '点击此通知可打开 ${conversation.title} 的最新消息',
+      }, testEvent: true);
+    }
+    if (mounted) {
+      showLuminaMessage(context, '请先在 Mac 或 Azure 的 Hermes 会话中产生一条消息');
+    }
+    return false;
   }
 
   @override
@@ -167,6 +193,26 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
                                 }
                               }),
                         child: const Text('发送测试提醒'),
+                      ),
+                      LuminaButton(
+                        primary: false,
+                        onPressed:
+                            system == null ||
+                                _busy ||
+                                !notification ||
+                                !system.enabled ||
+                                !system.identityCompatible
+                            ? null
+                            : () => _run(() async {
+                                final sent = await _previewChatNotification();
+                                if (context.mounted) {
+                                  showLuminaMessage(
+                                    context,
+                                    sent ? '测试聊天通知已发送，点击可打开会话消息' : '测试聊天通知未能发送',
+                                  );
+                                }
+                              }),
+                        child: const Text('发送测试聊天通知'),
                       ),
                     ],
                   ),

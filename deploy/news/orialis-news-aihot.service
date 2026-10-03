@@ -1,0 +1,26 @@
+[Unit]
+Description=Orialis News AIHot source collection and publication
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hermes
+Group=hermes
+WorkingDirectory=/opt/orialis-news/current
+EnvironmentFile=/etc/orialis-news/worker.env
+ExecStart=/usr/bin/python3 /opt/orialis-news/current/scripts/news_sources.py --refresh aihot
+TimeoutStartSec=300
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/hermes/.hermes /var/lib/orialis-news
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:orialis_mobile/core/config/app_config.dart';
 import 'package:orialis_mobile/core/database/app_database.dart';
 import 'package:orialis_mobile/features/chat/data/agent_chat_service.dart';
@@ -10,12 +11,16 @@ import 'package:orialis_mobile/features/chat/data/chat_repository.dart';
 class _Config extends AppConfig {
   _Config(this.url);
   final String url;
+  String token = 'test-session';
+  String? username;
+  @override
+  Future<String?> sessionUsername() async => username;
   @override
   Future<String> serverUrl() async => url;
   @override
   Future<String> deviceId() async => 'phone';
   @override
-  Future<String?> sessionToken() async => 'test-session';
+  Future<String?> sessionToken() async => token;
 }
 
 void main() {
@@ -23,6 +28,12 @@ void main() {
   late AgentChatService service;
   final requests = <String>[];
   var bindingAvailable = true;
+  var changeIdentity = false;
+  var unavailable = false;
+  String? createdTitle;
+  int unavailableStatus = 503;
+  bool changeRegistryIdentity = false;
+  late _Config config;
   final remote = {
     'id': 'conversation-mac',
     'title': 'Mac 电脑',
@@ -32,18 +43,41 @@ void main() {
     'version': 1,
   };
   setUp(() async {
+    SharedPreferences.setMockInitialValues({});
     requests.clear();
     bindingAvailable = true;
+    changeIdentity = false;
+    unavailable = false;
+    createdTitle = null;
+    unavailableStatus = 503;
+    changeRegistryIdentity = false;
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    service = AgentChatService(_Config('http://127.0.0.1:${server.port}'));
+    config = _Config('http://127.0.0.1:${server.port}');
+    service = AgentChatService(config);
     server.listen((request) async {
-      expect(request.headers.value('Authorization'), 'Session test-session');
+      if (!unavailable) {
+        expect(request.headers.value('Authorization'), 'Session test-session');
+      }
       requests.add('${request.method} ${request.uri.path}');
       request.response.headers.contentType = ContentType.json;
-      if (request.uri.path == '/api/v1/agent/devices') {
+      if (unavailable) {
+        request.response.statusCode = unavailableStatus;
+        request.response.write('{}');
+      } else if (request.uri.path == '/api/v1/agent/devices') {
+        if (changeRegistryIdentity) config.token = 'another-account';
         request.response.write(
           jsonEncode({
             'devices': [
+              {
+                'deviceId': 'JXCZ_AOZORA_Codex',
+                'platform': 'linux',
+                'online': true,
+              },
+              {
+                'deviceId': 'TEST_MAC_Hermes',
+                'platform': 'macos',
+                'online': true,
+              },
               {
                 'deviceId': 'JXCZ_MBA_Hermes',
                 'platform': 'macos',
@@ -58,12 +92,15 @@ void main() {
           }),
         );
       } else if (request.method == 'POST') {
-        request.response.write(jsonEncode(remote));
+        final body = jsonDecode(await utf8.decoder.bind(request).join());
+        createdTitle = body['title'] as String?;
+        request.response.write(jsonEncode({...remote, 'title': createdTitle}));
       } else if (request.method == 'PUT') {
         final body = jsonDecode(await utf8.decoder.bind(request).join());
         expect(body['deviceId'], 'JXCZ_MBA_Hermes');
         request.response.statusCode = bindingAvailable ? 200 : 404;
         request.response.write('{}');
+        if (changeIdentity) config.token = 'another-account';
       } else if (request.method == 'GET') {
         request.response.write(
           jsonEncode({
@@ -79,12 +116,113 @@ void main() {
   });
   tearDown(() async => server.close(force: true));
 
-  test('real registry lists Mac and offline Aozora separately', () async {
+  test('registry exposes only Mac and Azure Hermes', () async {
     final devices = await service.devices();
-    expect(devices.map((d) => d.label), ['Mac 电脑', 'Aozora 服务器']);
+    expect(devices.map((d) => d.label), ['Mac 电脑', 'Azure 服务器']);
     expect(devices.last.online, false);
+    expect(devices.map((d) => d.id), ['JXCZ_MBA_Hermes', 'JXCZ_AOZORA_Hermes']);
     expect(await service.target('conversation-mac'), 'JXCZ_MBA_Hermes');
   });
+  test(
+    'configured missing Azure remains offline without choosing Codex',
+    () async {
+      final configured = AgentChatService(
+        config,
+        azureDeviceId: 'JXCZ_NEWAZURE_Hermes',
+      );
+      final devices = await configured.devices();
+      expect(devices.length, 2);
+      expect(devices.last.id, 'JXCZ_NEWAZURE_Hermes');
+      expect(devices.last.label, 'Azure 服务器');
+      expect(devices.last.online, false);
+    },
+  );
+  test('direct Codex or test device cannot bypass the picker', () async {
+    for (final id in ['JXCZ_AOZORA_Codex', 'TEST_MAC_Hermes']) {
+      await expectLater(
+        service.createConversation(
+          ChatAgentDevice(id: id, platform: 'linux', online: true),
+        ),
+        throwsStateError,
+      );
+    }
+    expect(requests, isEmpty);
+  });
+  test('verified binding history survives offline service restart', () async {
+    expect(await service.target('conversation-mac'), 'JXCZ_MBA_Hermes');
+    unavailable = true;
+    final restarted = AgentChatService(config);
+    expect(await restarted.target('conversation-mac'), 'JXCZ_MBA_Hermes');
+    await expectLater(
+      restarted.target('conversation-mac', requireOnline: true),
+      throwsException,
+    );
+    expect((await restarted.devices()).map((device) => device.online), [
+      false,
+      false,
+    ]);
+    config.token = 'another-account';
+    expect(await restarted.target('conversation-mac'), isNull);
+  });
+  test(
+    'device aliases persist per server session without changing routing',
+    () async {
+      await service.renameDevice('JXCZ_MBA_Hermes', '  工作 Mac  ');
+      final restarted = AgentChatService(config);
+      final device = (await restarted.devices()).first;
+      expect(device.label, '工作 Mac');
+      expect(device.id, 'JXCZ_MBA_Hermes');
+      await restarted.createConversation(device);
+      expect(createdTitle, '工作 Mac');
+      config.token = 'another-account';
+      unavailable = true;
+      expect((await restarted.devices()).first.label, 'Mac 电脑');
+      config.token = 'test-session';
+      expect((await restarted.devices()).first.label, '工作 Mac');
+    },
+  );
+  test('empty names never overwrite the saved device alias', () async {
+    await service.renameDevice('JXCZ_MBA_Hermes', '工作 Mac');
+    await expectLater(
+      service.renameDevice('JXCZ_MBA_Hermes', '   '),
+      throwsArgumentError,
+    );
+    expect((await service.devices()).first.label, '工作 Mac');
+  });
+  test(
+    'rejected binding clears cached history before a later outage',
+    () async {
+      expect(await service.target('conversation-mac'), 'JXCZ_MBA_Hermes');
+      unavailable = true;
+      unavailableStatus = 403;
+      await expectLater(service.target('conversation-mac'), throwsException);
+      unavailableStatus = 503;
+      expect(await AgentChatService(config).target('conversation-mac'), isNull);
+    },
+  );
+  test(
+    'account switch during registry lookup clears names and online state',
+    () async {
+      await service.renameDevice('JXCZ_MBA_Hermes', '工作 Mac');
+      changeRegistryIdentity = true;
+      final devices = await service.devices();
+      expect(devices.map((device) => device.online), [false, false]);
+      expect(devices.first.label, 'Mac 电脑');
+    },
+  );
+  test(
+    'device aliases survive same-account token renewal and isolate another username',
+    () async {
+      config.username = 'jxcz';
+      await service.renameDevice('JXCZ_MBA_Hermes', '工作 Mac');
+      config.token = 'renewed-session';
+      unavailable = true;
+      final restarted = AgentChatService(config);
+      expect((await restarted.devices()).first.label, '工作 Mac');
+      config.username = 'other-user';
+      expect((await restarted.devices()).first.label, 'Mac 电脑');
+    },
+  );
   test('create binds exact device before exposing conversation', () async {
     final result = await service.createConversation(
       (await service.devices()).first,
@@ -110,6 +248,16 @@ void main() {
     expect(requests.last, 'DELETE /api/v1/conversations/conversation-mac');
   });
   test(
+    'account change during binding fails closed with original session cleanup',
+    () async {
+      final device = (await service.devices()).first;
+      changeIdentity = true;
+      await expectLater(service.createConversation(device), throwsStateError);
+      expect(requests.last, 'DELETE /api/v1/conversations/conversation-mac');
+    },
+  );
+
+  test(
     'import confirmed device conversation keeps local messages separate',
     () async {
       final db = AppDatabase(executor: NativeDatabase.memory());
@@ -118,7 +266,7 @@ void main() {
       final aozora = await repo.importDeviceConversation({
         ...remote,
         'id': 'conversation-aozora',
-        'title': 'Aozora 服务器',
+        'title': 'Azure 服务器',
       });
       await repo.sendMessage(conversationId: mac.id, content: 'to Mac');
       await repo.sendMessage(conversationId: aozora.id, content: 'to Aozora');

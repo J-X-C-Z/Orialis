@@ -26,19 +26,23 @@ import '../../features/chat/presentation/agent_event_cards.dart';
 import '../../features/chat/presentation/message_action_panel.dart';
 import '../../features/chat/presentation/safe_markdown.dart';
 
-final agentChatServiceProvider = Provider<AgentChatService>(
-  (ref) => AgentChatService(ref.watch(appConfigProvider)),
-);
+final agentChatServiceProvider = Provider<AgentChatService>((ref) {
+  final service = AgentChatService(ref.watch(appConfigProvider));
+  ref.onDispose(service.dispose);
+  return service;
+});
 
 class ChatPage extends ConsumerStatefulWidget {
   const ChatPage({
     required this.repository,
     this.conversationId = 'default',
+    this.messageId,
     super.key,
   });
 
   final ChatRepository repository;
   final String conversationId;
+  final String? messageId;
 
   @override
   ConsumerState<ChatPage> createState() => _ChatPageState();
@@ -51,8 +55,27 @@ class _ChatPageState extends ConsumerState<ChatPage>
   Message? _replyMessage;
   int _historyStart = 0;
   String? _highlightMessageId;
+  String? _pendingNotificationMessageId;
+  StreamSubscription<List<Conversation>>? _notificationConversationSubscription;
+  Timer? _conversationPositionTimer;
   final _scrollController = ScrollController();
-  late final _conversationsStream = widget.repository.watchConversations();
+  late final _conversationsStream = widget.repository
+      .watchConversations()
+      .asyncMap((conversations) async {
+        final service = ref.read(agentChatServiceProvider);
+        final visible = await Future.wait(
+          conversations.map((conversation) async {
+            try {
+              final target = await service.target(conversation.id);
+              return service.isAllowedTarget(target) ? conversation : null;
+            } catch (_) {
+              return null;
+            }
+          }),
+        );
+        // Keep historical test/Codex records in storage, but close their UI.
+        return visible.whereType<Conversation>().toList();
+      });
   final _latestMessageAnchor = GlobalKey();
   final _imagePicker = ImagePicker();
   final _attachmentBridge = AttachmentBridge();
@@ -78,6 +101,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
   bool _followLatest = true, _hasNewMessages = false, _scrollScheduled = false;
   bool _userDragging = false;
   bool _imeAdjusting = false;
+  bool _imeAdjustmentScheduled = false;
   double _lastImeInset = 0;
   bool _positioningLatest = true;
   int _alignRetries = 0;
@@ -136,13 +160,19 @@ class _ChatPageState extends ConsumerState<ChatPage>
     final inset = View.of(context).viewInsets.bottom;
     if (inset == _lastImeInset) return;
     _lastImeInset = inset;
-    final shouldFollow = _followLatest && !_userDragging;
     _imeAdjusting = true;
+    // A native keyboard animation can report several insets in one frame.
+    // Follow the final layout once, preserving any intervening history drag.
+    if (_imeAdjustmentScheduled) return;
+    _imeAdjustmentScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _imeAdjustmentScheduled = false;
       if (!mounted) return;
-      if (shouldFollow && !_userDragging && _scrollController.hasClients) {
-        _followLatest = true;
-        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      if (_followLatest && !_userDragging && _scrollController.hasClients) {
+        final position = _scrollController.position;
+        if (position.extentAfter > .5) {
+          _scrollController.jumpTo(position.maxScrollExtent);
+        }
         _queueLatest();
       }
       _imeAdjusting = false;
@@ -271,6 +301,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
     WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_onScroll);
     _conversationId = widget.conversationId;
+    _highlightMessageId = widget.messageId;
     _chatController = ChatController(
       repository: widget.repository,
       flush: () async {
@@ -286,10 +317,65 @@ class _ChatPageState extends ConsumerState<ChatPage>
       if (!mounted) return;
       _enqueueAgentEvent(event);
     });
+    _openNotificationRoute();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.conversationId != widget.conversationId ||
+        oldWidget.messageId != widget.messageId) {
+      _openNotificationRoute();
+    }
+  }
+
+  void _openNotificationRoute() {
+    unawaited(_notificationConversationSubscription?.cancel());
+    _notificationConversationSubscription = null;
+    final messageId = widget.messageId;
+    if (messageId == null || messageId.isEmpty) return;
+    final conversationId = widget.conversationId;
+    _notificationConversationSubscription = widget.repository
+        .watchConversations()
+        .listen((conversations) async {
+          final conversation = conversations
+              .where((item) => item.id == conversationId)
+              .firstOrNull;
+          if (conversation == null) return;
+          final service = ref.read(agentChatServiceProvider);
+          String? target;
+          try {
+            target = await service.target(conversationId);
+          } catch (_) {
+            return;
+          }
+          if (!mounted ||
+              widget.conversationId != conversationId ||
+              widget.messageId != messageId ||
+              !service.isAllowedTarget(target)) {
+            return;
+          }
+          unawaited(_notificationConversationSubscription?.cancel());
+          _notificationConversationSubscription = null;
+          await _openConversation(conversation);
+          if (!mounted ||
+              widget.conversationId != conversationId ||
+              widget.messageId != messageId) {
+            return;
+          }
+          setState(() {
+            _highlightMessageId = messageId;
+            _pendingNotificationMessageId = messageId;
+            _followLatest = false;
+            _positioningLatest = false;
+          });
+        });
   }
 
   @override
   void dispose() {
+    _conversationPositionTimer?.cancel();
+    unawaited(_notificationConversationSubscription?.cancel());
     WidgetsBinding.instance.removeObserver(this);
     for (final waiter in _commandWaiters.values) {
       if (!waiter.isCompleted) waiter.complete(null);
@@ -317,36 +403,66 @@ class _ChatPageState extends ConsumerState<ChatPage>
 
   Future<void> _chooseChatDevice() async {
     if (_startingDeviceChat || _sending) return;
+    if (_controller.text.isNotEmpty ||
+        _attachments.isNotEmpty ||
+        _replyMessage != null) {
+      showLuminaToast(context, '当前草稿已保留，请先发送或清空，再新建设备对话。');
+      return;
+    }
     setState(() => _startingDeviceChat = true);
     try {
       final service = ref.read(agentChatServiceProvider);
-      final devices = await service.devices();
+      var devices = await service.devices();
       if (!mounted) return;
       final device = await showLuminaSheet<ChatAgentDevice>(
         context: context,
-        builder: (context) => SafeArea(
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('与设备对话'),
-                  const SizedBox(height: 12),
-                  if (devices.isEmpty)
-                    const Text('还没有连接的聊天设备。请在 Mac 或服务器启动 Orialis Agent。'),
-                  for (final device in devices)
-                    OrialisListRow(
-                      title: device.label,
-                      subtitle: '${device.id} · ${device.online ? "在线" : "离线"}',
-                      onTap: device.online
-                          ? () => Navigator.of(
-                              context,
-                              rootNavigator: true,
-                            ).pop(device)
-                          : null,
-                    ),
-                ],
+        builder: (context) => StatefulBuilder(
+          builder: (context, updateDevices) => SafeArea(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('与设备对话'),
+                    const SizedBox(height: 12),
+                    if (devices.isEmpty)
+                      const Text('请在 Mac 或 Azure 服务器启动 Hermes 网关。'),
+                    for (final device in devices)
+                      OrialisListRow(
+                        title: device.label,
+                        subtitle: '${device.online ? "在线" : "离线"} · Hermes',
+                        trailing: LuminaIconButton(
+                          tooltip: '修改设备名称',
+                          icon: const LuminaIcon(LuminaIcons.settings),
+                          onPressed: () async {
+                            final name = await _askChatName(
+                              title: '修改设备名称',
+                              initial: device.label,
+                              hint: '设备名称（仅本机）',
+                            );
+                            if (name == null || !mounted) return;
+                            try {
+                              await service.renameDevice(device.id, name);
+                              devices = await service.devices();
+                              if (context.mounted) updateDevices(() {});
+                              if (mounted) setState(() {});
+                            } catch (_) {
+                              if (mounted) {
+                                showLuminaToast(this.context, '设备名称未能保存，请重试。');
+                              }
+                            }
+                          },
+                        ),
+                        onTap: device.online
+                            ? () => Navigator.of(
+                                context,
+                                rootNavigator: true,
+                              ).pop(device)
+                            : null,
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -367,15 +483,27 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
   }
 
-  String get _chatDeviceLabel {
-    final id = _chatDeviceId;
-    if (id == null) return '选择聊天设备';
-    if (id.toLowerCase().contains('aozora')) return 'Aozora 服务器';
-    if (id.toLowerCase().contains('_mba_') ||
-        id.toLowerCase().contains('_mac_')) {
-      return 'Mac 电脑';
+  bool get _hasHermesTarget =>
+      ref.read(agentChatServiceProvider).isAllowedTarget(_chatDeviceId);
+
+  String get _chatDeviceLabel =>
+      ref.read(agentChatServiceProvider).targetLabel(_chatDeviceId) ?? '选择聊天设备';
+
+  Future<bool> _requireHermesTarget() async {
+    final conversationId = _conversationId;
+    try {
+      final service = ref.read(agentChatServiceProvider);
+      final target = await service.target(conversationId, requireOnline: true);
+      if (!mounted || _conversationId != conversationId) return false;
+      setState(() => _chatDeviceId = target);
+      if (_hasHermesTarget) return true;
+    } catch (_) {
+      if (!mounted) return false;
+      showLuminaToast(context, '暂时无法确认 Hermes 设备，请联网后重试。');
+      return false;
     }
-    return id;
+    showLuminaToast(context, '请通过设备入口新建 Mac 或 Azure 的 Hermes 对话。');
+    return false;
   }
 
   Future<void> _openConversation(Conversation conversation) async {
@@ -404,7 +532,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
     _queueLatest();
     // Safety valve: never leave the transcript blank if variable-height
     // bubbles keep revising the scroll extent.
-    Future<void>.delayed(const Duration(milliseconds: 400), () {
+    _conversationPositionTimer?.cancel();
+    _conversationPositionTimer = Timer(const Duration(milliseconds: 400), () {
       if (mounted && _positioningLatest) {
         setState(() => _positioningLatest = false);
       }
@@ -413,8 +542,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   Future<void> _createConversation() async {
-    final conversation = await widget.repository.createConversation();
-    if (mounted) await _openConversation(conversation);
+    await _chooseChatDevice();
   }
 
   Widget _conversationList() => OrialisPageScaffold(
@@ -565,7 +693,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                 Navigator.of(context, rootNavigator: true).pop('resetOrder'),
           ),
           OrialisListRow(
-            title: '重命名',
+            title: '修改会话名称',
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('rename'),
           ),
@@ -612,15 +740,19 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
   }
 
-  Future<void> _renameConversation(Conversation conversation) async {
-    final controller = TextEditingController(text: conversation.title);
-    final title = await showLuminaDialog<String>(
+  Future<String?> _askChatName({
+    required String title,
+    required String initial,
+    required String hint,
+  }) async {
+    final controller = TextEditingController(text: initial);
+    final name = await showLuminaDialog<String>(
       context: context,
-      title: '重命名会话',
+      title: title,
       content: LuminaTextField(
         controller: controller,
         autofocus: true,
-        hintText: '会话名称',
+        hintText: hint,
       ),
       actions: [
         LuminaButton(
@@ -629,19 +761,34 @@ class _ChatPageState extends ConsumerState<ChatPage>
           child: const Text('取消'),
         ),
         LuminaButton(
-          onPressed: () =>
-              Navigator.of(context, rootNavigator: true).pop(controller.text),
+          onPressed: () {
+            final value = controller.text.trim();
+            if (value.isEmpty || value.length > 60) {
+              showLuminaToast(context, '名称须为 1–60 个字符。');
+              return;
+            }
+            Navigator.of(context, rootNavigator: true).pop(value);
+          },
           child: const Text('保存'),
         ),
       ],
     );
     controller.dispose();
-    if (title != null && title.trim().isNotEmpty) {
-      await widget.repository.renameConversation(conversation, title);
-      if (mounted && conversation.id == _conversationId) {
-        setState(() => _conversationTitle = title.trim());
-      }
+    return name;
+  }
+
+  Future<void> _renameConversation(Conversation conversation) async {
+    final title = await _askChatName(
+      title: '修改会话名称',
+      initial: conversation.title,
+      hint: '会话名称',
+    );
+    if (title == null) return;
+    await widget.repository.renameConversation(conversation, title);
+    if (mounted && conversation.id == _conversationId) {
+      setState(() => _conversationTitle = title);
     }
+    unawaited(ref.read(syncCoordinatorProvider).requestSync());
   }
 
   Future<void> _sendAgentAction(
@@ -649,6 +796,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
     String requestId,
     Map<String, dynamic> payload,
   ) async {
+    if (!await _requireHermesTarget()) {
+      _agentEvents.actions.release(requestId);
+      throw StateError('未绑定 Hermes 设备');
+    }
     try {
       await ref
           .read(realtimeClientProvider)
@@ -1136,16 +1287,22 @@ class _ChatPageState extends ConsumerState<ChatPage>
   Future<void> _addPaths(Iterable<String> paths) async {
     final additions = <AttachmentRecord>[];
     for (final path in paths) {
-      final file = File(path);
-      if (!await file.exists()) continue;
-      final size = await file.length();
-      if (size == 0 || size > 20 * 1024 * 1024) {
-        if (mounted) {
-          showLuminaToast(context, '${path.split('/').last} 超过 20 MB 或为空');
+      try {
+        final file = File(path);
+        if (!await file.exists()) throw StateError('附件文件已不可用');
+        final size = await file.length();
+        if (size == 0 || size > 20 * 1024 * 1024) {
+          if (mounted) {
+            showLuminaToast(context, '${path.split('/').last} 超过 20 MB 或为空');
+          }
+          continue;
         }
-        continue;
+        additions.add(await _attachmentBridge.importFile(path));
+      } catch (_) {
+        if (mounted) {
+          showLuminaToast(context, '${path.split('/').last} 未能添加，请重新选择。');
+        }
       }
-      additions.add(await _attachmentBridge.importFile(path));
     }
     if (mounted && additions.isNotEmpty) {
       setState(() => _attachments.addAll(additions));
@@ -1156,6 +1313,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
     if (_sending || (_controller.text.trim().isEmpty && _attachments.isEmpty)) {
       return;
     }
+    setState(() => _sending = true);
+    if (!await _requireHermesTarget()) {
+      if (mounted) setState(() => _sending = false);
+      return;
+    }
+    if (!mounted) return;
     final content = _controller.text;
     final attachments = List<AttachmentRecord>.from(_attachments);
     final reply = _replyMessage;
@@ -1165,7 +1328,6 @@ class _ChatPageState extends ConsumerState<ChatPage>
       _attachments.clear();
       _replyMessage = null;
     });
-    setState(() => _sending = true);
     _followLatest = true;
     _hasNewMessages = false;
     try {
@@ -1202,8 +1364,14 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   Future<void> _retryMessage(String messageId) async {
+    if (_sending) return;
+    setState(() => _sending = true);
+    if (!await _requireHermesTarget()) {
+      if (mounted) setState(() => _sending = false);
+      return;
+    }
+    if (!mounted) return;
     setState(() {
-      _sending = true;
       _failedMessages.remove(messageId);
     });
     try {
@@ -1264,6 +1432,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
         mainAxisSize: MainAxisSize.min,
         children: [
           OrialisListRow(
+            title: '修改会话名称',
+            leading: const LuminaIcon(LuminaIcons.settings),
+            onTap: () =>
+                Navigator.of(context, rootNavigator: true).pop('rename'),
+          ),
+          OrialisListRow(
             title: '模型与思考强度',
             leading: const LuminaIcon(LuminaIcons.sparkles),
             onTap: () =>
@@ -1293,6 +1467,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
       ),
     );
     if (!mounted) return;
+    if (action == 'rename') {
+      final conversations = await widget.repository.watchConversations().first;
+      final current = conversations.where((item) => item.id == _conversationId);
+      if (mounted && current.isNotEmpty) {
+        await _renameConversation(current.first);
+      }
+    }
     if (action == 'model') await _showModelSettings();
     if (action == 'command') await _showHermesCommand();
     if (action == 'delivery') await _showDeliveryControls();
@@ -1465,6 +1646,19 @@ class _ChatPageState extends ConsumerState<ChatPage>
                         card: false,
                       ),
                       data: (items) {
+                        final notificationMessage =
+                            _pendingNotificationMessageId;
+                        if (notificationMessage != null &&
+                            items.any(
+                              (item) => item.id == notificationMessage,
+                            )) {
+                          _pendingNotificationMessageId = null;
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted) {
+                              _jumpToQuotedMessage(notificationMessage, items);
+                            }
+                          });
+                        }
                         // Identity + length + content hash detects a new final
                         // message without building a full-body signature string.
                         final last = items.isEmpty ? null : items.last;

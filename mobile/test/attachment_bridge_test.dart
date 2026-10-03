@@ -5,6 +5,33 @@ import 'package:orialis_mobile/core/attachments/attachment_bridge.dart';
 
 void main() {
   test(
+    'preserves text and structured file MIME types for Hermes documents',
+    () async {
+      final root = await Directory.systemTemp.createTemp('orialis-text-');
+      addTearDown(() => root.delete(recursive: true));
+      final bridge = AttachmentBridge(
+        directoryProvider: () async => Directory('${root.path}/private'),
+      );
+      for (final entry in {
+        '笔记.TXT': 'text/plain',
+        'notes.md': 'text/markdown',
+        'table.csv': 'text/csv',
+        'data.json': 'application/json',
+        'data.xml': 'application/xml',
+        'config.yaml': 'text/plain',
+        'archive.bin': 'application/octet-stream',
+      }.entries) {
+        final source = File('${root.path}/${entry.key}')
+          ..writeAsStringSync('附件内容');
+        final record = await bridge.importFile(source.path);
+        expect(record.mimeType, entry.value);
+        await source.delete();
+        expect(await File(record.localPath).readAsString(), '附件内容');
+      }
+    },
+  );
+
+  test(
     'imports a selected file into the private persistent directory',
     () async {
       final root = await Directory.systemTemp.createTemp(
@@ -48,9 +75,7 @@ void main() {
       expect(decoded.status, AttachmentStatus.failed);
       expect(decoded.attempts, 2);
       expect(decoded.lastError, 'timeout');
-      expect(decoded.toMessageJson({'id': 'att-1'}), {
-        'id': 'att-1',
-      });
+      expect(decoded.toMessageJson({'id': 'att-1'}), {'id': 'att-1'});
       expect(
         decoded.toMessageJson({'id': 'att-1'}),
         isNot(contains('localPath')),

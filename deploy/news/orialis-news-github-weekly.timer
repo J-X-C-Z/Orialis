@@ -1,0 +1,11 @@
+[Unit]
+Description=Publish Orialis News GitHub weekly Monday 18:15 Asia Shanghai
+
+[Timer]
+OnCalendar=Mon *-*-* 18:15:00 Asia/Shanghai
+AccuracySec=1min
+Persistent=true
+Unit=orialis-news-github-weekly.service
+
+[Install]
+WantedBy=timers.target

@@ -10,6 +10,8 @@ import 'package:orialis_mobile/core/realtime/mobile_realtime_client.dart';
 import 'package:orialis_mobile/core/sync/sync_coordinator.dart';
 import 'package:orialis_mobile/core/sync/sync_engine.dart';
 import 'package:orialis_mobile/features/chat/data/chat_repository.dart';
+import 'package:orialis_mobile/features/chat/data/agent_chat_service.dart';
+import 'package:orialis_mobile/pages/chat/chat_page.dart';
 import 'package:orialis_mobile/features/chat/presentation/agent_event_cards.dart';
 import 'package:orialis_mobile/features/chat/presentation/safe_markdown.dart';
 
@@ -20,6 +22,15 @@ class _Config extends AppConfig {
   Future<String?> sessionUsername() async => null;
   @override
   Future<String> deviceId() async => 'offline-chat-test';
+}
+
+class _HermesChatService extends AgentChatService {
+  _HermesChatService() : super(_Config());
+  @override
+  Future<String?> target(
+    String conversationId, {
+    bool requireOnline = false,
+  }) async => 'JXCZ_MBA_Hermes';
 }
 
 class _Realtime extends MobileRealtimeClient {
@@ -89,6 +100,7 @@ openChat(WidgetTester tester, {bool largeDark = false}) async {
         appConfigProvider.overrideWithValue(_Config()),
         realtimeClientProvider.overrideWithValue(realtime),
         syncCoordinatorProvider.overrideWithValue(sync),
+        agentChatServiceProvider.overrideWithValue(_HermesChatService()),
       ],
       child: const OrialisApp(),
     ),

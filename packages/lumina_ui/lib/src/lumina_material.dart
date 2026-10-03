@@ -1,5 +1,85 @@
 part of 'design_components.dart';
 
+/// The same material as a raised LuminaSurface, painted behind a lazy sliver.
+/// Keeps one continuous card while its inset rows remain lazily mounted.
+class LuminaCardDecoration extends Decoration {
+  LuminaCardDecoration.of(
+    BuildContext context, {
+    double radius = 28,
+    this.title,
+    this.shoulder = false,
+    this.shoulderTrailingSpace = 0,
+  }) : colors = LuminaTheme.of(context).colors,
+       titleStyle = LuminaTheme.of(context).textTheme.cardTitle,
+       textDirection = Directionality.of(context),
+       textScaler = MediaQuery.textScalerOf(context),
+       radius = radius * LuminaTheme.of(context).data.radiusScale,
+       highPerformance = LuminaTheme.of(context).highPerformanceMode,
+       contrast = MediaQuery.maybeOf(context)?.highContrast ?? false;
+
+  final LuminaColors colors;
+  final double radius;
+  final bool highPerformance;
+  final bool contrast;
+  final String? title;
+  final bool shoulder;
+  final double shoulderTrailingSpace;
+  final TextStyle titleStyle;
+  final TextDirection textDirection;
+  final TextScaler textScaler;
+
+  @override
+  BoxPainter createBoxPainter([VoidCallback? onChanged]) =>
+      _LuminaCardBoxPainter(this, onChanged);
+}
+
+class _LuminaCardBoxPainter extends BoxPainter {
+  _LuminaCardBoxPainter(this.decoration, super.onChanged);
+  final LuminaCardDecoration decoration;
+
+  @override
+  void paint(Canvas canvas, Offset offset, ImageConfiguration configuration) {
+    final size = configuration.size;
+    if (size == null || size.isEmpty) return;
+    canvas.save();
+    canvas.translate(offset.dx, offset.dy);
+    double? shoulderWidth;
+    if (decoration.shoulder && decoration.title != null) {
+      final titlePainter =
+          TextPainter(
+            text: TextSpan(
+              text: decoration.title,
+              style: decoration.titleStyle,
+            ),
+            textDirection: decoration.textDirection,
+            textScaler: decoration.textScaler,
+          )..layout(
+            maxWidth: math.max(
+              1,
+              size.width - 32 - decoration.shoulderTrailingSpace,
+            ),
+          );
+      final lines = titlePainter.computeLineMetrics();
+      shoulderWidth = 16 + (lines.isEmpty ? 0 : lines.first.width) + 28;
+      titlePainter.dispose();
+    }
+    _LuminaMaterial(
+      colors: decoration.colors,
+      tint: decoration.colors.raisedSurface,
+      radius: decoration.radius,
+      depth: LuminaSurfaceDepth.raised,
+      shoulder: decoration.shoulder,
+      shoulderWidth: shoulderWidth,
+      contrast: decoration.contrast,
+      focused: false,
+      pressed: false,
+      cheapShadow: decoration.highPerformance,
+      physicalShadow: true,
+    ).paint(canvas, size);
+    canvas.restore();
+  }
+}
+
 /// One top-left light source across section cards, controls and inset rows.
 class _LuminaMaterial extends CustomPainter {
   const _LuminaMaterial({
@@ -16,6 +96,7 @@ class _LuminaMaterial extends CustomPainter {
     this.diffuseGlass = false,
     this.liquidGlass = false,
     this.cheapShadow = false,
+    this.physicalShadow = false,
     this.blurCompensation = 0,
   });
 
@@ -29,6 +110,7 @@ class _LuminaMaterial extends CustomPainter {
   final bool diffuseGlass;
   final bool liquidGlass;
   final bool cheapShadow;
+  final bool physicalShadow;
 
   /// 0–1 — rises as blur level drops so tint + micro-noise + rim replace sigma.
   final double blurCompensation;
@@ -177,8 +259,14 @@ class _LuminaMaterial extends CustomPainter {
       if (!cheapShadow) {
         shadowPaint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
       }
-      canvas.drawPath(path.shift(Offset(2, pressed ? 1 : 5)), shadowPaint);
-      if (cheapShadow) {
+      if (cheapShadow && physicalShadow) {
+        // Group cards retain a soft shadow in performance mode without a
+        // per-card mask-filter layer. Individual inset rows stay inexpensive.
+        canvas.drawShadow(path, shade.withValues(alpha: .32), 4, false);
+      } else {
+        canvas.drawPath(path.shift(Offset(2, pressed ? 1 : 5)), shadowPaint);
+      }
+      if (cheapShadow && !physicalShadow) {
         canvas.drawPath(
           path.shift(Offset(1, pressed ? 0 : 2)),
           Paint()..color = shade.withValues(alpha: .10),
@@ -571,5 +659,6 @@ class _LuminaMaterial extends CustomPainter {
       old.diffuseGlass != diffuseGlass ||
       old.liquidGlass != liquidGlass ||
       old.cheapShadow != cheapShadow ||
+      old.physicalShadow != physicalShadow ||
       old.blurCompensation != blurCompensation;
 }

@@ -9,6 +9,7 @@
 - Hermes → Orialis：文本回复，以及通过 Server HTTP 文件 API 上传的图片或文档附件。
 - 多 Agent 设备：每个 Hermes 安装使用独立、稳定的设备 ID；服务端可将账号消息路由到当前选中的在线设备。
 - 聊天创建日程：Hermes 提供 `create_schedule`，接收标题、RFC 3339 起止时间，以及可选描述、地点、全天、重要程度和提醒设置。插件通过配置的 Agent Bearer token 调用 `/api/v1/schedules`；服务端将新日程写入既有同步流。
+- 资讯发布：Hermes 注册单一 `news.publish` 工具，通过受限 dataset 枚举发布 AIHOT 热点/条目/事件/报告、GitHub 每周或每日榜单，以及 Orialis 项目报告。插件只将 dataset 映射到固定 REST 路由；source、taskId 和 idempotencyKey 由插件生成，调用方不能提供 URL、路径、用户 ID 或任务 ID。项目报告可选传入 `projectId`，服务端仍会验证该项目归属。
 - 用户域 HTTP 工具：插件提供经过显式输入校验、全部使用 `Authorization: Bearer $ORIALIS_DEVICE_TOKEN` 的异步工具，覆盖任务 CRUD、项目 CRUD/summary、里程碑 CRUD、`/schedules` 与 `/calendar-events` CRUD、会话 CRUD，以及会话消息的 list/create。PATCH 和 DELETE 始终要求 `baseVersion`；消息附件仍由既有 adapter/HTTP 附件 API 处理。
 - 协议错误会生成 `error` 帧；未知类型或格式错误不应使插件进程退出。
 
@@ -28,7 +29,11 @@ request/delivery ID 并按能力协商执行。调度触发仍由 Hermes Cron �
 | --- | --- | --- |
 | `ORIALIS_SERVER_URL` | 是 | Agent Gateway WebSocket URL，例如 `ws://127.0.0.1:18443/api/v1/agent/ws`。附件 HTTP 地址从同一服务派生。 |
 | `ORIALIS_DEVICE_ID` | 是 | 稳定设备 ID，格式为 `<USER>_<DEVICE>_<Agent>`，例如 `JXCZ_MBA_Hermes`。每段仅允许 ASCII 字母或数字，长度为 2–24；总长度不超过 80。 |
-| `ORIALIS_DEVICE_TOKEN` | 创建日程必需 | 创建日程时必须与服务端 `ORIALIS_AGENT_DEVICE_TOKEN` 一致；Gateway 启用 Agent 认证时也必须配置。 |
+| `ORIALIS_ALLOWED_USERS` | 聊天授权必需 | 设置为该网关自己的 `ORIALIS_DEVICE_ID`（例如 `JXCZ_MBA_Hermes`）。插件把已通过服务端鉴权的入站消息映射为此发送者；Hermes 默认拒绝未授权发送者。不要用全局 allow-all 替代。 |
+| `ORIALIS_DEVICE_TOKEN` | 用户域工具必需 | 必须与服务端 `ORIALIS_AGENT_DEVICE_TOKEN` 一致，由服务端绑定用户；Gateway 启用 Agent 认证时也必须配置。 |
+| `ORIALIS_NEWS_PUBLISHER_TOKEN` | 发布资讯必需 | 单独的资讯发布 Bearer secret；不能用 `ORIALIS_DEVICE_TOKEN` 代替。必须与 Orialis 服务端配置的 `ORIALIS_NEWS_PUBLISHER_TOKEN` 一致。 |
+
+服务端还必须设置 `ORIALIS_NEWS_PUBLISHER_USER_ID`，将 publisher token 绑定到一个已存在的 Orialis 用户。资讯会发布到该用户名下；客户端不能覆盖该绑定。项目报告带有 `projectId` 时，服务端会再检查项目是否属于这个用户。不要将 publisher secret 提交到仓库或写入日志。
 
 仓库级静态/协议门禁可运行 `python scripts/validate-contracts.py`。若要运行
 依赖 Hermes `gateway` 包的完整插件测试，使用 Hermes 虚拟环境：
@@ -39,6 +44,13 @@ HERMES_PYTHON=/path/to/hermes/venv/bin/python scripts/validate-hermes-plugin.sh
 
 生产环境请启用并配置设备 token。插件通过 `Authorization: Bearer <device-token>` 认证；不要将 token 提交到仓库或写入日志。开发模式下，仅当服务端 token 未设置时，允许本机未认证连接。
 
+完整用户域工具需在 Hermes `platform_toolsets` 中为 `orialis` 启用
+`[hermes-cli, orialis]`，并将 `ORIALIS_ALLOWED_USERS` 精确设为当前设备 ID。
+接收手机附件时，`ORIALIS_SERVER_URL` 应与服务端生成的附件链接使用同一来源
+（例如 `wss://orialis.jxcz.top/api/v1/agent/ws` 对应 HTTPS 下载链接）；
+不要通过关闭来源检查解决公网链接与 loopback 网关地址不一致的问题。
+Schedule 单条读取通过既有集合分页查找，服务端没有单条 GET 路由。
+
 ## macOS / Windows
 
 两平台配置项和协议完全相同。分别在运行 Hermes 的进程环境中设置变量，然后重启或重新加载 Hermes 插件：
@@ -48,7 +60,9 @@ macOS（shell）：
 ```sh
 export ORIALIS_SERVER_URL='ws://127.0.0.1:18443/api/v1/agent/ws'
 export ORIALIS_DEVICE_ID='JXCZ_MBA_Hermes'
+export ORIALIS_ALLOWED_USERS='JXCZ_MBA_Hermes'
 export ORIALIS_DEVICE_TOKEN='替换为服务端设备 token'
+export ORIALIS_NEWS_PUBLISHER_TOKEN='替换为服务端资讯 publisher token'
 ```
 
 Windows PowerShell：
@@ -56,7 +70,9 @@ Windows PowerShell：
 ```powershell
 $env:ORIALIS_SERVER_URL = 'ws://127.0.0.1:18443/api/v1/agent/ws'
 $env:ORIALIS_DEVICE_ID = 'JXCZ_WIN_Hermes'
+$env:ORIALIS_ALLOWED_USERS = 'JXCZ_WIN_Hermes'
 $env:ORIALIS_DEVICE_TOKEN = '替换为服务端设备 token'
+$env:ORIALIS_NEWS_PUBLISHER_TOKEN = '替换为服务端资讯 publisher token'
 ```
 
 本地服务使用 `ws://`；启用 TLS 的服务使用 `wss://`。Windows 的路径会被插件转换为安全的文件名，不能通过附件名称写入任意目录；macOS 同样适用。
@@ -134,6 +150,10 @@ Session 也分两种：插件使用 WebSocket 握手中的设备 token；Orialis
 
 检查服务端的 `ORIALIS_AGENT_DEVICE_TOKEN` 与客户端 `ORIALIS_DEVICE_TOKEN` 是否完全一致，并确认 token 没有被额外引号或空格包裹。不要把 token 发到聊天或日志中。
 
+**设备在线但不回复，日志出现 Unauthorized user**
+
+在该 Hermes profile 的 `.env` 设置 `ORIALIS_ALLOWED_USERS` 为该网关自己的 `ORIALIS_DEVICE_ID`，仅重启该 profile 网关。已有连接不能证明发送者授权通过；应核对入站消息、`message.reply` 发送和服务端回复落盘。
+
 **设备在线但收不到移动端消息**
 
 检查 `ORIALIS_DEVICE_ID` 是否唯一且符合三段格式。多用户数据库还需要在服务端设置 `ORIALIS_AGENT_USER_ID`；随后通过 `GET /api/v1/agent/devices` 查看设备，并用 `POST /api/v1/agent/devices/{device_id}/select` 选择目标设备。
@@ -156,3 +176,41 @@ The plugin checks are intentionally split into three layers:
    `test_*.py` module under this plugin.
 
 Local Hermes-runtime validation is an optional fourth layer using `scripts/validate-hermes-plugin.sh`; it validates the manifest and repeats full discovery with the Hermes Python runtime.
+
+## 批量创建
+
+`create_schedules`（日程）、`create_tasks`（任务）、`create_projects`、
+`create_milestones`、`create_conversations`、`create_messages` 支持
+`{"items": [...]}`，每批 1–200 条；兼容入口 `create_calendar_events` 同样可用。
+每项字段与对应单条创建工具一致，里程碑每项含 `projectId`，消息每项含
+`conversationId`。整学期课表可用一次 `create_schedules` 调用录入。
+
+插件先完成整批本地结构和日程时间校验；发现坏项返回 `validationIndex`
+（从 0 开始）和 `written: 0`，不会发出写入请求。服务器仍负责账号、
+关联资源、日期等最终校验。随后按输入顺序调用现有 HTTP 接口，不是事务，
+一项失败后继续后续项。响应含 `atomic: false`、`total`、`succeeded`、
+`failed` 和逐项 `results`；每项包含 `index`、`submitted`、`ok` 和结果或错误。
+`succeeded` 是成功响应数（服务端可能返回已有 ID），不代表全为新增。
+
+除里程碑外，缺失 ID 会在请求前生成，并放入 `submitted` 供核对。
+同批重复 ID 在写入前拒绝。插件不自动重试；网络中断、服务端 5xx 或
+不可解析的写入响应标记 `outcomeUnknown: true`，需先读取核对是否已写入，
+再决定是否重试。禁止直接重放整批；里程碑由服务端生成 ID，尤其需要先核对。
+批量上限不改变服务器每项目最多 100 个里程碑的限制。
+
+```json
+{
+  "items": [
+    {"title": "高等数学", "startAt": "2026-10-05T08:00:00+08:00", "endAt": "2026-10-05T09:35:00+08:00", "location": "教学楼 201"},
+    {"title": "大学英语", "startAt": "2026-10-05T10:00:00+08:00", "endAt": "2026-10-05T11:35:00+08:00"}
+  ]
+}
+```
+
+### 附件缓存
+
+下载的附件保存在当前 Hermes profile 的 `HERMES_HOME/cache/orialis-attachments/`，
+按服务、设备和凭据指纹隔离。回复结束、断连和网关重启不删除已下载文件，
+后续对话可继续读取原路径；同名附件有独立路径。默认保留收件或本轮处理结束后的
+30 天，在下次接收附件时清理过期且未在处理中的目录。模型直接读取文件不延长
+该期限。下载失败的半成品会删除，完整文件可在重试或重启后复用。

@@ -277,7 +277,7 @@ export function setupDemos(): { open(kind: DemoKind): void; close(): void } {
     mdn.target = '_blank';
     mdn.rel = 'noopener noreferrer';
     const trending = element('a', undefined, 'GitHub · Trending');
-    trending.href = 'https://github.com/trending';
+    trending.href = 'https://githot.dev/';
     trending.target = '_blank';
     trending.rel = 'noopener noreferrer';
     const mdnItem = element('li');

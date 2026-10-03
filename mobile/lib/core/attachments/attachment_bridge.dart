@@ -139,6 +139,15 @@ class AttachmentBridge {
       'gif': 'image/gif',
       'webp': 'image/webp',
       'pdf': 'application/pdf',
+      'txt': 'text/plain',
+      'md': 'text/markdown',
+      'markdown': 'text/markdown',
+      'csv': 'text/csv',
+      'log': 'text/plain',
+      'json': 'application/json',
+      'xml': 'application/xml',
+      'yaml': 'text/plain',
+      'yml': 'text/plain',
     };
     return types[extension] ?? 'application/octet-stream';
   }

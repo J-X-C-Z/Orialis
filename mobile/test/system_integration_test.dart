@@ -107,6 +107,50 @@ void main() {
     );
   }
   test(
+    'chat and schedule notices use scoped native adapter after opt in',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final db = AppDatabase(executor: AppDatabase.inMemoryExecutor());
+      const channel = MethodChannel('test/system-notifications');
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            return true;
+          });
+      final controller = SystemIntegrationController(
+        database: db,
+        config: FakeConfig(),
+        channel: channel,
+        supported: true,
+      );
+      await controller.start();
+      expect(await controller.previewChatMessage(), isFalse);
+      await controller.setEnabled(true);
+      expect(await controller.previewChatMessage(), isTrue);
+      expect(
+        await controller.notifyScheduleUpdate({
+          'eventId': 'event-1',
+          'notificationId': 'delivery-1',
+          'action': 'updated',
+        }),
+        isTrue,
+      );
+      final chat = calls.singleWhere(
+        (call) => call.method == 'testChatMessage',
+      );
+      expect((chat.arguments as Map)['conversationId'], 'default');
+      expect((chat.arguments as Map)['scope'], isNotEmpty);
+      expect((chat.arguments as Map).containsKey('token'), isFalse);
+      expect(
+        calls.any((call) => call.method == 'notifyScheduleUpdate'),
+        isTrue,
+      );
+      await controller.dispose();
+      await db.close();
+    },
+  );
+  test(
     'native refreshes serialize even while newer snapshots arrive',
     () async {
       SharedPreferences.setMockInitialValues({});

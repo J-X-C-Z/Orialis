@@ -130,6 +130,7 @@ void main() {
                             ),
                             LuminaCheck(value: true, onChanged: (_) {}),
                             LuminaSegmented<int>(
+                              transparent: true,
                               items: const {0: 'Today', 1: 'Week', 2: 'Month'},
                               value: 0,
                               onChanged: (_) {},
@@ -180,6 +181,7 @@ void main() {
                     children: [
                       const Text('Accessible surface'),
                       LuminaSegmented<int>(
+                        transparent: true,
                         items: const {0: 'Today', 1: 'Week'},
                         value: 0,
                         onChanged: (_) {},

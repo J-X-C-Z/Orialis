@@ -109,6 +109,11 @@ void main() {
     await tester.longPress(find.text('长按这条消息', findRichText: true).first);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('message-action-panel')), findsOneWidget);
+    final panel = tester.widget<LuminaSurface>(
+      find.byKey(const ValueKey('message-action-panel')),
+    );
+    expect(panel.glass, isFalse);
+    expect(panel.liquidGlass, isFalse);
     expect(find.text('复制'), findsOneWidget);
     await tester.tap(find.text('引用'));
     await tester.pumpAndSettle();
@@ -232,7 +237,9 @@ void main() {
         .position;
     expect(position.extentAfter, lessThan(1));
     final inputTop = tester.getTopLeft(find.byType(LuminaTextField).last).dy;
-    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    for (final inset in [40.0, 80.0, 160.0, 240.0, 300.0]) {
+      tester.view.viewInsets = FakeViewPadding(bottom: inset);
+    }
     await tester.pumpAndSettle();
     expect(
       tester.getTopLeft(find.byType(LuminaTextField).last).dy,
@@ -243,12 +250,35 @@ void main() {
     await tester.pumpAndSettle();
     final historyPosition = position.pixels;
     expect(position.extentAfter, greaterThan(72));
-    tester.view.viewInsets = const FakeViewPadding();
+    for (final inset in [240.0, 160.0, 80.0, 0.0]) {
+      tester.view.viewInsets = FakeViewPadding(bottom: inset);
+    }
     await tester.pumpAndSettle();
     expect(position.pixels, closeTo(historyPosition, 1));
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
   });
+
+  testWidgets(
+    'chat composer reopens the dismissed keyboard without losing the draft',
+    (tester) async {
+      await openChat(tester);
+      final composer = find.byType(EditableText).last;
+      await tester.tap(composer);
+      await tester.pumpAndSettle();
+      await tester.enterText(composer, '还没发送的草稿');
+      final focus = tester.widget<EditableText>(composer).focusNode;
+      tester.testTextInput.hide();
+      expect(focus.hasFocus, isTrue);
+      expect(tester.testTextInput.isVisible, isFalse);
+      await tester.tap(composer);
+      await tester.pumpAndSettle();
+      expect(tester.testTextInput.isVisible, isTrue);
+      expect(tester.widget<EditableText>(composer).controller.text, '还没发送的草稿');
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    },
+  );
 
   test('shortcuts exclude CLI-only commands and global model mutation', () {
     final commands = hermesShortcuts.map((item) => item.command.trim()).toSet();

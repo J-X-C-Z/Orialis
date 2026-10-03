@@ -6,9 +6,12 @@ import 'news/news_data.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  debugPrint('Orialis desktop: loading preferences');
   await LuminaCardMemory.initialize();
+  debugPrint('Orialis desktop: resolving account');
   final config = AppConfig(desktop: true);
   final databaseName = await config.desktopDatabaseName();
+  debugPrint('Orialis desktop: starting UI');
   runApp(
     ProviderScope(
       overrides: [

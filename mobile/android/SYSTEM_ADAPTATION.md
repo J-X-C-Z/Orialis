@@ -37,6 +37,12 @@ be reported separately.
 - `previewReminder`: user-invoked ordinary test notification with fixed generic
   text and `/today` navigation; requires a current projection and notification
   permission. Does not create a task or schedule.
+- `notifyChatMessage` / `testChatMessage`: account-scoped message notice and
+  test path; taps navigate to the existing chat page using conversation/message
+  query IDs. Permission is never requested implicitly.
+- `notifyScheduleUpdate` / `testScheduleUpdate`: show an account-scoped schedule
+  change notice. The realtime adapter syncs first, then refreshes the local
+  schedule projection so edits/deletions replace old alarms by event ID.
 - `initialRoute`: consumes a pending cold-launch `{route, scope}` map once.
   Hot launch calls Dart `openRoute` with the same map. Dart must reject a nonempty
   scope that differs from its current authenticated identity. The native host
@@ -87,7 +93,10 @@ Force-stop prevents delivery until the user relaunches the app.
 Business alarm and widget receivers are not exported. The exported lifecycle
 receiver only handles Android's protected boot/time/package/alarm-permission
 broadcasts. MainActivity has no generic app URI scheme registration. Routes are
-restricted to existing read-only screens and `/calendar/schedule/<id>?date=...`.
+restricted to existing screens, `/calendar/schedule/<id>?date=...`, and
+`/chat?conversationId=<id>&messageId=<id>`. Proposed `orialis://` links are
+translated to these internal MethodChannel routes, not registered as generic
+Android intent filters.
 Notifications are VISIBILITY_PRIVATE with generic public lock-screen text.
 The desktop widget displays the selected projection to whoever can see the home
 screen; its publication therefore requires the app's explicit opt-in.

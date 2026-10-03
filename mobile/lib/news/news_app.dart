@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,13 +7,47 @@ import 'package:go_router/go_router.dart';
 import '../app/design/lumina_compat.dart';
 import '../core/config/app_config.dart';
 import '../core/network/orialis_api_client.dart';
+import '../pages/shared/mobile_navigation.dart';
 import 'news_data.dart';
 import 'news_pages.dart';
+import 'news_motion.dart';
 
 final newsAppearanceProvider =
     StateNotifierProvider<_NewsAppearanceController, ThemeMode>(
       (ref) => _NewsAppearanceController(ref.watch(newsConfigProvider)),
     );
+
+final newsHighPerformanceModeProvider =
+    StateNotifierProvider<_NewsHighPerformanceModeController, bool>(
+      (ref) =>
+          _NewsHighPerformanceModeController(ref.watch(newsConfigProvider)),
+    );
+
+class _NewsHighPerformanceModeController extends StateNotifier<bool> {
+  _NewsHighPerformanceModeController(this.config) : super(true) {
+    _load();
+  }
+
+  final AppConfig config;
+  int _revision = 0;
+
+  Future<void> _load() async {
+    final saved = await config.highPerformanceMode();
+    if (mounted && _revision == 0) state = saved;
+  }
+
+  Future<void> setEnabled(bool value) async {
+    final previous = state;
+    final revision = ++_revision;
+    state = value;
+    try {
+      await config.setHighPerformanceMode(value);
+    } catch (_) {
+      if (mounted && revision == _revision) state = previous;
+      rethrow;
+    }
+  }
+}
 
 class _NewsAppearanceController extends StateNotifier<ThemeMode> {
   _NewsAppearanceController(this.config) : super(ThemeMode.system) {
@@ -48,16 +83,30 @@ class OrialisNewsApp extends ConsumerWidget {
     };
     return LuminaTheme(
       brightness: brightness,
+      highPerformanceMode: ref.watch(newsHighPerformanceModeProvider),
       data: const LuminaThemeData(),
       child: MaterialApp(
         title: 'Orialis 资讯',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(useMaterial3: true, brightness: Brightness.light),
-        darkTheme: ThemeData(useMaterial3: true, brightness: Brightness.dark),
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
         themeMode: mode,
-        builder: (context, child) => Material(
-          color: LuminaTheme.of(context).colors.paper,
-          child: child ?? const SizedBox.shrink(),
+        builder: (context, child) => LuminaMaterialBridge(
+          child: DefaultTextStyle(
+            style: LuminaTheme.of(context).textTheme.bodyMedium,
+            child: IconTheme(
+              data: IconThemeData(color: LuminaTheme.of(context).colors.muted),
+              child: AnnotatedRegion<SystemUiOverlayStyle>(
+                value: brightness == Brightness.dark
+                    ? SystemUiOverlayStyle.light
+                    : SystemUiOverlayStyle.dark,
+                child: Material(
+                  color: LuminaTheme.of(context).colors.paper,
+                  child: child ?? const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          ),
         ),
         home: const NewsHomePage(),
       ),
@@ -94,14 +143,14 @@ class _DesktopNewsPageState extends State<DesktopNewsPage> {
     },
     leading: const _NewsBrandLogo(),
     actions: [
-      IconButton(
+      LuminaIconButton(
         tooltip: '刷新',
         onPressed: () => setState(() => _refreshGeneration++),
         icon: const Icon(Icons.refresh_rounded),
       ),
     ],
-    body: KeyedSubtree(
-      key: ValueKey(_refreshGeneration),
+    body: NewsRefreshScope(
+      generation: _refreshGeneration,
       child: switch (widget.section) {
         DesktopNewsSection.aiHot => const AihotPage(),
         DesktopNewsSection.github => const GithubPage(),
@@ -113,29 +162,31 @@ class _DesktopNewsPageState extends State<DesktopNewsPage> {
 
 class _NewsHomePageState extends State<NewsHomePage> {
   int _selected = 0;
-  int _refreshGeneration = 0;
+  final _refreshGenerations = [0, 0, 0];
 
   @override
-  Widget build(BuildContext context) => Localizations.override(
-    context: context,
-    delegates: GlobalMaterialLocalizations.delegates,
-    child: LuminaPageScaffold(
-      title: 'Orialis 资讯',
-      leading: const _NewsBrandLogo(),
-      subtitle: const [
-        'AI 世界今天发生了什么？',
-        '开源世界今天有什么值得关注？',
-        '我的项目今天发生了什么？',
-      ][_selected],
+  Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= 840;
+    final desktop = DesktopLayoutScope.of(context);
+    final page = OrialisPageScaffold(
+      title: const ['AI 热点', 'GitHub', '项目资讯'][_selected],
+      leading: wide || desktop
+          ? const _NewsBrandLogo()
+          : LuminaIconButton(
+              tooltip: '刷新',
+              onPressed: () => setState(() => _refreshGenerations[_selected]++),
+              icon: const LuminaIcon(LuminaIcons.sync),
+            ),
       actions: [
-        IconButton(
-          tooltip: '刷新',
-          onPressed: () => setState(() => _refreshGeneration++),
-          icon: const Icon(Icons.refresh_rounded),
-        ),
-        IconButton(
+        if (wide || desktop)
+          LuminaIconButton(
+            tooltip: '刷新',
+            onPressed: () => setState(() => _refreshGenerations[_selected]++),
+            icon: const LuminaIcon(LuminaIcons.sync),
+          ),
+        LuminaIconButton(
           tooltip: '账号与服务地址',
-          onPressed: DesktopLayoutScope.of(context)
+          onPressed: desktop
               ? () => context.go('/profile')
               : () async {
                   await Navigator.of(context).push(
@@ -143,24 +194,31 @@ class _NewsHomePageState extends State<NewsHomePage> {
                       builder: (_) => const NewsAccountPage(),
                     ),
                   );
-                  if (mounted) setState(() => _refreshGeneration++);
                 },
-          icon: const Icon(Icons.account_circle_outlined),
+          icon: const LuminaIcon(LuminaIcons.person),
         ),
       ],
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final destinations = _newsDestinations;
-          final pages = IndexedStack(
+      body: Builder(
+        builder: (context) {
+          final pages = LuminaBranchTransition(
             index: _selected,
-            key: ValueKey(_refreshGeneration),
-            children: const [AihotPage(), GithubPage(), ProjectsNewsPage()],
+            children: [
+              for (var i = 0; i < 3; i++)
+                NewsRefreshScope(
+                  generation: _refreshGenerations[i],
+                  child: const [
+                    AihotPage(),
+                    GithubPage(),
+                    ProjectsNewsPage(),
+                  ][i],
+                ),
+            ],
           );
-          if (constraints.maxWidth >= 840) {
+          if (wide) {
             return Row(
               children: [
                 LuminaNavigationRail(
-                  destinations: destinations
+                  destinations: _newsDestinations(context)
                       .map(
                         (destination) => NavigationRailDestination(
                           icon: destination.icon,
@@ -179,7 +237,7 @@ class _NewsHomePageState extends State<NewsHomePage> {
               ],
             );
           }
-          if (DesktopLayoutScope.of(context)) {
+          if (desktop) {
             return Column(
               children: [
                 Expanded(child: pages),
@@ -193,35 +251,34 @@ class _NewsHomePageState extends State<NewsHomePage> {
           return pages;
         },
       ),
-      bottomActions:
-          DesktopLayoutScope.of(context) ||
-              MediaQuery.sizeOf(context).width >= 840
-          ? null
-          : _NewsNavigation(
-              selected: _selected,
-              onSelected: (value) => setState(() => _selected = value),
-            ),
-    ),
-  );
+    );
+    if (wide || desktop) return page;
+    return OrialisMobileNavigationOverlay(
+      destinations: _newsDestinations(context),
+      selectedIndex: _selected,
+      onDestinationSelected: (value) => setState(() => _selected = value),
+      child: page,
+    );
+  }
 }
 
-const _newsDestinations = <NavigationDestination>[
-  NavigationDestination(
-    icon: Icon(Icons.auto_awesome_outlined),
-    selectedIcon: Icon(Icons.auto_awesome_rounded),
-    label: 'AIHOT',
-  ),
-  NavigationDestination(
-    icon: Icon(Icons.code_outlined),
-    selectedIcon: Icon(Icons.code_rounded),
-    label: 'GitHub',
-  ),
-  NavigationDestination(
-    icon: Icon(Icons.work_outline_rounded),
-    selectedIcon: Icon(Icons.work_rounded),
-    label: 'Projects',
-  ),
-];
+List<NavigationDestination> _newsDestinations(BuildContext context) {
+  final colors = LuminaTheme.of(context).colors;
+  const labels = ['AI 热点', 'GitHub', '项目'];
+  const icons = [
+    LuminaIcons.sparkles,
+    LuminaIcons.terminal,
+    LuminaIcons.folder,
+  ];
+  return [
+    for (var i = 0; i < labels.length; i++)
+      NavigationDestination(
+        icon: LuminaIcon(icons[i], color: colors.muted),
+        selectedIcon: LuminaIcon(icons[i], color: colors.accent),
+        label: labels[i],
+      ),
+  ];
+}
 
 class NewsAccountPage extends ConsumerStatefulWidget {
   const NewsAccountPage({super.key});
@@ -282,9 +339,7 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
         _username = _usernameController.text.trim();
         _passwordController.clear();
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('登录成功')));
+      showLuminaMessage(context, '登录成功');
     } catch (error) {
       if (mounted) setState(() => _error = _authError(error));
     } finally {
@@ -320,9 +375,7 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
         _serverController.text = next;
         _serverError = null;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('服务地址已保存')));
+      showLuminaMessage(context, '服务地址已保存');
     }
   }
 
@@ -337,131 +390,167 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
   @override
   Widget build(BuildContext context) => LuminaPageScaffold(
     title: '账号与服务',
-    leading: IconButton(
+    leading: LuminaIconButton(
       tooltip: '返回',
       onPressed: () => Navigator.of(context).maybePop(),
-      icon: const Icon(Icons.arrow_back_rounded),
+      icon: const LuminaIcon(LuminaIcons.back),
     ),
-    body: !_ready
-        ? const Center(child: CircularProgressIndicator())
-        : ListView(
-            padding: EdgeInsets.only(
-              top: LuminaPageHeaderInset.of(context) + 12,
-              bottom: 24,
-            ),
-            children: [
-              LuminaSection(
-                title: 'Orialis 服务',
-                trailing: const _NewsBrandLogo(size: 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    TextField(
-                      key: const ValueKey('news-server-url'),
-                      controller: _serverController,
-                      keyboardType: TextInputType.url,
-                      onChanged: (_) {
-                        if (_serverError != null) {
-                          setState(() => _serverError = null);
-                        }
-                      },
-                      decoration: const InputDecoration(
-                        labelText: '服务地址',
-                        hintText: 'https://orialis.example.com',
+    body: Builder(
+      builder: (context) => !_ready
+          ? const Center(child: LuminaProgress())
+          : ListView(
+              padding: EdgeInsets.only(
+                top: LuminaPageHeaderInset.of(context) + 12,
+                bottom:
+                    MediaQuery.viewInsetsOf(context).bottom +
+                    MediaQuery.paddingOf(context).bottom +
+                    24,
+              ),
+              children: [
+                LuminaSection(
+                  title: 'Orialis 服务',
+                  trailing: const _NewsBrandLogo(size: 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      LuminaTextField(
+                        key: const ValueKey('news-server-url'),
+                        controller: _serverController,
+                        keyboardType: TextInputType.url,
+                        onChanged: (_) {
+                          if (_serverError != null) {
+                            setState(() => _serverError = null);
+                          }
+                        },
+                        label: '服务地址',
+                        hint: 'https://orialis.example.com',
+                        enabled: !_busy,
                       ),
-                    ),
-                    if (_serverError != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          _serverError!,
-                          style: TextStyle(
-                            color: LuminaTheme.of(context).colors.danger,
+                      if (_serverError != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            _serverError!,
+                            style: TextStyle(
+                              color: LuminaTheme.of(context).colors.danger,
+                            ),
                           ),
                         ),
+                      LuminaButton(
+                        primary: false,
+                        onPressed: _busy ? null : _saveServerAddress,
+                        child: const Text('保存服务地址'),
                       ),
-                    TextButton(
-                      onPressed: _busy ? null : _saveServerAddress,
-                      child: const Text('保存服务地址'),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 18),
-              LuminaSection(
-                title: '外观',
-                child: LuminaThemeModeSelector(
-                  value: ref.watch(newsAppearanceProvider),
-                  onChanged: (mode) =>
-                      ref.read(newsAppearanceProvider.notifier).setMode(mode),
+                const SizedBox(height: 18),
+                LuminaSection(
+                  title: '外观',
+                  child: Column(
+                    children: [
+                      LuminaThemeModeSelector(
+                        value: ref.watch(newsAppearanceProvider),
+                        onChanged: (mode) => ref
+                            .read(newsAppearanceProvider.notifier)
+                            .setMode(mode),
+                      ),
+                      const SizedBox(height: 12),
+                      OrialisListRow(
+                        title: '高性能模式',
+                        subtitle: '优先流畅滚动，关闭后使用更细腻的阴影效果',
+                        trailing: LuminaSwitch(
+                          key: const ValueKey('news-high-performance-mode'),
+                          value: ref.watch(newsHighPerformanceModeProvider),
+                          onChanged: (value) async {
+                            try {
+                              await ref
+                                  .read(
+                                    newsHighPerformanceModeProvider.notifier,
+                                  )
+                                  .setEnabled(value);
+                            } catch (_) {
+                              if (context.mounted) {
+                                showLuminaMessage(context, '设置未能保存，请重试');
+                              }
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 18),
-              LuminaSection(
-                title: '登录状态',
-                child: _username == null
-                    ? Column(
-                        children: [
-                          TextField(
-                            controller: _usernameController,
-                            textInputAction: TextInputAction.next,
-                            decoration: const InputDecoration(labelText: '用户名'),
-                          ),
-                          const SizedBox(height: 10),
-                          TextField(
-                            controller: _passwordController,
-                            obscureText: true,
-                            onSubmitted: (_) => _busy ? null : _login(),
-                            decoration: const InputDecoration(labelText: '密码'),
-                          ),
-                          if (_error != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Text(
-                                _error!,
-                                style: TextStyle(
-                                  color: LuminaTheme.of(context).colors.danger,
+                const SizedBox(height: 18),
+                LuminaSection(
+                  title: '登录状态',
+                  child: _username == null
+                      ? Column(
+                          children: [
+                            LuminaTextField(
+                              controller: _usernameController,
+                              textInputAction: TextInputAction.next,
+                              label: '用户名',
+                              enabled: !_busy,
+                            ),
+                            const SizedBox(height: 10),
+                            LuminaTextField(
+                              controller: _passwordController,
+                              obscureText: true,
+                              onSubmitted: (_) => _busy ? null : _login(),
+                              label: '密码',
+                              enabled: !_busy,
+                              textInputAction: TextInputAction.done,
+                            ),
+                            if (_error != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  _error!,
+                                  style: TextStyle(
+                                    color: LuminaTheme.of(
+                                      context,
+                                    ).colors.danger,
+                                  ),
                                 ),
                               ),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: LuminaButton(
+                                onPressed: _busy ? null : _login,
+                                icon: _busy
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: LuminaProgress(),
+                                      )
+                                    : const Icon(Icons.login_rounded),
+                                child: const Text('登录'),
+                              ),
                             ),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: FilledButton.icon(
-                              onPressed: _busy ? null : _login,
-                              icon: _busy
-                                  ? const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.login_rounded),
-                              label: const Text('登录'),
+                          ],
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('已登录为 $_username'),
+                            const SizedBox(height: 12),
+                            LuminaButton(
+                              primary: false,
+                              onPressed: _logout,
+                              icon: const LuminaIcon(LuminaIcons.logout),
+                              child: const Text('退出登录'),
                             ),
-                          ),
-                        ],
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('已登录为 $_username'),
-                          const SizedBox(height: 12),
-                          OutlinedButton.icon(
-                            onPressed: _logout,
-                            icon: const Icon(Icons.logout_rounded),
-                            label: const Text('退出登录'),
-                          ),
-                        ],
-                      ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                '项目报告按登录账号隔离。更换账号后，资讯缓存也会按账号分开。',
-                style: LuminaTheme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
+                          ],
+                        ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '项目报告按登录账号隔离。更换账号后，资讯缓存也会按账号分开。',
+                  style: LuminaTheme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+    ),
   );
 }
 
@@ -504,7 +593,7 @@ class _NewsNavigation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => LuminaNavigationBar(
-    destinations: _newsDestinations,
+    destinations: _newsDestinations(context),
     selectedIndex: selected,
     onDestinationSelected: onSelected,
   );

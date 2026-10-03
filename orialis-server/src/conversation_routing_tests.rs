@@ -224,3 +224,164 @@ async fn conversation_message_dispatch_isolated_and_offline_never_falls_back() {
     reply(&state, ao_rx.recv().await.unwrap(), "legacy-reply").await;
     task.await.unwrap();
 }
+
+#[tokio::test]
+async fn conversation_binding_cannot_change_but_same_target_is_idempotent() {
+    let state = memory_state().await;
+    let _ = bind(&state, "mac-chat", "mac").await.unwrap();
+    queue(&state, "queued-fixed", "mac-chat").await;
+    assert!(matches!(
+        bind(&state, "mac-chat", "aozora").await,
+        Err(AppError::Conflict(_))
+    ));
+    let Json(repeated) = bind(&state, "mac-chat", "mac").await.unwrap();
+    assert_eq!(repeated.device_id.as_deref(), Some("mac"));
+    assert_eq!(
+        conversation_agent_device(&state.pool, "u1", "mac-chat")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("mac")
+    );
+}
+
+#[tokio::test]
+async fn conversation_with_legacy_user_messages_cannot_capture_new_target() {
+    let state = memory_state().await;
+    queue(&state, "queued-legacy", "legacy").await;
+    assert!(matches!(
+        bind(&state, "legacy", "mac").await,
+        Err(AppError::Conflict(_))
+    ));
+    assert_eq!(
+        conversation_agent_device(&state.pool, "u1", "legacy")
+            .await
+            .unwrap(),
+        None
+    );
+    // Delivered historical user messages also prevent first binding.
+    sqlx::query("DELETE FROM agent_delivery_queue WHERE message_id='queued-legacy'")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        bind(&state, "legacy", "aozora").await,
+        Err(AppError::Conflict(_))
+    ));
+}
+
+#[tokio::test]
+async fn mac_request_rejects_aozora_spoofed_reply_and_error() {
+    let state = memory_state().await;
+    let (mac_tx, mut mac_rx) = mpsc::channel(2);
+    let (ao_tx, _ao_rx) = mpsc::channel(2);
+    state
+        .agent
+        .register_connection(
+            "cm".into(),
+            "u1".into(),
+            "mac".into(),
+            "macos".into(),
+            mac_tx,
+        )
+        .await;
+    state
+        .agent
+        .register_connection(
+            "ca".into(),
+            "u1".into(),
+            "aozora".into(),
+            "linux".into(),
+            ao_tx,
+        )
+        .await;
+    let mut receiver = state
+        .agent
+        .send_request_for_user(
+            "u1",
+            Some("mac"),
+            GatewayMessage::MessageSend {
+                version: 1,
+                message_id: "mac-pending".into(),
+                conversation_id: "mac-chat".into(),
+                content: "hello".into(),
+                attachments: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    assert!(mac_rx.recv().await.is_some());
+    let response = GatewayMessage::MessageReply {
+        version: 1,
+        message_id: "mac-response".into(),
+        reply_to: "mac-pending".into(),
+        conversation_id: "mac-chat".into(),
+        content: "from Mac".into(),
+        attachments: vec![],
+    };
+    assert!(
+        !state
+            .agent
+            .resolve_reply_for_device("aozora", response.clone())
+            .await
+    );
+    assert!(matches!(
+        receiver.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(
+        !state
+            .agent
+            .resolve_reply_for_device(
+                "aozora",
+                GatewayMessage::Error {
+                    version: 1,
+                    code: "spoofed".into(),
+                    message: "interrupt Mac".into(),
+                    reply_to: Some("mac-pending".into()),
+                }
+            )
+            .await
+    );
+    assert!(matches!(
+        receiver.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(state.agent.resolve_reply_for_device("mac", response).await);
+    assert!(
+        matches!(receiver.await.unwrap(), GatewayMessage::MessageReply { content, .. } if content == "from Mac")
+    );
+    let receiver = state
+        .agent
+        .send_request_for_user(
+            "u1",
+            Some("mac"),
+            GatewayMessage::MessageSend {
+                version: 1,
+                message_id: "mac-error".into(),
+                conversation_id: "mac-chat".into(),
+                content: "hello".into(),
+                attachments: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    assert!(mac_rx.recv().await.is_some());
+    assert!(
+        state
+            .agent
+            .resolve_reply_for_device(
+                "mac",
+                GatewayMessage::Error {
+                    version: 1,
+                    code: "legitimate".into(),
+                    message: "Mac error".into(),
+                    reply_to: Some("mac-error".into()),
+                }
+            )
+            .await
+    );
+    assert!(
+        matches!(receiver.await.unwrap(), GatewayMessage::Error { code, .. } if code == "legitimate")
+    );
+}

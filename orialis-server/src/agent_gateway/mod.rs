@@ -271,17 +271,41 @@ impl AgentRegistry {
         self.pending_remove(message_id).await;
     }
 
+    #[cfg(test)]
     pub(crate) async fn resolve_reply(&self, message: GatewayMessage) {
+        self.resolve_reply_inner(None, message).await;
+    }
+
+    /// Correlated replies and errors may only complete this device's request.
+    pub(crate) async fn resolve_reply_for_device(
+        &self,
+        device_id: &str,
+        message: GatewayMessage,
+    ) -> bool {
+        self.resolve_reply_inner(Some(device_id), message).await
+    }
+
+    async fn resolve_reply_inner(&self, device_id: Option<&str>, message: GatewayMessage) -> bool {
         let Some(reply_to) = message.reply_to().map(ToOwned::to_owned) else {
             tracing::warn!("received Orialis Agent message without reply_to");
-            return;
+            return false;
         };
         let delivered = {
             let mut state = self.state.lock().await;
-            let Some(pending) = state.pending.remove(&reply_to) else {
+            let Some(pending) = state.pending.get(&reply_to) else {
                 tracing::warn!(reply_to = %reply_to, "received reply for unknown Orialis Agent request");
-                return;
+                return false;
             };
+            if device_id.is_some_and(|device_id| pending.device_id != device_id) {
+                tracing::warn!(reply_to = %reply_to, "received reply from a different Orialis Agent device");
+                return false;
+            }
+            // Ownership was checked under this same lock; a rejected reply
+            // must leave the intended device's pending receiver untouched.
+            let pending = state
+                .pending
+                .remove(&reply_to)
+                .expect("checked pending request");
             let delivered = pending.reply_tx.send(message).is_ok();
             if delivered {
                 state.completed.insert(reply_to.to_owned());
@@ -299,6 +323,7 @@ impl AgentRegistry {
         } else {
             tracing::warn!(reply_to = %reply_to, "received reply after Orialis Agent request timed out");
         }
+        delivered
     }
 
     pub(crate) async fn accept_event(

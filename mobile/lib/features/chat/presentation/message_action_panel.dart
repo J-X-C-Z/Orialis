@@ -100,7 +100,7 @@ class _MessageActionPanel extends StatelessWidget {
             width: width,
             child: LuminaSurface(
               key: const ValueKey('message-action-panel'),
-              glass: true,
+              liquidGlass: false,
               depth: LuminaSurfaceDepth.raised,
               radius: 20,
               color: LuminaTheme.of(context).colors.raisedSurface,

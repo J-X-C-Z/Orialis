@@ -1,7 +1,10 @@
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Response,
+    },
     routing::{get, post},
     Json, Router,
 };
@@ -30,6 +33,7 @@ pub(crate) fn router(
         publisher_user_id,
     });
     Router::new()
+        .route("/api/v1/news/stream", get(news_stream))
         .route("/api/v1/news/aihot/hot", get(get_public_cache))
         .route("/api/v1/news/aihot/items", get(get_public_cache))
         .route("/api/v1/news/aihot/events/{id}", get(get_aihot_event))
@@ -182,6 +186,93 @@ async fn session_user(state: &NewsState, headers: &HeaderMap) -> Result<String, 
     .await
     .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "database_error", "news request failed"))?
     .ok_or_else(|| api_error(StatusCode::UNAUTHORIZED, "unauthorized", "valid session required"))
+}
+
+// Invalidation revisions come from persisted metadata. Reconnecting after a
+// server restart reconciles the current snapshot rather than replaying articles.
+// Project report metadata is included only for the authenticated account.
+async fn news_revision(state: &NewsState, user: &str) -> Result<String, sqlx::Error> {
+    let public = sqlx::query_as::<_, (String, String, Option<String>, bool, Option<String>)>(
+        "SELECT cache_key,updated_at,task_id,stale,error FROM news_cache
+         WHERE cache_key LIKE 'aihot:%' OR cache_key LIKE 'github:%' ORDER BY cache_key",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let private = sqlx::query_as::<_, (String, String, String, String, String)>(
+        "SELECT project_key,period,report_date,updated_at,task_id FROM news_project_reports
+         WHERE user_id=? ORDER BY project_key,period,report_date",
+    )
+    .bind(user)
+    .fetch_all(&state.pool)
+    .await?;
+    // These tuple types are infallibly serializable and contain no article body.
+    Ok(token_hash(
+        &serde_json::to_string(&(user, public, private)).unwrap(),
+    ))
+}
+
+async fn news_stream(
+    State(state): State<Arc<NewsState>>,
+    headers: HeaderMap,
+) -> Result<Response, Response> {
+    let user = session_user(&state, &headers).await?;
+    let previous = headers
+        .get("last-event-id")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| v.len() == 64 && v.bytes().all(|b| b.is_ascii_hexdigit()))
+        .map(str::to_owned);
+    let interval = tokio::time::interval(std::time::Duration::from_secs(1));
+    let events = futures_util::stream::unfold(
+        (state, headers, user, previous, interval),
+        |(state, headers, user, mut previous, mut interval)| async move {
+            loop {
+                interval.tick().await;
+                // Stop on logout/expiry. A long-lived stream must not outlive its session.
+                if session_user(&state, &headers).await.ok().as_deref() != Some(user.as_str()) {
+                    return None;
+                }
+                let revision = match news_revision(&state, &user).await {
+                    Ok(value) => value,
+                    Err(error) => {
+                        tracing::warn!(%error, "news stream metadata read failed");
+                        return None;
+                    }
+                };
+                if previous.as_deref() == Some(&revision) {
+                    continue;
+                }
+                previous = Some(revision.clone());
+                let event = Event::default()
+                    .event("news.updated")
+                    .id(&revision)
+                    .retry(std::time::Duration::from_secs(3))
+                    .data(
+                        json!({"channels":["aihot","github","projects"],"revision":revision})
+                            .to_string(),
+                    );
+                return Some((
+                    Ok::<_, std::convert::Infallible>(event),
+                    (state, headers, user, previous, interval),
+                ));
+            }
+        },
+    );
+    let mut response = Sse::new(events)
+        .keep_alive(
+            KeepAlive::new()
+                .interval(std::time::Duration::from_secs(15))
+                .text("keepalive"),
+        )
+        .into_response();
+    response.headers_mut().insert(
+        "x-accel-buffering",
+        axum::http::HeaderValue::from_static("no"),
+    );
+    response.headers_mut().insert(
+        "cache-control",
+        axum::http::HeaderValue::from_static("no-cache, no-transform"),
+    );
+    Ok(response)
 }
 
 async fn publisher_user(state: &NewsState, headers: &HeaderMap) -> Result<String, Response> {
@@ -820,7 +911,7 @@ async fn publish_github(
     let owner = publisher_user(&state, &headers).await?;
     let new_payload = input.result.get("repositories").is_some();
     if !matches!(period.as_str(), "daily" | "weekly")
-        || !source_is_valid(&input.source, &["github.com/trending"])
+        || !source_is_valid(&input.source, &["githot.dev"])
         || !validate_repo_urls(&input.result)
         || github_repositories(&input.result).is_none()
         || (new_payload && !valid_github_brief(&input.result))
@@ -828,7 +919,7 @@ async fn publish_github(
         return Err(api_error(
             StatusCode::BAD_REQUEST,
             "invalid_source",
-            "GitHub publish requires official trending source and safe repository URLs",
+            "GitHub publish requires the Githot source and safe repository URLs",
         ));
     }
     if input
@@ -1030,7 +1121,7 @@ async fn publish_failure(
     Json(input): Json<PublishInput>,
 ) -> Result<Json<Value>, Response> {
     let owner = publisher_user(&state, &headers).await?;
-    if !source_is_valid(&input.source, &["aihot.news", "github.com/trending"])
+    if !source_is_valid(&input.source, &["aihot.news", "github.com/trending", "githot.dev"])
         || input.task_id.trim().is_empty()
         || input.task_id.len() > 128
     {
@@ -1419,13 +1510,15 @@ mod tests {
     #[test]
     fn publisher_sources_are_exact_allowlist_values() {
         assert!(source_is_valid("aihot.news", &["aihot.news"]));
+        assert!(source_is_valid("githot.dev", &["githot.dev"]));
+        assert!(!source_is_valid("github.com/trending", &["githot.dev"]));
         assert!(!source_is_valid(
             "https://127.0.0.1/latest",
             &["aihot.news"]
         ));
         assert!(!source_is_valid(
             "https://169.254.169.254/",
-            &["github.com/trending"]
+            &["githot.dev"]
         ));
     }
 
@@ -1552,6 +1645,111 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stream_reconciles_persisted_changes_and_honors_resume_revision() {
+        use futures_util::StreamExt;
+        let state = Arc::new(test_state().await);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Session session-a"),
+        );
+        let response = news_stream(State(state.clone()), headers.clone())
+            .await
+            .unwrap();
+        assert_eq!(response.headers()["x-accel-buffering"], "no");
+        let mut body = response.into_body().into_data_stream();
+        let first = body.next().await.unwrap().unwrap();
+        let text = String::from_utf8(first.to_vec()).unwrap();
+        assert!(text.contains("event: news.updated"));
+        assert!(text.contains("aihot"));
+        let revision = news_revision(&state, "user-a").await.unwrap();
+        assert!(text.contains(&format!("id: {revision}")));
+        headers.insert("last-event-id", HeaderValue::from_str(&revision).unwrap());
+        let resumed = news_stream(State(state.clone()), headers).await.unwrap();
+        let mut resumed = resumed.into_body().into_data_stream();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), resumed.next())
+                .await
+                .is_err()
+        );
+        sqlx::query("INSERT INTO news_cache(cache_key,data_json,updated_at,source,task_id) VALUES ('github:daily','[]',?,'githot.dev','new-task')")
+            .bind(now()).execute(&state.pool).await.unwrap();
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), resumed.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let updated = news_revision(&state, "user-a").await.unwrap();
+        assert_ne!(revision, updated);
+        assert!(String::from_utf8(event.to_vec())
+            .unwrap()
+            .contains(&updated));
+        // A reconstructed stream/state retains the same cursor after restart.
+        let recreated = NewsState {
+            pool: state.pool.clone(),
+            publisher_token: None,
+            publisher_user_id: None,
+        };
+        assert_eq!(news_revision(&recreated, "user-a").await.unwrap(), updated);
+    }
+
+    #[tokio::test]
+    async fn stream_rejects_anonymous_and_stops_after_session_revocation() {
+        use futures_util::StreamExt;
+        let state = Arc::new(test_state().await);
+        assert_eq!(
+            news_stream(State(state.clone()), HeaderMap::new())
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Session session-a"),
+        );
+        let mut body = news_stream(State(state.clone()), headers)
+            .await
+            .unwrap()
+            .into_body()
+            .into_data_stream();
+        body.next().await.unwrap().unwrap();
+        sqlx::query("UPDATE user_sessions SET revoked_at=? WHERE user_id='user-a'")
+            .bind(now())
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), body.next())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_revision_isolates_private_projects_and_tracks_source_failure() {
+        let state = test_state().await;
+        let a = news_revision(&state, "user-a").await.unwrap();
+        let b = news_revision(&state, "user-b").await.unwrap();
+        assert_ne!(a, b);
+        sqlx::query("INSERT INTO news_project_reports(user_id,project_key,period,report_date,report_json,source,task_id,generated_at,updated_at) VALUES ('user-a','p','daily','2026-10-03','{}','test','task',?,?)")
+            .bind(now()).bind(now()).execute(&state.pool).await.unwrap();
+        assert_ne!(news_revision(&state, "user-a").await.unwrap(), a);
+        assert_eq!(news_revision(&state, "user-b").await.unwrap(), b);
+        sqlx::query("INSERT INTO news_cache(cache_key,data_json,updated_at,source,stale,error) VALUES ('aihot:hot','[]',?,'aihot.news',1,'source timeout')")
+            .bind(now()).execute(&state.pool).await.unwrap();
+        let failed = news_revision(&state, "user-b").await.unwrap();
+        assert_ne!(failed, b);
+        sqlx::query("UPDATE news_cache SET stale=0,error=NULL WHERE cache_key='aihot:hot'")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        assert_ne!(news_revision(&state, "user-b").await.unwrap(), failed);
+    }
+
+    #[tokio::test]
     async fn project_publish_user_is_bound_to_session_or_configured_publisher() {
         let state = test_state().await;
         let mut headers = HeaderMap::new();
@@ -1596,7 +1794,7 @@ mod tests {
                 .bind(key)
                 .bind(payload)
                 .bind(now())
-                .bind("github.com/trending")
+                .bind("githot.dev")
                 .execute(&state.pool)
                 .await
                 .unwrap();
@@ -1629,7 +1827,7 @@ mod tests {
         sqlx::query("INSERT INTO news_cache(cache_key,data_json,updated_at,source,stale) VALUES ('github:daily',?,?,?,0)")
             .bind(serde_json::to_string(&combined).unwrap())
             .bind(now())
-            .bind("github.com/trending")
+            .bind("githot.dev")
             .execute(&state.pool)
             .await
             .unwrap();
@@ -1658,7 +1856,7 @@ mod tests {
         let state = test_state().await;
         let input = PublishInput {
             task_id: "publish-1".into(),
-            source: "github.com/trending".into(),
+            source: "githot.dev".into(),
             generated_at: None,
             result: json!([{"repository":"owner/repo"}]),
             user_id: None,
@@ -1696,7 +1894,7 @@ mod tests {
         let state = test_state().await;
         let input = PublishInput {
             task_id: "retry-1".into(),
-            source: "github.com/trending".into(),
+            source: "githot.dev".into(),
             generated_at: None,
             result: json!([{"repository":"owner/repo"}]),
             user_id: None,

@@ -1486,21 +1486,42 @@ async fn set_conversation_agent_device(
     if device_id.is_empty() {
         return Err(AppError::BadRequest("deviceId is required".into()));
     }
-    // Validate ownership and update in one statement, including concurrent
-    // deletion of a conversation. Device liveness is intentionally irrelevant.
+    // Fix the destination before the first user message. Keep this predicate
+    // in the write itself so concurrent binding or message insertion cannot
+    // redirect a queued message. Repeating the same binding remains idempotent.
     let result = sqlx::query(
         "UPDATE conversations SET agent_device_id=? WHERE user_id=? AND id=? AND deleted_at IS NULL
-         AND EXISTS(SELECT 1 FROM agent_devices WHERE user_id=? AND device_id=?)",
+         AND EXISTS(SELECT 1 FROM agent_devices WHERE user_id=? AND device_id=?)
+         AND (agent_device_id=? OR (agent_device_id IS NULL AND NOT EXISTS(
+             SELECT 1 FROM messages WHERE user_id=? AND conversation_id=? AND role='user'
+         )))",
     )
     .bind(device_id)
     .bind(&user_id)
     .bind(&id)
     .bind(&user_id)
     .bind(device_id)
+    .bind(device_id)
+    .bind(&user_id)
+    .bind(&id)
     .execute(&state.pool)
     .await?;
     if result.rows_affected() != 1 {
-        return Err(AppError::NotFound);
+        ensure_conversation(&state.pool, &user_id, &id).await?;
+        let device_exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM agent_devices WHERE user_id=? AND device_id=?)",
+        )
+        .bind(&user_id)
+        .bind(device_id)
+        .fetch_one(&state.pool)
+        .await?;
+        if !device_exists {
+            return Err(AppError::NotFound);
+        }
+        return Err(AppError::Conflict(
+            "conversation destination is fixed; create a new empty conversation for this device"
+                .into(),
+        ));
     }
     Ok(Json(ConversationAgentDeviceResponse {
         conversation_id: id,

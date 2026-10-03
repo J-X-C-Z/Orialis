@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 import urllib.error
 import urllib.request
@@ -21,13 +22,13 @@ RUNBOOKS = [
     {
         "key": "github-daily", "title": "Orialis News · GitHub Daily",
         "cronExpression": "0 18 * * *", "timezone": "Asia/Shanghai",
-        "description": "Collect a fresh GitHub daily trending ranking and repository metadata/README; make one grounded read-only Agent Runner call for per-repository briefs and the full-period overview. Publish source=github.com/trending to POST /api/v1/news/publish/github/daily with taskId, source, generatedAt, period=daily, result={repositories:[...],brief:{title,summary,themes,highlights,analysisStatus,source}}, and idempotencyKey=taskId. If analysis fails, keep the full ranking and publish a deterministic brief from observed repository descriptions with analysisStatus=unavailable. Keep taskId stable across retries and record taskId/status/startedAt/finishedAt/source/result/error. Runner command comes from ORIALIS_NEWS_RUNNER_COMMAND; default: codex exec --ephemeral --sandbox read-only --skip-git-repo-check --json -. Do not inspect unrelated project code or send user notifications.",
+        "description": "Collect a fresh Githot daily ranking and GitHub metadata/README; make one grounded read-only Agent Runner call for per-repository briefs and the full-period overview. Publish source=githot.dev to POST /api/v1/news/publish/github/daily with taskId, source, generatedAt, period=daily, result={repositories:[...],brief:{title,summary,themes,highlights,analysisStatus,source}}, and idempotencyKey=taskId. If analysis fails, keep the full ranking and publish a deterministic brief from observed Githot summaries with analysisStatus=unavailable. Keep taskId stable across retries and record taskId/status/startedAt/finishedAt/source/result/error. Runner command comes from ORIALIS_NEWS_RUNNER_COMMAND; default: codex exec --ephemeral --sandbox read-only --skip-git-repo-check --json -. Do not inspect unrelated project code or send user notifications.",
         "runnerKind": "llm",
     },
     {
         "key": "github-weekly", "title": "Orialis News · GitHub Weekly",
         "cronExpression": "15 18 * * 1", "timezone": "Asia/Shanghai",
-        "description": "Fetch a new GitHub weekly trending ranking (never concatenate daily reports), retrieve metadata and README, and make one grounded read-only Agent Runner call for per-repository briefs plus the full-period overview. POST /api/v1/news/publish/github/weekly with source=github.com/trending, period=weekly, result={repositories:[...],brief:{title,summary,themes,highlights,analysisStatus,source}}, and stable taskId/idempotencyKey. If analysis fails, keep the full ranking and publish a deterministic brief from observed repository descriptions with analysisStatus=unavailable. Audit taskId/status/startedAt/finishedAt/source/result/error. Runner is configurable; default codex exec --ephemeral --sandbox read-only --skip-git-repo-check --json -. Do not send user notifications.",
+        "description": "Fetch a new Githot weekly ranking (never concatenate daily reports), retrieve GitHub metadata and README, and make one grounded read-only Agent Runner call for per-repository briefs plus the full-period overview. POST /api/v1/news/publish/github/weekly with source=githot.dev, period=weekly, result={repositories:[...],brief:{title,summary,themes,highlights,analysisStatus,source}}, and stable taskId/idempotencyKey. If analysis fails, keep the full ranking and publish a deterministic brief from observed Githot summaries with analysisStatus=unavailable. Audit taskId/status/startedAt/finishedAt/source/result/error. Runner is configurable; default codex exec --ephemeral --sandbox read-only --skip-git-repo-check --json -. Do not send user notifications.",
         "runnerKind": "llm",
     },
     {
@@ -72,6 +73,12 @@ def unwrap_list(value: Any) -> list[dict[str, Any]]:
 
 
 def apply(company_id: str, agent_ids: dict[str, str], *, base_url: str, token: str, do_apply: bool, project_id: str = "", enable_triggers: bool = False) -> dict[str, Any]:
+    # Preserve the legacy shared LLM worker while allowing deterministic,
+    # period-specific process entrypoints that invoke the configured Runner.
+    agent_ids = {"aihot": agent_ids.get("aihot", ""),
+                 "github-daily": agent_ids.get("github-daily") or agent_ids.get("github", ""),
+                 "github-weekly": agent_ids.get("github-weekly") or agent_ids.get("github", ""),
+                 "projects": agent_ids.get("projects", "")}
     api = PaperclipApi(base_url, token)
     routes: list[dict[str, Any]] = []
     try:
@@ -80,7 +87,7 @@ def apply(company_id: str, agent_ids: dict[str, str], *, base_url: str, token: s
         projects = unwrap_list(api.request("GET", f"/api/companies/{company_id}/projects"))
         readable = True
     except PipelineError as exc:
-        agents, routines, readable = [], [], False
+        agents, routines, projects, readable = [], [], [], False
         read_error = str(exc)
     by_id = {a.get("id"): a for a in agents}
     project_ids = {p.get("id") for p in projects}
@@ -92,24 +99,40 @@ def apply(company_id: str, agent_ids: dict[str, str], *, base_url: str, token: s
             raise PipelineError("apply requires --project-id for the Orialis News operations project")
         if project_id not in project_ids:
             raise PipelineError("project ID is not in the selected Paperclip company; refusing cross-company or unrelated-project setup")
-        if set(agent_ids) != {"aihot", "github", "projects"} or not all(agent_ids.values()):
-            raise PipelineError("apply requires explicit --aihot-process-agent-id, --github-agent-id and --projects-agent-id")
-        if len(set(agent_ids.values())) != 3:
+        if not all(agent_ids.values()):
+            raise PipelineError("apply requires --aihot-process-agent-id, --projects-agent-id and either --github-agent-id or both --github-daily-agent-id/--github-weekly-agent-id")
+        if agent_ids["aihot"] == agent_ids["projects"] or any(agent_ids[key] in {agent_ids["aihot"], agent_ids["projects"]} for key in ("github-daily", "github-weekly")):
             raise PipelineError("AIHOT process worker and GitHub/Projects runner agents must be distinct")
         if readable:
             if assigned["aihot"].get("adapterType") != "process":
                 raise PipelineError("AIHOT schedule must be assigned to a Paperclip process adapter agent")
             process_config = assigned["aihot"].get("adapterConfig") or {}
+            aihot_command = shlex.split(process_config.get("command", ""))
+            if len(aihot_command) != 1 or os.path.basename(aihot_command[0]) not in {"python", "python3"}:
+                raise PipelineError("AIHOT process agent must execute its pure collector with Python")
             process_args = process_config.get("args", [])
             if isinstance(process_args, str):
                 process_args = process_args.split()
-            if "scripts/news_sources.py" not in process_args or not any("--refresh" in str(arg) for arg in process_args) or not any("aihot" in str(arg) for arg in process_args):
-                raise PipelineError("AIHOT process agent must be preconfigured with scripts/news_sources.py --refresh aihot")
-            if assigned["github"].get("adapterType") == "process" or assigned["projects"].get("adapterType") == "process":
-                raise PipelineError("GitHub and Projects routines require a configured LLM Agent Runner adapter")
+            aihot_wrapper = process_args == ["-m", "integrations.news.worker", "--workflow", "aihot"]
+            if not aihot_wrapper and ("scripts/news_sources.py" not in process_args or not any("--refresh" in str(arg) for arg in process_args) or not any("aihot" in str(arg) for arg in process_args)):
+                raise PipelineError("AIHOT process agent must use the pure source collector or the AIHOT lifecycle worker")
+            for period in ("daily", "weekly"):
+                worker = assigned[f"github-{period}"]
+                if worker.get("adapterType") == "process":
+                    config = worker.get("adapterConfig") or {}
+                    command = shlex.split(config.get("command", ""))
+                    args = config.get("args", [])
+                    if isinstance(args, str):
+                        args = shlex.split(args)
+                    expected = ["-m", "integrations.news.cli", "github", period, "--publish"]
+                    lifecycle = ["-m", "integrations.news.worker", "--workflow", "github"]
+                    if len(command) != 1 or os.path.basename(command[0]) not in {"python", "python3"} or args not in (expected, lifecycle):
+                        raise PipelineError(f"GitHub {period} process worker must execute python3 -m integrations.news.cli github {period} --publish")
+            if assigned["projects"].get("adapterType") == "process":
+                raise PipelineError("Projects routines require a configured LLM Agent Runner adapter")
     for plan in RUNBOOKS:
         existing = next((r for r in routines if r.get("title") == plan["title"]), None)
-        agent_key = {"aihot-refresh": "aihot", "github-daily": "github", "github-weekly": "github", "projects-daily": "projects"}[plan["key"]]
+        agent_key = {"aihot-refresh": "aihot", "github-daily": "github-daily", "github-weekly": "github-weekly", "projects-daily": "projects"}[plan["key"]]
         agent_id = agent_ids.get(agent_key)
         route = {"key": plan["key"], "runnerKind": plan["runnerKind"], "assigneeAgentId": agent_id, "projectId": project_id or None, "routine": "reuse" if existing else "create", "trigger": "inspect/create", "triggerEnabled": enable_triggers}
         if existing:
@@ -151,7 +174,7 @@ def apply(company_id: str, agent_ids: dict[str, str], *, base_url: str, token: s
         prerequisites.append("projectId")
     elif project_id not in project_ids:
         prerequisites.append("projectIdInSelectedCompany")
-    prerequisites.extend(f"{key}AgentId" for key in ("aihot", "github", "projects") if not agent_ids.get(key))
+    prerequisites.extend(f"{key}AgentId" for key in ("aihot", "github-daily", "github-weekly", "projects") if not agent_ids.get(key))
     return {"mode": "apply" if do_apply else "dry-run", "companyId": company_id, "projectId": project_id or None, "paperclipReadable": readable, "readyToApply": readable and not prerequisites, "missingPrerequisites": prerequisites, "enableTriggers": enable_triggers, "routes": routes, **({"readError": read_error} if not readable else {})}
 
 
@@ -162,6 +185,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base-url", default=os.getenv("PAPERCLIP_API_URL", "http://127.0.0.1:3100"))
     parser.add_argument("--aihot-process-agent-id", default=os.getenv("ORIALIS_NEWS_AIHOT_PROCESS_AGENT_ID"))
     parser.add_argument("--github-agent-id", default=os.getenv("ORIALIS_NEWS_GITHUB_AGENT_ID"))
+    parser.add_argument("--github-daily-agent-id", default=os.getenv("ORIALIS_NEWS_GITHUB_DAILY_AGENT_ID"))
+    parser.add_argument("--github-weekly-agent-id", default=os.getenv("ORIALIS_NEWS_GITHUB_WEEKLY_AGENT_ID"))
     parser.add_argument("--projects-agent-id", default=os.getenv("ORIALIS_NEWS_PROJECTS_AGENT_ID"))
     parser.add_argument("--enable-triggers", action="store_true", help="create/enable schedule triggers; omitted triggers stay disabled")
     parser.add_argument("--apply", action="store_true", help="create missing routines and schedule triggers")
@@ -169,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.company_id:
         parser.error("--company-id or PAPERCLIP_COMPANY_ID is required")
     try:
-        result = apply(args.company_id, {"aihot": args.aihot_process_agent_id or "", "github": args.github_agent_id or "", "projects": args.projects_agent_id or ""}, base_url=args.base_url, token=os.getenv("PAPERCLIP_API_KEY", ""), do_apply=args.apply, project_id=args.project_id, enable_triggers=args.enable_triggers)
+        result = apply(args.company_id, {"aihot": args.aihot_process_agent_id or "", "github": args.github_agent_id or "", "github-daily": args.github_daily_agent_id or "", "github-weekly": args.github_weekly_agent_id or "", "projects": args.projects_agent_id or ""}, base_url=args.base_url, token=os.getenv("PAPERCLIP_API_KEY", ""), do_apply=args.apply, project_id=args.project_id, enable_triggers=args.enable_triggers)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except PipelineError as exc:

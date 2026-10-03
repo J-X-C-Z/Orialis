@@ -1,4 +1,6 @@
 import asyncio
+import os
+import tempfile
 import json
 import unittest
 from types import SimpleNamespace
@@ -14,6 +16,19 @@ from ..conversation import chat_id_for_conversation, conversation_id_for_chat_id
 
 
 class AdapterTests(unittest.TestCase):
+    def setUp(self):
+        home = tempfile.TemporaryDirectory()
+        cache_type = adapter_module.AttachmentCache
+
+        def isolated_cache(*args):
+            with patch.dict(os.environ, {"HERMES_HOME": home.name}):
+                return cache_type(*args)
+
+        cache_patch = patch.object(adapter_module, "AttachmentCache", isolated_cache)
+        cache_patch.start()
+        self.addCleanup(home.cleanup)
+        self.addCleanup(cache_patch.stop)
+
     def test_conversations_have_stable_isolated_chat_ids(self):
         Platform._add_pseudo_member("orialis")
         adapter = OrialisAdapter(SimpleNamespace(extra={}))
@@ -141,7 +156,7 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(len(handled), 1)
         self.assertEqual([item["type"] for item in sent], ["message.ack", "message.ack"])
 
-    def test_inbound_attachment_is_local_only_during_dispatch_and_then_cleaned(self):
+    def test_inbound_attachment_survives_dispatch(self):
         Platform._add_pseudo_member("orialis")
         adapter = OrialisAdapter(SimpleNamespace(extra={
             "server_url": "https://orialis.test/api/v1/agent/ws",
@@ -172,7 +187,7 @@ class AdapterTests(unittest.TestCase):
         with patch.object(adapter_module, "_download_attachment", fake_download):
             asyncio.run(adapter._dispatch_message(message))
         self.assertEqual(observed[0][1], "text/plain")
-        self.assertFalse(Path(observed[0][0]).exists())
+        self.assertTrue(Path(observed[0][0]).exists())
 
     def test_reconnect_uses_bounded_exponential_backoff(self):
         Platform._add_pseudo_member("orialis")

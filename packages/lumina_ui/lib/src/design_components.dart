@@ -33,10 +33,15 @@ part 'lumina_calendar.dart';
 enum LuminaSurfaceDepth { normal, raised, recessed }
 
 /// A recess belongs to a material host, never directly to the page canvas.
-class _LuminaCardHost extends InheritedWidget {
-  const _LuminaCardHost({required super.child});
+/// Marks a painted card as the host for recessed descendant surfaces.
+/// Custom sliver cards use this scope to inset rows into the existing backing
+/// instead of having each recess create its own standalone raised card.
+class LuminaCardHost extends InheritedWidget {
+  const LuminaCardHost({required super.child, super.key});
+  static bool of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<LuminaCardHost>() != null;
   @override
-  bool updateShouldNotify(_LuminaCardHost oldWidget) => false;
+  bool updateShouldNotify(LuminaCardHost oldWidget) => false;
 }
 
 /// Space scrollable content needs to clear the floating navigation.
@@ -57,11 +62,22 @@ class LuminaNavigationInset extends InheritedWidget {
       bottom != oldWidget.bottom;
 }
 
+/// Makes descendant surfaces opaque cards while retaining the page theme.
+/// Used by card overlays and top tabs; ordinary page controls are unchanged.
+class LuminaCardScope extends InheritedWidget {
+  const LuminaCardScope({required super.child, super.key});
+  static bool of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<LuminaCardScope>() != null;
+  @override
+  bool updateShouldNotify(LuminaCardScope oldWidget) => false;
+}
+
 class LuminaSurface extends StatefulWidget {
   const LuminaSurface({
     required this.child,
     this.padding = const EdgeInsets.all(16),
     this.glass = false,
+    this.liquidGlass,
     this.diffuseGlass = false,
     this.backdrop = false,
     this.depth = LuminaSurfaceDepth.normal,
@@ -76,6 +92,9 @@ class LuminaSurface extends StatefulWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
   final bool glass;
+
+  /// Overrides the theme material for this surface without changing its children.
+  final bool? liquidGlass;
 
   /// Spreads the cool refracted light across wide capsule controls.
   final bool diffuseGlass;
@@ -152,13 +171,14 @@ class _LuminaSurfaceState extends State<LuminaSurface>
   @override
   Widget build(BuildContext context) {
     if (widget.depth == LuminaSurfaceDepth.recessed &&
-        context.dependOnInheritedWidgetOfExactType<_LuminaCardHost>() == null) {
+        !LuminaCardHost.of(context)) {
       return LuminaSurface(
         depth: LuminaSurfaceDepth.raised,
         radius: widget.radius + 12,
         child: LuminaSurface(
           padding: widget.padding,
           glass: widget.glass,
+          liquidGlass: widget.liquidGlass,
           diffuseGlass: widget.diffuseGlass,
           backdrop: widget.backdrop,
           depth: widget.depth,
@@ -177,6 +197,9 @@ class _LuminaSurfaceState extends State<LuminaSurface>
     final contrast = media?.highContrast ?? false;
     final theme = LuminaTheme.of(context);
     final opaque = contrast || theme.reduceTransparency;
+    final card = LuminaCardScope.of(context);
+    final glass = widget.glass && !card;
+    final liquidGlass = !card && (widget.liquidGlass ?? theme.data.liquidGlass);
     final colors = theme.colors;
     final tint =
         widget.color ??
@@ -185,16 +208,16 @@ class _LuminaSurfaceState extends State<LuminaSurface>
           LuminaSurfaceDepth.raised => colors.raisedSurface,
           LuminaSurfaceDepth.recessed => colors.recessedSurface,
         };
-    final transparent = tint.a == 0 && !widget.glass;
+    final transparent = tint.a == 0 && !glass;
     // Live backdrop blur stays off by default. Opt-in via [LuminaSurface.backdrop]
     // for persistent chrome only (the floating bottom bar). High-performance
     // mode still keeps that single nav blur — it is one saveLayer, not a list.
-    final blur = widget.backdrop && widget.glass && !opaque
+    final blur = widget.backdrop && glass && !opaque
         ? LuminaBlurPolicy.instance.chrome
         : LuminaBlurConfig.disabled;
-    final backdrop = widget.backdrop && widget.glass && !opaque && blur.enabled;
+    final backdrop = widget.backdrop && glass && !opaque && blur.enabled;
     final blurFilter = backdrop ? LuminaBlurFilters.forConfig(blur) : null;
-    final compensation = widget.glass && !opaque ? blur.compensation : 0.0;
+    final compensation = glass && !opaque ? blur.compensation : 0.0;
     final useSprings = widget.onTap != null && !reduced;
     Widget label = widget.child;
     Widget content = Padding(
@@ -231,22 +254,22 @@ class _LuminaSurfaceState extends State<LuminaSurface>
                 colors: colors,
                 tint: transparent
                     ? colors.surface
-                    : theme.data.liquidGlass
+                    : liquidGlass
                     ? tint
-                    : widget.glass && !opaque
+                    : glass && !opaque
                     // Thin frost: keep tint low so the blur actually reads.
                     ? tint.withValues(alpha: backdrop ? .22 : .58)
                     : tint,
-                glass: widget.glass && !opaque,
+                glass: glass && !opaque,
                 diffuseGlass: widget.diffuseGlass,
-                liquidGlass: theme.data.liquidGlass,
+                liquidGlass: liquidGlass,
                 radius: widget.radius >= LuminaControlSize.capsuleRadius
                     ? widget.radius
                     : widget.radius * theme.data.radiusScale,
                 depth: widget.depth,
                 shoulder: widget.shoulder,
                 shoulderWidth: shoulderWidth,
-                contrast: contrast || (theme.data.liquidGlass && opaque),
+                contrast: contrast || (liquidGlass && opaque),
                 focused: focused,
                 pressed: pressed,
                 cheapShadow: theme.highPerformanceMode,
@@ -258,10 +281,8 @@ class _LuminaSurfaceState extends State<LuminaSurface>
         },
       );
     }
-    if (!widget.glass &&
-        !transparent &&
-        widget.depth != LuminaSurfaceDepth.recessed) {
-      content = _LuminaCardHost(child: content);
+    if (!glass && !transparent && widget.depth != LuminaSurfaceDepth.recessed) {
+      content = LuminaCardHost(child: content);
     }
     if (backdrop && blurFilter != null) {
       // Clip the backdrop only, allowing the material shadow to breathe.
@@ -339,7 +360,7 @@ class _LuminaSurfaceState extends State<LuminaSurface>
                               0,
                               (_spring?.value ?? 0) * theme.data.motionScale,
                             );
-                      final pressure = widget.glass
+                      final pressure = glass
                           ? (_spring?.value ?? 0).clamp(-.15, 1.0) *
                                 theme.data.motionScale
                           : 0.0;
@@ -660,60 +681,60 @@ class LuminaTopBar extends StatelessWidget {
   final Widget? leading;
   final List<Widget> actions;
   @override
-  Widget build(BuildContext context) => LuminaSurface(
-    radius: 24,
-    glass: true,
-    backdrop: true,
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-    child: ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 48),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Positioned.fill(
-            child: Row(
-              children: [
-                ?leading,
-                const Spacer(),
-                ...actions.map(
-                  (a) => Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: a,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          IgnorePointer(
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: math
-                    .max(leading == null ? 0 : 56, actions.length * 56)
-                    .toDouble(),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+  Widget build(BuildContext context) => LuminaCardScope(
+    child: LuminaSurface(
+      radius: 24,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned.fill(
+              child: Row(
                 children: [
-                  Text(
-                    title,
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: LuminaTheme.of(context).textTheme.titleMedium,
-                  ),
-                  if (subtitle != null)
-                    Text(
-                      subtitle!,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: LuminaTheme.of(context).textTheme.bodySmall,
+                  ?leading,
+                  const Spacer(),
+                  ...actions.map(
+                    (a) => Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: a,
                     ),
+                  ),
                 ],
               ),
             ),
-          ),
-        ],
+            IgnorePointer(
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: math
+                      .max(leading == null ? 0 : 56, actions.length * 56)
+                      .toDouble(),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: LuminaTheme.of(context).textTheme.titleMedium,
+                    ),
+                    if (subtitle != null)
+                      Text(
+                        subtitle!,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: LuminaTheme.of(context).textTheme.bodySmall,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     ),
   );
@@ -745,10 +766,12 @@ class LuminaListRow extends StatelessWidget {
     child: LuminaSurface(
       onTap: enabled ? onTap : null,
       depth: depth,
-      glass:
-          onTap != null &&
+      // Sheet rows belong to the card panel, including interactive rows.
+      liquidGlass:
           context.dependOnInheritedWidgetOfExactType<_LuminaSheetScope>() !=
-              null,
+              null
+          ? false
+          : null,
       color: selected ? LuminaTheme.of(context).colors.accentSoft : null,
       child: Row(
         children: [

@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:drift/native.dart';
@@ -101,7 +104,10 @@ class ProjectMilestones extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
-@TableIndex(name: 'idx_messages_conversation_created', columns: {#conversationId, #createdAt, #id})
+@TableIndex(
+  name: 'idx_messages_conversation_created',
+  columns: {#conversationId, #createdAt, #id},
+)
 class Messages extends Table {
   TextColumn get replyToMessageId => text().nullable()();
   TextColumn get replyQuote => text().nullable()();
@@ -175,7 +181,7 @@ class OutboxMutations extends Table {
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase({QueryExecutor? executor, String name = 'orialis'})
-      : super(executor ?? _openConnection(name));
+    : super(executor ?? _openConnection(name));
 
   @override
   int get schemaVersion => 10;
@@ -325,7 +331,9 @@ class AppDatabase extends _$AppDatabase {
         );
       }
       if (from < 10) {
-        await customStatement('CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages (conversation_id, created_at, id)');
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages (conversation_id, created_at, id)',
+        );
         await addColumnIfMissing(
           'tasks',
           'manual_position',
@@ -427,19 +435,39 @@ class AppDatabase extends _$AppDatabase {
         .watch();
   }
 
-  Stream<List<Conversation>> watchActiveConversations() => customSelect(
-    '''
+  Stream<List<Conversation>> watchActiveConversations() =>
+      customSelect(
+        '''
     SELECT c.* FROM conversations c
     WHERE c.deleted_at IS NULL
     ORDER BY c.pinned DESC, c.manual_position IS NULL, c.manual_position,
       COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id), c.updated_at) DESC,
       c.id
     ''',
-    readsFrom: {conversations, messages},
-  ).watch().map((rows) => rows.map((row) => conversations.map(row.data)).toList());
+        readsFrom: {conversations, messages},
+      ).watch().map(
+        (rows) => rows.map((row) => conversations.map(row.data)).toList(),
+      );
 
   static QueryExecutor _openConnection(String name) {
-    return driftDatabase(name: name);
+    return driftDatabase(
+      name: name,
+      native: DriftNativeOptions(
+        databaseDirectory: () async {
+          // Keep existing account databases and outboxes at their original path.
+          if (!kIsWeb && Platform.isMacOS) {
+            final home = Platform.environment['HOME'];
+            if (home != null) {
+              final legacy = Directory(
+                '$home/Library/Containers/top.jxcz.orialis/Data/Documents',
+              );
+              if (await legacy.exists()) return legacy;
+            }
+          }
+          return getApplicationDocumentsDirectory();
+        },
+      ),
+    );
   }
 
   static QueryExecutor inMemoryExecutor() => NativeDatabase.memory();

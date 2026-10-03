@@ -1,10 +1,52 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orialis_mobile/core/database/app_database.dart';
+import 'package:orialis_mobile/core/attachments/attachment_bridge.dart';
 import 'package:orialis_mobile/features/chat/application/chat_controller.dart';
 import 'package:orialis_mobile/features/chat/data/chat_repository.dart';
 
 void main() {
+  test(
+    'attachment-only delivery failure survives controller recreation',
+    () async {
+      final database = AppDatabase(executor: NativeDatabase.memory());
+      addTearDown(database.close);
+      final repository = ChatRepository(database: database);
+      final controller = ChatController(
+        repository: repository,
+        flush: () async => throw StateError('upload unavailable'),
+      );
+      final attachments = AttachmentBridge.encode([
+        const AttachmentRecord(
+          localPath: '/private/notes.txt',
+          name: 'notes.txt',
+          mimeType: 'text/plain',
+          size: 12,
+        ),
+      ]);
+      await expectLater(
+        controller.send(
+          conversationId: 'aozora-chat',
+          content: '',
+          attachmentsJson: attachments,
+        ),
+        throwsStateError,
+      );
+      final saved =
+          (await repository.watchMessages('aozora-chat').first).single;
+      expect(saved.content, '');
+      expect(saved.attachmentsJson, attachments);
+      expect(saved.syncStatus, 'pendingCreate');
+      final restored = ChatController(
+        repository: repository,
+        flush: () async {},
+      );
+      await restored.retry(saved.id);
+      expect(await repository.watchMessages('aozora-chat').first, hasLength(1));
+      expect(restored.lastMessageId, saved.id);
+    },
+  );
+
   test('controller keeps local-first send state and flushes once', () async {
     final database = AppDatabase(executor: NativeDatabase.memory());
     addTearDown(database.close);

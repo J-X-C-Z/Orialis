@@ -127,7 +127,16 @@ class SystemIntegrationController {
     if (_disposed || _identityChanging || generation != _generation) return;
     final uri = Uri.tryParse(route);
     if (uri == null || uri.hasAuthority || uri.hasScheme) return;
-    if (route == '/today' ||
+    final chatRoute =
+        uri.path == '/chat' &&
+        uri.queryParameters.keys.toSet().difference({
+          'conversationId',
+          'messageId',
+        }).isEmpty &&
+        (uri.queryParameters['conversationId']?.isNotEmpty ?? false) &&
+        (uri.queryParameters['messageId']?.isNotEmpty ?? false);
+    if (chatRoute ||
+        route == '/today' ||
         route == '/events' ||
         route == '/calendar' ||
         (uri.pathSegments.length == 3 &&
@@ -280,6 +289,53 @@ class SystemIntegrationController {
       _invoke<void>('openNotificationSettings');
   Future<bool?> requestPinWidget() => _invoke<bool>('requestPinWidget');
   Future<bool?> previewReminder() => _invoke<bool>('previewReminder');
+  Future<bool> notifyChatMessage(
+    Map<String, dynamic> payload, {
+    bool testEvent = false,
+  }) async {
+    if (_disposed ||
+        !supported ||
+        !enabled ||
+        !identityCompatible ||
+        _identityChanging) {
+      return false;
+    }
+    final scope = await _scope();
+    if (scope == null || scope != await _marker()) return false;
+    return await _invoke<bool>(
+          testEvent ? 'testChatMessage' : 'notifyChatMessage',
+          {...payload, 'scope': scope},
+        ) ??
+        false;
+  }
+
+  Future<bool> previewChatMessage() => notifyChatMessage({
+    'id': 'test-${DateTime.now().millisecondsSinceEpoch}',
+    'conversationId': 'default',
+    'sender': 'Orialis 测试消息',
+    'content': '点击此通知可打开默认会话',
+  }, testEvent: true);
+  Future<bool> notifyScheduleUpdate(
+    Map<String, dynamic> payload, {
+    bool testEvent = false,
+  }) async {
+    if (_disposed ||
+        !supported ||
+        !enabled ||
+        !identityCompatible ||
+        _identityChanging) {
+      return false;
+    }
+    final scope = await _scope();
+    if (scope == null || scope != await _marker()) return false;
+    await refresh();
+    return await _invoke<bool>(
+          testEvent ? 'testScheduleUpdate' : 'notifyScheduleUpdate',
+          {...payload, 'scope': scope},
+        ) ??
+        false;
+  }
+
   Future<void> openExactAlarmSettings() =>
       _invoke<void>('openExactAlarmSettings');
 

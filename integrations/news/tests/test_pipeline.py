@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from integrations.news.paperclip_setup import PaperclipApi, apply as apply_paperclip
 from integrations.news.pipeline import (
-    HttpClient, PipelineError, TaskStore, compact_reports, execute_task,
+    CommandRunner, HttpClient, PipelineError, TaskStore, compact_reports, execute_task,
     github_readme_api_url, receive_project_report, run_github, run_projects, validate_report,
 )
 
@@ -69,58 +69,71 @@ class NewsPipelineTests(unittest.TestCase):
         self.assertEqual(project["completed"], ["shipped sync", "new API"])
         self.assertEqual(merged["counts"]["issues"], 1)
 
-    def test_ai_fault_keeps_and_publishes_baseline_github_ranking(self):
-        backend = FakeBackend()
-        ranks = [{"ranking": 1, "repository": "owner/repo", "description": "tool", "stars": 200, "readme": "A test README."}]
-        task = run_github("daily", self.store, FakeRunner(fail=True), backend, mock_data=ranks, publish=True, task_id="daily-1")
-        result = task["result"]
-        self.assertEqual(task["status"], "degraded")
-        self.assertEqual(task["phase"], "analysis")
-        self.assertTrue(result["stale"])
-        self.assertEqual(result["brief"]["analysisStatus"], "unavailable")
-        self.assertEqual(result["repositories"][0]["repository"], "owner/repo")
-        self.assertEqual(backend.calls[0][1], "/api/v1/news/publish/github/daily")
-        self.assertEqual(backend.calls[0][2]["result"]["repositories"][0]["repository"], "owner/repo")
+    def test_runner_timeout_is_bounded_configurable_and_explicit_override_wins(self):
+        with patch.dict("os.environ", {"ORIALIS_NEWS_RUNNER_TIMEOUT": "540"}):
+            self.assertEqual(CommandRunner("codex exec").timeout, 540)
+            self.assertEqual(CommandRunner("codex exec", timeout=240).timeout, 240)
+        for value in ("0", "901", "-1", "not-an-integer"):
+            with self.subTest(value=value), patch.dict("os.environ", {"ORIALIS_NEWS_RUNNER_TIMEOUT": value}):
+                with self.assertRaises(PipelineError):
+                    CommandRunner("codex exec")
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(CommandRunner("codex exec").timeout, 180)
 
-    def test_github_period_brief_is_published_with_repository_array(self):
+    def test_command_runner_recovers_complete_json_object_after_cli_preamble(self):
+        class Completed:
+            returncode = 0
+            stderr = ""
+            stdout = "分析结果如下：\n```json\n{\"repositories\":[],\"brief\":{\"summary\":\"已核实\"}}\n```\n"
+        with patch("integrations.news.pipeline.subprocess.run", return_value=Completed()):
+            result = CommandRunner("hermes chat --oneshot").analyze("instruction", {"period": "daily"})
+        self.assertEqual(result["brief"]["summary"], "已核实")
+
+    def test_backend_requests_identify_news_worker_for_public_edge(self):
+        with patch("integrations.news.pipeline.urllib.request.build_opener") as opener:
+            opener.return_value.open.return_value.__enter__.return_value.read.return_value = b'{"ok": true}'
+            response = HttpClient("https://orialis.example").request("GET", "/api/health")
+        self.assertEqual(response, {"ok": True})
+        request = opener.return_value.open.call_args.args[0]
+        self.assertEqual(request.get_header("User-agent"), "Orialis-News/0.1")
+
+    def test_empty_github_ranking_never_calls_runner_or_overwrites_published_cache(self):
         backend = FakeBackend()
-        brief = {"title": "Daily", "summary": "Grounded overview.", "themes": ["Python tooling"], "highlights": ["owner/repo" ]}
-        runner = FakeRunner({"repositories": [{"repository": "owner/repo", "summary": "A tool."}], "brief": brief})
-        task = run_github("daily", self.store, runner, backend, mock_data=[{"repository": "owner/repo", "ranking": 1, "description": "tool"}], publish=True, task_id="daily-brief-1")
+        runner = FakeRunner()
+        task = run_github("daily", self.store, runner, backend, mock_data=[], publish=True, task_id="daily-empty")
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(task["phase"], "collection")
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(backend.calls, [])
+
+    def test_github_publishes_source_copy_without_calling_any_runner(self):
+        backend = FakeBackend()
+        runner = FakeRunner(fail=True)
+        ranks = [{"ranking": 1, "repository": "owner/repo", "sourceTitle": "中文标题", "sourceSummary": "源站原文，不改写。", "sourceTopics": ["agents"], "readme": "# README"}]
+        task = run_github("daily", self.store, runner, backend, mock_data=ranks, publish=True, task_id="daily-source-1")
         self.assertEqual(task["status"], "succeeded")
+        self.assertEqual(runner.calls, [])
+        self.assertFalse(task["result"]["stale"])
         published = backend.calls[0][2]["result"]
-        self.assertEqual(published["repositories"][0]["repository"], "owner/repo")
-        self.assertEqual(published["brief"]["summary"], "Grounded overview.")
-        self.assertEqual(published["brief"]["analysisStatus"], "complete")
-        self.assertEqual(published["brief"]["source"], "github.com/trending")
+        self.assertEqual(published["repositories"][0]["summary"], ranks[0]["sourceSummary"])
+        self.assertEqual(published["repositories"][0]["sourceTitle"], ranks[0]["sourceTitle"])
+        self.assertEqual(published["repositories"][0]["readme"], ranks[0]["readme"])
+        self.assertEqual(published["brief"]["analysisStatus"], "not_required")
+        self.assertEqual(published["brief"]["source"], "githot.dev")
+        self.assertEqual(published["brief"]["themes"], [])
+        self.assertEqual(published["brief"]["highlights"], [])
+        self.assertEqual(published["repositories"][0]["sourceTopics"], ["agents"])
 
-    def test_github_analysis_scope_violation_degrades_and_preserves_full_ranking(self):
-        ranks = [
-            {"ranking": n, "repository": f"owner/repo-{n}", "period": "weekly", "description": f"source description {n}", "readme": f"README {n}"}
-            for n in range(1, 18)
-        ]
-        out_of_scope_repo = {"repository": "owner/repo-17", "summary": "must not be applied"}
-        cases = [
-            ({"repositories": [{"repository": "owner/repo-1", "summary": "in scope"}, out_of_scope_repo], "brief": {"title": "Weekly", "summary": "Overview", "themes": [], "highlights": []}}, "repo-extra"),
-            ({"repositories": [{"repository": "owner/repo-1", "summary": "in scope"}], "brief": {"title": "Weekly", "summary": "Overview", "themes": [], "highlights": [{"repository": "owner/repo-17", "text": "outside the analysis input"}]}}, "brief-extra"),
-        ]
+    def test_weekly_direct_publication_keeps_every_source_summary(self):
+        ranks = [{"ranking": n, "repository": f"owner/repo-{n}", "sourceSummary": f"源站简介 {n}"} for n in range(1, 19)]
+        runner = FakeRunner({"repositories": [{"repository": "invented/repo"}]})
         backend = FakeBackend()
-        for response, task_id in cases:
-            with self.subTest(task_id=task_id):
-                runner = FakeRunner(response)
-                task = run_github("weekly", self.store, runner, backend, mock_data=ranks, publish=True, task_id=task_id)
-                result = task["result"]
-                self.assertEqual(task["status"], "degraded")
-                self.assertEqual(task["phase"], "analysis")
-                self.assertEqual([r["repository"] for r in result["repositories"]], [r["repository"] for r in ranks])
-                self.assertEqual(len(runner.calls[0][1]["repositories"]), 10)
-                self.assertTrue(all(r["analysisStatus"] == "unavailable" for r in result["repositories"]))
-                self.assertTrue(all("summary" not in r for r in result["repositories"]))
-                self.assertEqual(result["brief"]["analysisStatus"], "unavailable")
-                published = backend.calls[-1][2]["result"]
-                self.assertEqual(len(published["repositories"]), 17)
-                self.assertEqual(published["repositories"][16]["description"], "source description 17")
-                self.assertNotIn("summary", published["repositories"][16])
+        task = run_github("weekly", self.store, runner, backend, mock_data=ranks, publish=True, task_id="weekly-source-1")
+        self.assertEqual(task["status"], "succeeded")
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(len(task["result"]["repositories"]), 18)
+        self.assertEqual([x["summary"] for x in task["result"]["repositories"]], [x["sourceSummary"] for x in ranks])
+        self.assertEqual(backend.calls[0][1], "/api/v1/news/publish/github/weekly")
 
     def test_publish_timeout_retries_exact_prepared_payload_without_reanalysis(self):
         class TimeoutAfterAcceptBackend(FakeBackend):

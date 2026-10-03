@@ -25,7 +25,9 @@ import java.util.concurrent.locks.ReentrantLock
 internal object SystemSnapshot {
     const val ROUTE = "orialis.system.route"
     const val SCOPE = "orialis.system.scope"
-    const val CHANNEL = "orialis_reminders_v1"
+    const val CHANNEL = "schedule_reminders"
+    const val CHAT_CHANNEL = "chat_messages"
+    const val UPDATE_CHANNEL = "schedule_updates"
     private const val MAX_BYTES = 256 * 1024
     private fun file(context: Context) = AtomicFile(File(context.filesDir, "system_projection_v1.json"))
 
@@ -55,6 +57,7 @@ internal object SystemSnapshot {
 
     fun validRoute(route: String): Boolean {
         if (route in setOf("/today", "/calendar", "/events")) return true
+        if (Regex("^/chat\\?conversationId=[A-Za-z0-9_.~+%-]{1,512}(?:&messageId=[A-Za-z0-9_.~+%-]{1,512})?$").matches(route)) return true
         // Existing read-only Schedule detail route, optionally carrying its local date.
         return Regex("^/calendar/schedule/(?:[A-Za-z0-9_.~+-]|%[A-Fa-f0-9]{2})+(?:\\?date=[0-9TZ:+.%\\-]+)?$").matches(route)
     }
@@ -100,7 +103,7 @@ internal object SystemSnapshot {
         val previous = read(context)
         writeUnlocked(context, next)
         // Persist first: a receiver racing this change must only see the new identity.
-        cancelAlarms(context, previous)
+        cancelAlarms(context, previous, next)
         cancelChangedNotifications(context, previous, next)
         restore(context)
         TodayWidgetProvider.requestRefresh(context)
@@ -142,7 +145,7 @@ internal object SystemSnapshot {
             }
             next.put("reminders", valid)
             writeUnlocked(context, next)
-            cancelAlarms(context, previous)
+            cancelAlarms(context, previous, next)
             cancelChangedNotifications(context, previous, next)
             restore(context)
         }
@@ -185,10 +188,16 @@ internal object SystemSnapshot {
         return (0 until array.length()).mapNotNull { array.optJSONObject(it) }
     }
 
-    private fun cancelAlarms(context: Context, snapshot: JSONObject?) {
+    private fun cancelAlarms(context: Context, snapshot: JSONObject?, next: JSONObject? = null) {
         val manager = context.getSystemService(AlarmManager::class.java)
         val scope = snapshot?.optString("scope") ?: return
+        val preserveUnchanged = next != null && next.optBoolean("enabled") && next.optString("scope") == scope
+        val nextRows = rows(next).associateBy { it.optString("key") }
         for (row in rows(snapshot)) {
+            // Inexact alarms may still be queued after their nominal fire time.
+            // A routine refresh must not cancel them: restore only registers
+            // future rows, so cancelling unchanged overdue rows loses delivery.
+            if (preserveUnchanged && nextRows[row.optString("key")]?.toString() == row.toString()) continue
             alarmPending(context, scope, row, PendingIntent.FLAG_NO_CREATE)?.let {
                 manager.cancel(it)
                 it.cancel()
@@ -205,12 +214,18 @@ internal object SystemSnapshot {
                 manager.cancel("orialis:${previous?.optString("scope")}:${row.optString("key")}", 0)
             }
         }
-        if (!sameScope) manager.cancel("orialis:preview", 0)
+        if (!sameScope) cancelNotifications(context, previous)
     }
 
     private fun cancelNotifications(context: Context, snapshot: JSONObject?) {
         val manager = context.getSystemService(NotificationManager::class.java)
         for (row in rows(snapshot)) manager.cancel("orialis:${snapshot?.optString("scope")}:${row.optString("key")}", 0)
+        // Chat/update notices are not part of the reminder projection. Clear
+        // them too when consent or identity changes, including orphaned tags.
+        if (Build.VERSION.SDK_INT >= 23) {
+            manager.activeNotifications.filter { it.tag?.startsWith("orialis:") == true }
+                .forEach { manager.cancel(it.tag, it.id) }
+        }
     }
 
     fun restore(context: Context) = withLock(context) { restoreUnlocked(context) }
@@ -266,10 +281,24 @@ internal object SystemSnapshot {
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= 26) {
-            val channel = NotificationChannel(CHANNEL, "任务与日程提醒", NotificationManager.IMPORTANCE_HIGH)
-            channel.description = "你设置的 Orialis 任务与日程提醒"
-            channel.lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
-            context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+            ensureChannels(context)
+        }
+    }
+
+    fun ensureChannels(context: Context) {
+        if (Build.VERSION.SDK_INT < 26) return
+        val manager = context.getSystemService(NotificationManager::class.java)
+        listOf(
+            Triple(CHAT_CHANNEL, "聊天消息", "Hermes 与 Agent 会话的新消息"),
+            Triple(CHANNEL, "日程提醒", "已同步到本机的日程提醒"),
+            Triple(UPDATE_CHANNEL, "日程变更", "日程新增、变更或取消"),
+            Triple("project_updates", "项目更新", "项目状态与动态"),
+            Triple("news_updates", "资讯更新", "Orialis 资讯更新"),
+        ).forEach { (id, name, description) ->
+            manager.createNotificationChannel(NotificationChannel(id, name, NotificationManager.IMPORTANCE_HIGH).apply {
+                this.description = description
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+            })
         }
     }
 }

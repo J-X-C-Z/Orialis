@@ -430,12 +430,14 @@ class _LuminaMenuGlass extends StatelessWidget {
     required this.radius,
     required this.color,
     this.glass = false,
+    this.liquidGlass,
     this.padding = EdgeInsets.zero,
   });
   final Widget child;
   final double radius;
   final Color color;
   final bool glass;
+  final bool? liquidGlass;
   final EdgeInsetsGeometry padding;
   @override
   Widget build(BuildContext context) => Stack(
@@ -447,6 +449,7 @@ class _LuminaMenuGlass extends StatelessWidget {
               padding: EdgeInsets.zero,
               depth: LuminaSurfaceDepth.raised,
               glass: glass,
+              liquidGlass: liquidGlass,
               color: color,
               radius: radius,
               child: const SizedBox.expand(),
@@ -551,7 +554,7 @@ Widget _luminaSelectionPopupTheme(BuildContext context, Widget child) {
   );
 }
 
-/// Glass popup with the SDK's traversal, outside-tap dismissal and menu anchor.
+/// Card popup with the SDK's traversal, outside-tap dismissal and menu anchor.
 class LuminaMenuAnchor extends StatelessWidget {
   const LuminaMenuAnchor({
     required this.menuChildren,
@@ -581,7 +584,7 @@ class LuminaMenuAnchor extends StatelessWidget {
                   .clamp(64.0, 280.0),
               child: _LuminaMenuGlass(
                 color: LuminaTheme.of(context).colors.raisedSurface,
-                glass: true,
+                liquidGlass: false,
                 radius: 22,
                 padding: const EdgeInsets.all(6),
                 child: Column(

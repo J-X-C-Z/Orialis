@@ -12,6 +12,8 @@ class SyncCoordinator {
     required this.realtime,
     this.chatRepository,
     this.localChanges,
+    this.onChatMessage,
+    this.onScheduleUpdate,
     this.localChangeDelay = const Duration(milliseconds: 250),
   });
 
@@ -19,6 +21,8 @@ class SyncCoordinator {
   final MobileRealtimeClient realtime;
   final ChatRepository? chatRepository;
   final Stream<void>? localChanges;
+  final Future<void> Function(Map<String, dynamic>)? onChatMessage;
+  final Future<void> Function(Map<String, dynamic>)? onScheduleUpdate;
   final Duration localChangeDelay;
   StreamSubscription<MobileEnvelope>? _events;
   StreamSubscription<void>? _localChanges;
@@ -77,8 +81,23 @@ class SyncCoordinator {
     if (event.type == 'message') {
       final repository = chatRepository;
       if (repository != null) {
-        unawaited(repository.applyRemoteMessage(event.payload));
+        unawaited(() async {
+          await repository.applyRemoteMessage(event.payload);
+          await onChatMessage?.call(event.payload);
+        }());
+      } else {
+        final notify = onChatMessage;
+        if (notify != null) unawaited(notify(event.payload));
       }
+      return;
+    }
+    if (event.type == 'schedule.updated') {
+      unawaited(() async {
+        final state = await requestSync();
+        if (!_disposed && state == SyncState.idle) {
+          await onScheduleUpdate?.call(event.payload);
+        }
+      }());
       return;
     }
     if (isSyncTriggerType(event.type)) {
