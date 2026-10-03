@@ -55,6 +55,8 @@ pub(crate) async fn capabilities() -> Json<CapabilitiesResponse> {
             "task_children",
             "schedule_importance",
             "multidevice.v1",
+            "cron_delivery",
+            "proactive_delivery",
         ],
     })
 }
@@ -69,5 +71,7 @@ mod tests {
         assert!(response.0.capabilities.contains(&"task_children"));
         assert!(response.0.capabilities.contains(&"schedule_importance"));
         assert!(response.0.capabilities.contains(&"multidevice.v1"));
+        assert!(response.0.capabilities.contains(&"cron_delivery"));
+        assert!(response.0.capabilities.contains(&"proactive_delivery"));
     }
 }

@@ -365,14 +365,9 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
             command_tx,
         )
         .await;
-    if send_message(
-        &mut socket,
-        &protocol::GatewayMessage::HelloAck {
-            version: protocol::PROTOCOL_VERSION,
-        },
-    )
-    .await
-    .is_err()
+    if send_message(&mut socket, &super::server_hello_ack())
+        .await
+        .is_err()
     {
         state.agent.remove_connection(&connection_id).await;
         return;

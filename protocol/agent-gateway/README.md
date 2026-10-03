@@ -79,11 +79,14 @@ capability resume 控制帧和带序列的非语音结构化事件。服务端�
 }
 ```
 
-`hello` 必须是首帧；`platform` 当前使用 `macos` 或 `windows`。`capabilities` 可选，
+`hello` 必须是首帧；`platform` 当前使用 `macos`、`windows` 或 `linux`。`capabilities` 可选，
 但发送方不得声明尚未能处理的扩展。Orialis 返回
-`{"version":1,"type":"hello_ack"}`；详细能力与续传使用 `capabilities.hello`。
+`hello_ack`，其中可选的 `capabilities` 列表声明服务端能力，包括
+`cron_delivery` 和 `proactive_delivery`，供独立定时投递在首轮握手时判断支持情况。
+旧版 `{"version":1,"type":"hello_ack"}` 仍可解析，但不表示支持扩展投递。
+详细能力与续传仍使用 `capabilities.hello`。
 当前 Python helper 的默认 `hello()` 会列出插件支持的扩展名称；实际发送仍以对端
-返回的 `capabilities.ack` 和兼容矩阵为准。
+返回的 `hello_ack` / `capabilities.ack` 和兼容矩阵为准。
 收到 `ping` 返回 `pong`；未知类型、错误
 版本、缺字段或非法附件生成 `error`，不会要求插件进程退出。
 
