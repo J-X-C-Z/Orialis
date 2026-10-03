@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:drift/native.dart';
@@ -28,6 +29,10 @@ void main() {
   late AgentChatService service;
   final requests = <String>[];
   var bindingAvailable = true;
+  Completer<void>? bindingGate;
+  String? bindingTarget;
+  String? gatedConversation;
+  String? rejectedConversation;
   var changeIdentity = false;
   var unavailable = false;
   String? createdTitle;
@@ -46,6 +51,10 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     requests.clear();
     bindingAvailable = true;
+    bindingGate = null;
+    gatedConversation = null;
+    rejectedConversation = null;
+    bindingTarget = 'JXCZ_MBA_Hermes';
     changeIdentity = false;
     unavailable = false;
     createdTitle = null;
@@ -59,8 +68,16 @@ void main() {
         expect(request.headers.value('Authorization'), 'Session test-session');
       }
       requests.add('${request.method} ${request.uri.path}');
+      if (request.method == 'GET' &&
+          request.uri.path.endsWith('/agent-device') &&
+          (gatedConversation == null ||
+              request.uri.path.contains('/$gatedConversation/'))) {
+        await bindingGate?.future;
+      }
       request.response.headers.contentType = ContentType.json;
-      if (unavailable) {
+      if (unavailable ||
+          (rejectedConversation != null &&
+              request.uri.path.contains('/$rejectedConversation/'))) {
         request.response.statusCode = unavailableStatus;
         request.response.write('{}');
       } else if (request.uri.path == '/api/v1/agent/devices') {
@@ -105,7 +122,7 @@ void main() {
         request.response.write(
           jsonEncode({
             'conversationId': 'conversation-mac',
-            'deviceId': 'JXCZ_MBA_Hermes',
+            'deviceId': bindingTarget,
           }),
         );
       } else {
@@ -114,7 +131,11 @@ void main() {
       await request.response.close();
     });
   });
-  tearDown(() async => server.close(force: true));
+  tearDown(() async {
+    if (bindingGate?.isCompleted == false) bindingGate!.complete();
+    service.dispose();
+    await server.close(force: true);
+  });
 
   test('registry exposes only Mac and Azure Hermes', () async {
     final devices = await service.devices();
@@ -165,6 +186,119 @@ void main() {
     expect(await restarted.target('conversation-mac'), isNull);
   });
   test(
+    'cached history opens before slow refresh and requests are shared',
+    () async {
+      expect(await service.target('conversation-mac'), 'JXCZ_MBA_Hermes');
+      requests.clear();
+      bindingGate = Completer<void>();
+      bindingTarget = 'JXCZ_AOZORA_Hermes';
+      final restarted = AgentChatService(config);
+      final changed = restarted.targetChanges.first;
+      expect(
+        await restarted.cachedTarget('conversation-mac'),
+        'JXCZ_MBA_Hermes',
+      );
+      expect(requests, isEmpty);
+      final cached = await Future.wait(
+        List.generate(5, (_) => restarted.target('conversation-mac')),
+      ).timeout(const Duration(seconds: 1));
+      expect(cached, everyElement('JXCZ_MBA_Hermes'));
+      var onlineFinished = false;
+      final online = restarted
+          .target('conversation-mac', requireOnline: true)
+          .then((value) {
+            onlineFinished = true;
+            return value;
+          });
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(onlineFinished, false);
+      expect(requests, [
+        'GET /api/v1/conversations/conversation-mac/agent-device',
+      ]);
+      bindingGate!.complete();
+      expect(await online, 'JXCZ_AOZORA_Hermes');
+      expect(await changed, ('conversation-mac', 'JXCZ_AOZORA_Hermes'));
+      expect(
+        await restarted.cachedTarget('conversation-mac'),
+        'JXCZ_AOZORA_Hermes',
+      );
+      restarted.dispose();
+    },
+  );
+
+  test(
+    'background rejection removes the binding and notifies history',
+    () async {
+      expect(await service.target('conversation-mac'), 'JXCZ_MBA_Hermes');
+      unavailable = true;
+      unavailableStatus = 403;
+      final changed = service.targetChanges.first;
+      expect(await service.target('conversation-mac'), 'JXCZ_MBA_Hermes');
+      expect(await changed, ('conversation-mac', null));
+      expect(await service.cachedTarget('conversation-mac'), isNull);
+    },
+  );
+
+  test(
+    'auth rejection prevents another cached binding surviving restart',
+    () async {
+      await service.target('conversation-mac');
+      await service.target('conversation-other');
+      unavailable = true;
+      unavailableStatus = 401;
+      final changed = service.targetChanges.first;
+      await expectLater(
+        service.target('conversation-mac', requireOnline: true),
+        throwsException,
+      );
+      expect(await changed, ('', null));
+      final restarted = AgentChatService(config);
+      expect(await restarted.cachedTarget('conversation-other'), isNull);
+      restarted.dispose();
+    },
+  );
+
+  test(
+    'late success cannot restore bindings after concurrent auth rejection',
+    () async {
+      await service.target('conversation-mac');
+      await service.target('conversation-other');
+      bindingGate = Completer<void>();
+      gatedConversation = 'conversation-other';
+      rejectedConversation = 'conversation-mac';
+      unavailableStatus = 401;
+      final pending = service.target('conversation-other', requireOnline: true);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await expectLater(
+        service.target('conversation-mac', requireOnline: true),
+        throwsException,
+      );
+      bindingGate!.complete();
+      expect(await pending, isNull);
+      final restarted = AgentChatService(config);
+      expect(await restarted.cachedTarget('conversation-other'), isNull);
+      restarted.dispose();
+    },
+  );
+
+  test(
+    'identity switch during refresh cannot overwrite the old binding',
+    () async {
+      await service.target('conversation-mac');
+      bindingGate = Completer<void>();
+      bindingTarget = 'JXCZ_AOZORA_Hermes';
+      final refresh = service.target('conversation-mac', requireOnline: true);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      config.token = 'another-account';
+      expect(await service.cachedTarget('conversation-mac'), isNull);
+      bindingGate!.complete();
+      expect(await refresh, isNull);
+      config.token = 'test-session';
+      expect(await service.cachedTarget('conversation-mac'), 'JXCZ_MBA_Hermes');
+    },
+  );
+
+  test(
     'device aliases persist per server session without changing routing',
     () async {
       await service.renameDevice('JXCZ_MBA_Hermes', '  工作 Mac  ');
@@ -195,7 +329,10 @@ void main() {
       expect(await service.target('conversation-mac'), 'JXCZ_MBA_Hermes');
       unavailable = true;
       unavailableStatus = 403;
-      await expectLater(service.target('conversation-mac'), throwsException);
+      await expectLater(
+        service.target('conversation-mac', requireOnline: true),
+        throwsException,
+      );
       unavailableStatus = 503;
       expect(await AgentChatService(config).target('conversation-mac'), isNull);
     },

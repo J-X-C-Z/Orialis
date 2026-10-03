@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
@@ -55,8 +56,28 @@ class AgentChatService {
     config.addIdentityListener(_resetDeviceNames);
   }
 
-  Future<void> _resetDeviceNames() async => _deviceNames.clear();
-  void dispose() => config.removeIdentityListener(_resetDeviceNames);
+  int _identityGeneration = 0;
+  bool _disposed = false;
+  final _targetChanges = StreamController<(String, String?)>.broadcast();
+  final _refreshes = <String, Future<String?>>{};
+  final _authRevisions = <(String, String), int>{};
+
+  /// Authoritative binding changes discovered while showing cached history.
+  /// An empty conversation ID invalidates all visible bindings.
+  Stream<(String, String?)> get targetChanges => _targetChanges.stream;
+
+  Future<void> _resetDeviceNames() async {
+    _identityGeneration++;
+    _deviceNames.clear();
+    if (!_disposed) _targetChanges.add(('', null));
+  }
+
+  void dispose() {
+    _disposed = true;
+    _identityGeneration++;
+    config.removeIdentityListener(_resetDeviceNames);
+    unawaited(_targetChanges.close());
+  }
 
   final String macDeviceId;
   final String azureDeviceId;
@@ -174,36 +195,124 @@ class AgentChatService {
   String _bindingCacheKey((String, String) scope, String conversationId) =>
       'orialis.hermesBinding.${sha256.convert(utf8.encode(jsonEncode([scope.$1, scope.$2, conversationId])))}';
 
+  String _authInvalidationKey((String, String) scope) =>
+      'orialis.hermesBindingInvalid.${sha256.convert(utf8.encode(jsonEncode([scope.$1, scope.$2])))}';
+
+  Future<bool> _isCurrent((String, String) scope, int generation) async {
+    if (_disposed || generation != _identityGeneration) return false;
+    try {
+      return await identity() == scope && generation == _identityGeneration;
+    } on StateError {
+      return false;
+    }
+  }
+
+  /// Reads a verified, session-scoped binding without starting a request.
+  Future<String?> cachedTarget(String conversationId) async {
+    final generation = _identityGeneration;
+    final scope = await identity();
+    final preferences = await SharedPreferences.getInstance();
+    await _loadDeviceNames(scope);
+    if (!await _isCurrent(scope, generation) ||
+        preferences.getBool(_authInvalidationKey(scope)) == true) {
+      return null;
+    }
+    final cached = preferences.getString(
+      _bindingCacheKey(scope, conversationId),
+    );
+    return isAllowedTarget(cached) ? cached : null;
+  }
+
   Future<String?> target(
     String conversationId, {
     bool requireOnline = false,
   }) async {
+    final generation = _identityGeneration;
     final scope = await identity();
     final preferences = await SharedPreferences.getInstance();
     final key = _bindingCacheKey(scope, conversationId);
     await _loadDeviceNames(scope);
+    if (!await _isCurrent(scope, generation)) return null;
+    final cached = preferences.getBool(_authInvalidationKey(scope)) == true
+        ? null
+        : preferences.getString(key);
+    final refresh = _refreshTarget(scope, generation, conversationId, key);
+    if (!requireOnline && isAllowedTarget(cached)) {
+      // The API client bounds connection/response time. Repeated list renders
+      // share one request, and background failures never block local history.
+      unawaited(refresh.then<void>((_) {}, onError: (Object _) {}));
+      return cached;
+    }
     try {
-      final target = await (await _clientFor(
-        scope,
-      )).conversationAgentDevice(conversationId);
-      if (await identity() != scope) return null;
-      if (isAllowedTarget(target)) {
-        await preferences.setString(key, target!);
-      } else {
-        await preferences.remove(key);
-      }
-      return target;
+      return await refresh;
     } on DioException catch (error) {
-      // Offline history remains readable, scoped to the exact server/session.
-      // Auth and binding errors must not revive a stale device assignment.
-      if (error.response != null && (error.response!.statusCode ?? 0) < 500) {
-        await preferences.remove(key);
+      if (requireOnline ||
+          (error.response != null && (error.response!.statusCode ?? 0) < 500)) {
         rethrow;
       }
-      if (requireOnline) rethrow;
-      if (await identity() != scope) return null;
-      return preferences.getString(key);
+      return null;
     }
+  }
+
+  Future<String?> _refreshTarget(
+    (String, String) scope,
+    int generation,
+    String conversationId,
+    String key,
+  ) {
+    final requestKey = '$generation:$key';
+    final authRevision = _authRevisions[scope] ?? 0;
+    final existing = _refreshes[requestKey];
+    if (existing != null) return existing;
+    late final Future<String?> refresh;
+    refresh = (() async {
+      final preferences = await SharedPreferences.getInstance();
+      final previous = preferences.getString(key);
+      try {
+        final target = await (await _clientFor(
+          scope,
+        )).conversationAgentDevice(conversationId);
+        if (!await _isCurrent(scope, generation)) return null;
+        // A concurrent authentication rejection invalidates all bindings for
+        // this session, including successful requests already in flight.
+        if ((_authRevisions[scope] ?? 0) != authRevision) return null;
+        final allowed = isAllowedTarget(target) ? target : null;
+        if (allowed != null) {
+          await preferences.setString(key, allowed);
+        } else {
+          await preferences.remove(key);
+        }
+        if (!await _isCurrent(scope, generation) ||
+            (_authRevisions[scope] ?? 0) != authRevision) {
+          return null;
+        }
+        if (previous != allowed) {
+          _targetChanges.add((conversationId, allowed));
+        }
+        return allowed;
+      } on DioException catch (error) {
+        final status = error.response?.statusCode;
+        if (status != null &&
+            status < 500 &&
+            await _isCurrent(scope, generation)) {
+          if (status == 401) {
+            _authRevisions[scope] = (_authRevisions[scope] ?? 0) + 1;
+            await preferences.setBool(_authInvalidationKey(scope), true);
+          }
+          await preferences.remove(key);
+          if (await _isCurrent(scope, generation)) {
+            _targetChanges.add((status == 401 ? '' : conversationId, null));
+          }
+        }
+        rethrow;
+      } finally {
+        if (identical(_refreshes[requestKey], refresh)) {
+          _refreshes.remove(requestKey);
+        }
+      }
+    })();
+    _refreshes[requestKey] = refresh;
+    return refresh;
   }
 
   Future<Map<String, dynamic>> createConversation(

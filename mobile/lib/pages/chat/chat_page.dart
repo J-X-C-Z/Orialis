@@ -59,23 +59,63 @@ class _ChatPageState extends ConsumerState<ChatPage>
   StreamSubscription<List<Conversation>>? _notificationConversationSubscription;
   Timer? _conversationPositionTimer;
   final _scrollController = ScrollController();
-  late final _conversationsStream = widget.repository
-      .watchConversations()
-      .asyncMap((conversations) async {
-        final service = ref.read(agentChatServiceProvider);
-        final visible = await Future.wait(
-          conversations.map((conversation) async {
-            try {
-              final target = await service.target(conversation.id);
-              return service.isAllowedTarget(target) ? conversation : null;
-            } catch (_) {
-              return null;
-            }
-          }),
-        );
-        // Keep historical test/Codex records in storage, but close their UI.
-        return visible.whereType<Conversation>().toList();
-      });
+  final _conversationListController =
+      StreamController<List<Conversation>>.broadcast();
+  Stream<List<Conversation>> get _conversationsStream =>
+      _conversationListController.stream;
+  StreamSubscription<List<Conversation>>? _conversationListSubscription;
+  StreamSubscription<(String, String?)>? _targetSubscription;
+  List<Conversation> _localConversations = [];
+  final Map<String, String?> _visibleTargets = {};
+  int _listGeneration = 0;
+
+  void _emitConversations() {
+    if (!mounted) return;
+    _conversationListController.add(
+      _localConversations
+          .where(
+            (row) => ref
+                .read(agentChatServiceProvider)
+                .isAllowedTarget(_visibleTargets[row.id]),
+          )
+          .toList(),
+    );
+  }
+
+  Future<void> _updateConversations(List<Conversation> rows) async {
+    final generation = ++_listGeneration;
+    _localConversations = rows;
+    final service = ref.read(agentChatServiceProvider);
+    final cached = await Future.wait(
+      rows.map((row) async {
+        try {
+          return await service.cachedTarget(row.id);
+        } catch (_) {
+          return null;
+        }
+      }),
+    );
+    if (!mounted || generation != _listGeneration) return;
+    _visibleTargets.clear();
+    for (var i = 0; i < rows.length; i++) {
+      _visibleTargets[rows[i].id] = cached[i];
+    }
+    _emitConversations();
+    for (final row in rows) {
+      unawaited(() async {
+        String? target;
+        try {
+          target = await service.target(row.id);
+        } catch (_) {
+          target = null;
+        }
+        if (!mounted || generation != _listGeneration) return;
+        _visibleTargets[row.id] = target;
+        _emitConversations();
+      }());
+    }
+  }
+
   final _latestMessageAnchor = GlobalKey();
   final _imagePicker = ImagePicker();
   final _attachmentBridge = AttachmentBridge();
@@ -317,6 +357,29 @@ class _ChatPageState extends ConsumerState<ChatPage>
       if (!mounted) return;
       _enqueueAgentEvent(event);
     });
+    _targetSubscription = ref
+        .read(agentChatServiceProvider)
+        .targetChanges
+        .listen((change) {
+          if (change.$1.isEmpty) {
+            _listGeneration++;
+            _visibleTargets.clear();
+            if (mounted) setState(() => _chatDeviceId = null);
+          } else {
+            _visibleTargets[change.$1] = change.$2;
+          }
+          _emitConversations();
+          if (mounted && change.$1 == _conversationId) {
+            setState(() => _chatDeviceId = change.$2);
+          }
+        });
+    _conversationListSubscription = widget.repository
+        .watchConversations()
+        .listen(
+          _updateConversations,
+          onError: (Object error, StackTrace stack) =>
+              _conversationListController.addError(error, stack),
+        );
     _openNotificationRoute();
   }
 
@@ -381,6 +444,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
       if (!waiter.isCompleted) waiter.complete(null);
     }
     _commandWaiters.clear();
+    _listGeneration++;
+    unawaited(_conversationListSubscription?.cancel());
+    unawaited(_targetSubscription?.cancel());
+    unawaited(_conversationListController.close());
     _composerFocus.dispose();
     _controller.dispose();
     _scrollController.dispose();

@@ -29,6 +29,10 @@ class _Service extends AgentChatService {
   final renamed = <String>[];
   String macName = 'Mac 电脑';
   Completer<void>? validationGate;
+  Completer<void>? unknownGate;
+  @override
+  Future<String?> cachedTarget(String id) async =>
+      id == "existing-mac" ? "JXCZ_MBA_Hermes" : null;
   int validations = 0;
   @override
   String? targetLabel(String? id) =>
@@ -63,6 +67,9 @@ class _Service extends AgentChatService {
     if (requireOnline) {
       validations++;
       await validationGate?.future;
+    }
+    if (conversationId != "existing-mac" && conversationId != "mac-chat") {
+      await unknownGate?.future;
     }
     return conversationId == 'mac-chat' || conversationId == 'existing-mac'
         ? 'JXCZ_MBA_Hermes'
@@ -101,6 +108,7 @@ Finder action(String label) => find.byWidgetPredicate(
 Future<_Service> _openChat(
   WidgetTester tester, {
   bool notificationMessages = false,
+  bool slowUnknown = false,
 }) async {
   tester.view.physicalSize = const Size(432, 960);
   tester.view.devicePixelRatio = 1;
@@ -132,6 +140,7 @@ Future<_Service> _openChat(
     }
   });
   final service = _Service();
+  if (slowUnknown) service.unknownGate = Completer<void>();
   final realtime = MobileRealtimeClient(config: _Config());
   final sync = _Sync(realtime: realtime, chatRepository: repository);
   await tester.pumpWidget(
@@ -163,6 +172,41 @@ Future<_Service> _openChat(
 }
 
 void main() {
+  testWidgets('cached chat opens while an unknown binding remains pending', (
+    tester,
+  ) async {
+    final service = await _openChat(tester, slowUnknown: true);
+    expect(action('返回会话列表'), findsOneWidget);
+    expect(service.unknownGate!.isCompleted, isFalse);
+    service.unknownGate!.complete();
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('chat composer reopens hidden IME on text and padding taps', (
+    tester,
+  ) async {
+    await _openChat(tester);
+    final editor = find.byType(EditableText).last;
+    await tester.tap(editor);
+    await tester.pumpAndSettle();
+    expect(tester.testTextInput.isVisible, isTrue);
+    await tester.enterText(editor, '保留草稿');
+    for (var i = 0; i < 3; i++) {
+      tester.testTextInput.hide();
+      await tester.tapAt(
+        tester.getTopLeft(find.byType(LuminaTextField).last) +
+            const Offset(8, 24),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.testTextInput.isVisible, isTrue);
+      expect(tester.widget<EditableText>(editor).controller.text, '保留草稿');
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('notification reopens a conversation and changes message focus', (
     tester,
   ) async {
