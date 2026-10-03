@@ -1164,6 +1164,11 @@ mod tests {
     use axum::http::HeaderValue;
     use sqlx::sqlite::SqlitePoolOptions;
 
+    // These tests use independent databases but share the process-wide Scrypt
+    // admission limit. Serialize scenarios so the load test cannot consume
+    // another test's permits; concurrency within each scenario stays intact.
+    static PAIRING_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     async fn test_state() -> (Arc<AppState>, String, String, std::path::PathBuf) {
         let database_path =
             std::env::temp_dir().join(format!("orialis-node-control-{}.db", Uuid::new_v4()));
@@ -1233,6 +1238,7 @@ mod tests {
 
     #[tokio::test]
     async fn persisted_pairing_is_account_bound_and_revocation_blocks_device_credential() {
+        let _pairing_guard = PAIRING_TEST_LOCK.lock().await;
         let (state, _account_id, other_account, database_path) = test_state().await;
         let identity = NodeIdentity {
             display_name: "Office node".to_owned(),
@@ -1466,6 +1472,7 @@ mod tests {
 
     #[tokio::test]
     async fn pairing_code_is_one_time_and_expiry_is_enforced() {
+        let _pairing_guard = PAIRING_TEST_LOCK.lock().await;
         let (state, _, _, database_path) = test_state().await;
         let identity = NodeIdentity {
             display_name: "test".into(),
@@ -1625,6 +1632,7 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_completions_are_one_time_and_revoke_serializes_with_heartbeat() {
+        let _pairing_guard = PAIRING_TEST_LOCK.lock().await;
         let (state, _, _, database_path) = test_state().await;
         let identity = NodeIdentity {
             display_name: "race node".into(),
@@ -1716,6 +1724,7 @@ mod tests {
 
     #[tokio::test]
     async fn global_pairing_creation_limit_cannot_be_raced_past() {
+        let _pairing_guard = PAIRING_TEST_LOCK.lock().await;
         let (state, _, _, database_path) = test_state().await;
         let mut tasks = tokio::task::JoinSet::new();
         for index in 0..40 {

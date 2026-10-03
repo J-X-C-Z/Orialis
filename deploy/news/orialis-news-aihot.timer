@@ -9,4 +9,3 @@ Unit=orialis-news-aihot.service
 
 [Install]
 WantedBy=timers.target
-

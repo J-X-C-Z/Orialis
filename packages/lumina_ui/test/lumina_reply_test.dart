@@ -90,7 +90,9 @@ void main() {
     );
   });
 
-  testWidgets('compact top bar retains actions and live glass', (tester) async {
+  testWidgets('compact top bar retains actions in the title card', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       harness(
         const Center(
@@ -106,7 +108,16 @@ void main() {
         ),
       ),
     );
-    expect(find.byType(BackdropFilter), findsOneWidget);
+    final header = find.byType(LuminaTopBar);
+    expect(
+      find.descendant(of: header, matching: find.byType(LuminaCardScope)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: header, matching: find.byType(BackdropFilter)),
+      findsNothing,
+    );
+    expect(find.text('Today'), findsOneWidget);
     expect(
       tester.getSize(find.byType(LuminaTopBar)).height,
       lessThanOrEqualTo(64),

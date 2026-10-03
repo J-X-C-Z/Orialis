@@ -9,4 +9,3 @@ Unit=orialis-news-github-daily.service
 
 [Install]
 WantedBy=timers.target
-

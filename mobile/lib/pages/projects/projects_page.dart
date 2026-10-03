@@ -241,6 +241,9 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                                           await ref
                                               .read(projectRepositoryProvider)
                                               .deleteProject(p);
+                                          if (mounted && _selected == p.id) {
+                                            _closeProject();
+                                          }
                                         }
                                       },
                                     ),
@@ -554,6 +557,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                                           await ref
                                               .read(projectRepositoryProvider)
                                               .deleteProject(selected);
+                                          if (mounted) _closeProject();
                                         }
                                       },
                                     ),

@@ -1,6 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:orialis_mobile/app/app.dart';
 import 'package:orialis_mobile/app/design/design_components.dart';
 import 'package:orialis_mobile/core/config/app_config.dart';
@@ -60,6 +61,7 @@ void main() {
   testWidgets(
     'desktop destinations and offline task creation work at wide and narrow sizes',
     (tester) async {
+      SharedPreferences.setMockInitialValues({});
       tester.view.physicalSize = const Size(1180, 800);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -136,9 +138,16 @@ void main() {
       await tester.tap(find.text('GitHub').last);
       await tester.pumpAndSettle();
       expect(find.text('GitHub Trending'), findsOneWidget);
-      expect(
-        tester.getTopLeft(find.text('GitHub 日报')).dy,
-        greaterThan(tester.getTopLeft(find.text('GitHub Trending')).dy),
+      await tester.scrollUntilVisible(
+        find.text('GitHub 总览'),
+        240,
+        scrollable: find.byType(Scrollable).last,
+      );
+      expect(find.text('GitHub 总览'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('owner/repo'),
+        240,
+        scrollable: find.byType(Scrollable).last,
       );
       expect(find.text('owner/repo'), findsOneWidget);
       await tester.tap(find.text('owner/repo').last);

@@ -2,7 +2,7 @@ name: Orialis checks
 
 on:
   push:
-    branches: [main, orialis-refactor]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -60,6 +60,21 @@ jobs:
         run: flutter analyze --no-fatal-infos
       - working-directory: mobile
         run: flutter test
+
+  macos-client:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - working-directory: mobile
+        run: flutter pub get
+      - working-directory: mobile
+        run: flutter analyze --no-fatal-infos
+      - working-directory: mobile
+        run: flutter build macos --debug --target lib/main_desktop.dart
 
   hygiene:
     runs-on: ubuntu-latest

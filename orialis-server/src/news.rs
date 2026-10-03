@@ -1121,8 +1121,10 @@ async fn publish_failure(
     Json(input): Json<PublishInput>,
 ) -> Result<Json<Value>, Response> {
     let owner = publisher_user(&state, &headers).await?;
-    if !source_is_valid(&input.source, &["aihot.news", "github.com/trending", "githot.dev"])
-        || input.task_id.trim().is_empty()
+    if !source_is_valid(
+        &input.source,
+        &["aihot.news", "github.com/trending", "githot.dev"],
+    ) || input.task_id.trim().is_empty()
         || input.task_id.len() > 128
     {
         return Err(api_error(

@@ -286,7 +286,8 @@ void main() {
         ),
       );
       final lens = find.byKey(const ValueKey('lumina-selection-lens'));
-      expect(find.byType(RawMagnifier), findsNothing);
+      final magnifier = tester.widget<RawMagnifier>(find.byType(RawMagnifier));
+      expect(magnifier.magnificationScale, greaterThan(1));
       final origin = tester.getTopLeft(lens).dx;
       update(() => index = 2);
       await tester.pump();
