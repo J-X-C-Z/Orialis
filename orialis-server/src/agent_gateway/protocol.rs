@@ -187,7 +187,11 @@ pub enum GatewayMessage {
         platform: String,
     },
     #[serde(rename = "hello_ack")]
-    HelloAck { version: u32 },
+    HelloAck {
+        version: u32,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        capabilities: Vec<String>,
+    },
     #[serde(rename = "ping")]
     Ping { version: u32 },
     #[serde(rename = "pong")]

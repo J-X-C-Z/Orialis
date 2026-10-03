@@ -44,6 +44,16 @@ pub(crate) const SERVER_CAPABILITIES: &[&str] = &[
     "proactive_delivery",
 ];
 
+pub(crate) fn server_hello_ack() -> protocol::GatewayMessage {
+    protocol::GatewayMessage::HelloAck {
+        version: protocol::PROTOCOL_VERSION,
+        capabilities: SERVER_CAPABILITIES
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect(),
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum AgentCommand {
     Send(GatewayMessage),
@@ -529,6 +539,21 @@ mod tests {
     use super::*;
     use protocol::GatewayMessage;
 
+    #[test]
+    fn initial_handshake_advertises_delivery_and_accepts_legacy_ack() {
+        let acknowledgement = serde_json::to_value(server_hello_ack()).unwrap();
+        let capabilities = acknowledgement["capabilities"].as_array().unwrap();
+        assert!(capabilities.iter().any(|value| value == "cron_delivery"));
+        assert!(capabilities
+            .iter()
+            .any(|value| value == "proactive_delivery"));
+        let legacy: GatewayMessage =
+            serde_json::from_str(r#"{"type":"hello_ack","version":1}"#).unwrap();
+        assert!(
+            matches!(legacy, GatewayMessage::HelloAck { capabilities, .. } if capabilities.is_empty())
+        );
+    }
+
     #[tokio::test]
     async fn capabilities_ack_advertises_scheduled_delivery() {
         let registry = AgentRegistry::default();
@@ -537,7 +562,9 @@ mod tests {
             panic!("expected capabilities.ack");
         };
         assert!(capabilities.iter().any(|value| value == "cron_delivery"));
-        assert!(capabilities.iter().any(|value| value == "proactive_delivery"));
+        assert!(capabilities
+            .iter()
+            .any(|value| value == "proactive_delivery"));
     }
 
     #[tokio::test]
