@@ -40,6 +40,8 @@ pub(crate) const SERVER_CAPABILITIES: &[&str] = &[
     "artifact.progress",
     "artifact.completed",
     "artifact.failed",
+    "cron_delivery",
+    "proactive_delivery",
 ];
 
 #[derive(Debug)]
@@ -526,6 +528,17 @@ fn session_id_for(message: &GatewayMessage) -> String {
 mod tests {
     use super::*;
     use protocol::GatewayMessage;
+
+    #[tokio::test]
+    async fn capabilities_ack_advertises_scheduled_delivery() {
+        let registry = AgentRegistry::default();
+        let message = registry.capabilities_ack("device-1", 0).await;
+        let GatewayMessage::CapabilitiesAck { capabilities, .. } = message else {
+            panic!("expected capabilities.ack");
+        };
+        assert!(capabilities.iter().any(|value| value == "cron_delivery"));
+        assert!(capabilities.iter().any(|value| value == "proactive_delivery"));
+    }
 
     #[tokio::test]
     async fn request_without_connection_is_rejected() {
