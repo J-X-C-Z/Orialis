@@ -44,9 +44,7 @@ review handoff):
 
 - Base: `ff3249beae015557704f7d06404f7fb72a2ecc7d`.
 - Baseline source: `c5d04460df3adf2ffb71ede6530a1c5af85c6dcc`.
-- Candidate implementation commit: `51e45a8dbe10b0bc61540697f694017ddff0f306`;
-  the final gate refinement and evidence update is rechecked at its exact SHA
-  before handoff.
+- Candidate implementation commit: `a2b7536e16a5361b37eea309541276aac0a13111`.
 - Toolchain: rustc `1.98.1 (48a229cea 2026-09-01)`; Cargo
   `1.98.1 (797e8a9bc 2026-08-05)`.
 - Baseline and candidate Clippy capture command exit: 0 each; 96
@@ -58,8 +56,8 @@ review handoff):
   forbidden build output fails; generated source and product asset pass;
   unlisted oversized blob fails; exact allowlisted SDK blob passes.
 - Range checker command
-  `python3 scripts/repo_health/check_changed_artifacts.py --base ff3249beae015557704f7d06404f7fb72a2ecc7d --head 51e45a8dbe10b0bc61540697f694017ddff0f306`:
-  exit 0, 7 changed paths checked.
+  `python3 scripts/repo_health/check_changed_artifacts.py --base ff3249beae015557704f7d06404f7fb72a2ecc7d --head a2b7536e16a5361b37eea309541276aac0a13111`:
+  exit 0, 7 changed paths checked (rerun during review correction).
 - `python3 -m py_compile scripts/repo_health/clippy_diagnostics.py scripts/repo_health/check_changed_artifacts.py scripts/repo_health/tests/test_gates.py` and `git diff --check`: exit 0.
 - CI workflow run: not run from this workspace; job conclusion unavailable.
 - Production calls: none.
