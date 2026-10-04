@@ -40,15 +40,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace
-      # Baseline currently contains pre-existing dead-code/clippy findings in
-      # server test modules; keep the command visible while it is remediated.
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-        continue-on-error: true
+      - name: Capture Clippy diagnostics
+        run: python3 scripts/repo_health/clippy_diagnostics.py capture --output "$RUNNER_TEMP/clippy-candidate.jsonl"
+      - name: Reject new Clippy diagnostics
+        run: >-
+          python3 scripts/repo_health/clippy_diagnostics.py compare
+          --baseline .github/repo-health/clippy-baseline.json
+          --candidate "$RUNNER_TEMP/clippy-candidate.jsonl"
+          --baseline-sha c5d04460df3adf2ffb71ede6530a1c5af85c6dcc
+          --candidate-sha "$GITHUB_SHA"
 
   mobile:
     runs-on: ubuntu-latest
@@ -102,6 +107,8 @@ jobs:
             }
           }
 
+          python3 -m unittest scripts.repo_health.tests.test_gates
+
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             base="$(jq -r '.pull_request.base.sha // empty' "$EVENT_PATH")"
             head="$(jq -r '.pull_request.head.sha // empty' "$EVENT_PATH")"
@@ -112,6 +119,7 @@ jobs:
             require_commit "$base"
             require_commit "$head"
             git diff --check "${base}...${head}"
+            python3 scripts/repo_health/check_changed_artifacts.py --base "$base" --head "$head" --three-dot
           elif [[ "$EVENT_NAME" == "push" ]]; then
             before="$(jq -r '.before // empty' "$EVENT_PATH")"
             after="$(jq -r '.after // empty' "$EVENT_PATH")"
@@ -133,6 +141,7 @@ jobs:
               fi
             fi
             git diff --check "$before" "$after"
+            python3 scripts/repo_health/check_changed_artifacts.py --base "$before" --head "$after"
           else
             echo "::error::Unsupported event: $EVENT_NAME"
             exit 1
