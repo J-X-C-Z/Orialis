@@ -1,4 +1,3 @@
 [workspace]
 members = ["orialis-core", "orialis-server"]
 resolver = "2"
-

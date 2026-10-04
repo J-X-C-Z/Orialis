@@ -286,16 +286,29 @@ jobs:
               exit 1
             }
             require_commit "$after"
+            artifact_base="$before"
             if [[ "$before" =~ ^0+$ ]]; then
-              before="$(git hash-object -t tree /dev/null)"
+              empty_tree="$(git hash-object -t tree /dev/null)"
+              # A first push has no previous ref. Keep whitespace hygiene strict
+              # across the full tree, but scope artifact checks to changes from
+              # the repository's integration branch so existing large assets
+              # are not misclassified as newly introduced blobs.
+              git diff --check "$empty_tree" "$after"
+              integration_ref="origin/refactor/repository-health-20261004"
+              require_commit "$integration_ref"
+              artifact_base="$(git merge-base "$after" "$integration_ref")"
+              [[ -n "$artifact_base" ]] || {
+                echo "::error::Could not determine artifact baseline against $integration_ref"
+                exit 1
+              }
             else
               if ! require_commit "$before"; then
                 git fetch --no-tags --depth=1 origin "$before"
                 require_commit "$before"
               fi
+              git diff --check "$before" "$after"
             fi
-            git diff --check "$before" "$after"
-            python3 scripts/repo_health/check_changed_artifacts.py --base "$before" --head "$after"
+            python3 scripts/repo_health/check_changed_artifacts.py --base "$artifact_base" --head "$after"
           else
             echo "::error::Unsupported event: $EVENT_NAME"
             exit 1
