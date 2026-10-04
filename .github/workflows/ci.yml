@@ -13,38 +13,89 @@ permissions:
   contents: read
 
 jobs:
-  contracts:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.select.outputs.rust }}
+      contracts: ${{ steps.select.outputs.contracts }}
+      python: ${{ steps.select.outputs.python }}
+      mobile: ${{ steps.select.outputs.mobile }}
+      macos_client: ${{ steps.select.outputs.macos_client }}
+      website: ${{ steps.select.outputs.website }}
+      vela: ${{ steps.select.outputs.vela }}
+      lumina_flutter: ${{ steps.select.outputs.lumina_flutter }}
+      lumina_web: ${{ steps.select.outputs.lumina_web }}
+      workflow: ${{ steps.select.outputs.workflow }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select component checks for this event range
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+          EVENT_SHA: ${{ github.sha }}
+        run: >-
+          python3 scripts/repo_health/select_ci_jobs.py
+          --event "$EVENT_PATH" --event-name "$EVENT_NAME" --event-sha "$EVENT_SHA"
+
+  python:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true' || needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - run: python -m pip install -r scripts/requirements-contracts.txt
+          python-version: "3.12.15"
+      - run: python -m pip install -r scripts/requirements-contracts.txt -r integrations/codex_gateway/requirements.txt
       - run: python scripts/validate-contracts.py
-      - run: python -m py_compile integrations/hermes/orialis/*.py
+      - run: python -m compileall -q integrations/hermes/orialis integrations/news integrations/codex_gateway integrations/orialis_sdk scripts tests
       # These tests do not require the proprietary Hermes runtime.
-      - run: python -m unittest integrations.hermes.orialis.tests.test_protocol integrations.hermes.orialis.tests.test_tools
-      - run: python -m pytest -q integrations/hermes/orialis/tests/test_contract_fixtures.py
+      - run: python -m unittest integrations.hermes.orialis.tests.test_protocol integrations.hermes.orialis.tests.test_tools integrations.hermes.orialis.tests.test_batch_tools
+      - run: >-
+          python -m pytest -q
+          integrations/hermes/orialis/tests/test_contract_fixtures.py
+          integrations/news/tests
+          integrations/codex_gateway/test_gateway.py
+          integrations/orialis_sdk/tests
+      - run: >-
+          python -m pytest -q
+          tests/news_sources
+          tests/roadmap/test_static_contracts.py
+          scripts/repo_health/tests
       # Run the complete plugin discovery when the Hermes runtime is available;
       # the public CI image cannot install that proprietary dependency.
-      - name: Hermes runtime discovery
+      - name: Hermes runtime discovery (explicitly deferred when unavailable)
+        id: hermes_runtime
         run: |
           if python -c 'import gateway' >/dev/null 2>&1; then
             PYTHONPATH=. python -m unittest discover -s integrations/hermes/orialis -t . -p 'test_*.py'
+            echo "status=passed" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::Hermes gateway package unavailable; full runtime discovery is deferred to scripts/validate-hermes-plugin.sh"
+            echo "status=deferred" >> "$GITHUB_OUTPUT"
+            {
+              echo '### Hermes runtime discovery: DEFERRED'
+              echo 'The proprietary gateway package is unavailable on this runner. This is not a passing runtime test.'
+              echo 'Owner: plugin team (7c62159b-d540-4a58-a083-ebb0a3fec96d). Closure: run scripts/validate-hermes-plugin.sh in the supported isolated Hermes environment and have T13 verify the SHA and outcome.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::DEFERRED, not passed: Hermes gateway package unavailable; owner and closure are recorded in the workflow summary and docs/repo-health-ci-matrix.md"
           fi
 
   rust:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
-      - run: cargo test --workspace
+      - run: cargo test --workspace --locked
       - name: Capture Clippy diagnostics
         run: python3 scripts/repo_health/clippy_diagnostics.py capture --output "$RUNNER_TEMP/clippy-candidate.jsonl"
       - name: Reject new Clippy diagnostics
@@ -54,13 +105,30 @@ jobs:
           --candidate "$RUNNER_TEMP/clippy-candidate.jsonl"
           --baseline-sha c5d04460df3adf2ffb71ede6530a1c5af85c6dcc
           --candidate-sha "$GITHUB_SHA"
+      - name: Check historical migration checksums
+        run: |
+          reference_root="$RUNNER_TEMP/migration-reference"
+          mkdir -p "$reference_root"
+          git archive c5d04460df3adf2ffb71ede6530a1c5af85c6dcc orialis-server/migrations \
+            | tar -x -C "$reference_root"
+          python3 scripts/check-migration-checksums.py \
+            --reference-dir "$reference_root/orialis-server/migrations"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.15"
+      - run: python -m pip install -r integrations/codex_gateway/requirements.txt
+      - name: Run root black-box tests against a disposable SQLite service
+        run: python3 scripts/roadmap-e2e/run.py --start-server --skip-rust
 
   mobile:
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: "3.47.4"
           channel: stable
           cache: true
       - working-directory: mobile
@@ -71,11 +139,14 @@ jobs:
         run: flutter test
 
   macos-client:
+    needs: changes
+    if: needs.changes.outputs.macos_client == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: "3.47.4"
           channel: stable
           cache: true
       - working-directory: mobile
@@ -86,28 +157,36 @@ jobs:
         run: flutter build macos --debug --target lib/main_desktop.dart
 
   website:
+    needs: changes
+    if: needs.changes.outputs.website == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22.22.0"
           cache: npm
           cache-dependency-path: website/package-lock.json
+      - name: Record Node and npm versions
+        run: node --version && npm --version
       - working-directory: website
         run: npm ci
       - working-directory: website
         run: npm run build
 
   vela:
+    needs: changes
+    if: needs.changes.outputs.vela == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22.22.0"
           cache: npm
           cache-dependency-path: band/vela/package-lock.json
+      - name: Record Node and npm versions
+        run: node --version && npm --version
       - working-directory: band/vela
         run: npm ci
       - working-directory: band/vela
@@ -116,19 +195,25 @@ jobs:
         run: npm run build
 
   lumina-flutter:
+    needs: changes
+    if: needs.changes.outputs.lumina_flutter == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: "3.47.4"
           channel: stable
           cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.15"
       - working-directory: packages/lumina_ui
         run: flutter pub get
       - working-directory: packages/lumina_ui
-        run: flutter test
-      - working-directory: packages/lumina_ui
         run: flutter analyze lib test
+      - working-directory: packages/lumina_ui
+        run: flutter test
       - working-directory: packages/lumina_ui/example
         run: flutter pub get
       - working-directory: packages/lumina_ui/example
@@ -136,20 +221,25 @@ jobs:
       - run: python3 packages/lumina_tokens/generate_flutter.py --check
 
   lumina-web:
+    needs: changes
+    if: needs.changes.outputs.lumina_web == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22.22.0"
           cache: npm
           cache-dependency-path: packages/lumina_web/package-lock.json
+      - name: Record Node and npm versions
+        run: node --version && npm --version
       - working-directory: packages/lumina_web
         run: npm ci
       - working-directory: packages/lumina_web
         run: npm run build
 
   hygiene:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

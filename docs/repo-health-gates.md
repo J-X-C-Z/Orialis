@@ -39,28 +39,25 @@ small temporary fixture repositories only.
 
 ## Website, Vela, and Lumina CI checks (ORI-114)
 
-The workflow also runs the website install/build, Vela install/unit tests/debug
-package build, Lumina Flutter package tests and analysis, its example tests,
-the generated-token consistency check, and Lumina Web install/build. These
-jobs use Node 22 (meeting Vite's Node 20.19+ minimum) and the stable Flutter
-channel (the packages declare Flutter 3.47+ and Dart 3.13+). The workflow has
-no path filters, so changes to these package sources, lockfiles, and consumers
-continue to trigger the relevant checks on pull requests and configured
-branches.
+The workflow runs the website install/build, hardware-free Vela tests/debug
+package build, Lumina Flutter library and showcase tests, token consistency,
+and Lumina Web type/build checks. Node 22 meets Vite's Node 20.19+ minimum;
+Flutter 3.47.4 / Dart 3.13.3 meets the Flutter package constraints. The
+`changes` job resolves changed files for both push and pull-request event
+ranges. Its unit tests cover shared-contract, package-lock, and unrelated-path
+selection. Workflow/selector changes rerun all component jobs; unselected jobs
+are reported as not triggered by changed paths, not as passing checks.
 
 Physical wearable connection, signer matching, Xiaomi SDK behavior, and
 watch-side runtime acceptance remain deferred; the CI jobs do not claim device
 acceptance. The Vela build only produces the debug RPK under its ignored local
 temporary directory and does not use production signing or connect to hardware.
 
-ORI-114 local verification on baseline `e48fa78f6cfdd1c3bbd9254ea2ed26dfc11ba50b`:
-website `npm ci && npm run build`, Vela `npm ci && npm test && npm run build`,
-Lumina UI `flutter pub get && flutter test` (142 tests) and
-`flutter analyze lib test`, showcase `flutter pub get && flutter test` (4
-tests), token generator `python3 packages/lumina_tokens/generate_flutter.py
---check`, and Lumina Web `npm ci && npm run build` all exited 0. This is the
-matrix command baseline supplied by the coordinating lead; branch-head CI is
-still required to verify the workflow wiring.
+The authoritative component commands, tool versions, path routing, execution
+SHA/exit codes, and runtime/device deferrals are recorded in
+[`repo-health-ci-matrix.md`](repo-health-ci-matrix.md). Baseline commands passed
+locally; final workflow wiring still requires branch-head push and PR Actions
+runs.
 
 ## Verification record
 

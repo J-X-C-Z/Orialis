@@ -45,7 +45,9 @@ class LiveAgentGatewayTests(LiveServerMixin, unittest.TestCase):
                 "platform": "test",
             }))
             hello_ack = await receive_json(socket)
-            self.assertEqual(hello_ack, {"version": 1, "type": "hello_ack"})
+            self.assertEqual(hello_ack["version"], 1)
+            self.assertEqual(hello_ack["type"], "hello_ack")
+            self.assertIsInstance(hello_ack["capabilities"], list)
 
             await socket.send(json.dumps({"version": 1, "type": "future.roadmap.event"}))
             error = await receive_json(socket)

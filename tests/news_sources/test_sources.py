@@ -113,19 +113,22 @@ class GitHubTrendingTests(unittest.TestCase):
         with self.assertRaises(news_sources.SourceError):
             news_sources.parse_trending_html("<html><body>maintenance</body></html>", "daily")
 
-    def test_metadata_failure_keeps_the_official_ranked_base_list(self):
-        page = b'''<article class="Box-row"><h2><a href="/octo/one">one</a></h2>
-        <p class="col-9 color-fg-muted">source description</p><span itemprop="programmingLanguage">Rust</span>
-        <span>15 stars today</span></article>'''
-        with patch.object(news_sources, "_request", return_value=(page, {})), patch.object(
-            news_sources, "_github_api", side_effect=news_sources.SourceError("rate limited")
+    def test_detail_failure_keeps_the_githot_ranked_base_list(self):
+        page = b'''<article class="card" data-full-name="octo/one">
+        <div class="rank-num">1</div><h2 class="card-title"><a href="/repo/octo/one">one</a></h2>
+        <p class="card-desc">source description</p><span class="lang">Rust</span>
+        <span class="gain-chip" aria-label="+15 today">+15</span></article>'''
+        with patch.object(
+            news_sources,
+            "_request",
+            side_effect=[(page, {}), news_sources.SourceError("detail unavailable")],
         ):
             rows = news_sources.fetch_github("daily", None)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["repository"], "octo/one")
         self.assertEqual(rows[0]["starsInPeriod"], 15)
         self.assertEqual(rows[0]["language"], "Rust")
-        self.assertEqual(rows[0]["metadataError"], "rate limited")
+        self.assertEqual(rows[0]["sourceDetailStatus"], "unavailable")
 
 
 if __name__ == "__main__":
