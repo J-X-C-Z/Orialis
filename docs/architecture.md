@@ -16,6 +16,21 @@ Flutter UI → Riverpod → domain Repository / Controller → Drift / SQLite
 `calendar_events` 仅是兼容性的存储/接口名称。Today 是二者的聚合读取视图，
 只在查询层生成，不拥有独立数据库、实体或同步流。
 
+## 持久化与协议边界
+
+服务端 SQL row、HTTP request/response DTO、`orialis-core` 领域值、移动端
+Drift 记录和 Hermes/wire maps 分属不同层，不因字段相似而直接互换。边界和
+兼容规则见 [`docs/architecture-refactor/A02-repository-boundaries.md`](architecture-refactor/A02-repository-boundaries.md)；
+机器可读字段以 [`protocol/contracts/`](../protocol/contracts/README.md) 为准，
+HTTP 与同步行为分别以 [`docs/api-v1.md`](api-v1.md) 和 [`docs/sync.md`](sync.md)
+为准。
+
+服务端的实体写入和对应 `sync_events` 追加在同一 SQLite 事务提交；移动端
+实体写入和初始 outbox 记录在同一 Drift 事务提交。`version` 是服务端实体版本，
+`baseVersion` 是写入依据，`localRevision` 是本地编辑代次，`cursor` 是用户同步
+流位置，Agent `seq` 是 Agent 事件序号；它们不可互换。冲突返回后保留本地改动，
+不得静默覆盖。细节见 [`docs/sync.md`](sync.md)。
+
 ## 手机端业务边界
 
 页面只负责展示、输入和路由，不直接访问 Drift、HTTP 或 SyncEngine。业务边界如下：

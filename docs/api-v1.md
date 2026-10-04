@@ -1,10 +1,10 @@
 # Orialis API v1
 
-本文档定义 Orialis 当前服务端已经提供的 API，以及下一步建议实现的同步能力。
+本文档定义 Orialis 当前服务端 HTTP API 行为。未实现或仍待验证的能力会单独标注，不能从路线图或历史验收记录推断为当前已通过。
 
 本文档以 `orialis-server/src/main.rs`、`orialis-core/src/lib.rs` 和
-`orialis-server/migrations/` 的当前工作树为准。标记为“建议”的内容仍属于后续
-设计，其余接口可作为已完成基础实现的契约使用。
+`orialis-server/migrations/` 的当前工作树为准；各路由的实现情况见本文件接口表，
+未来建议不视为现有接口。本文只说明 API 契约，不构成设备或生产环境验收。
 
 三端（手机版、Rust 服务端、Hermes 插件）的字段、兼容策略和验收边界见
 [`docs/server-plugin-mobile-alignment.md`](server-plugin-mobile-alignment.md)。
@@ -86,8 +86,8 @@ Cookie: orialis_session=<accessToken>
 | GET/PATCH/DELETE | `/api/v1/projects/{project_id}/milestones/{id}` | 是 | 已实现 | 查询、更新或软删除里程碑 |
 | GET/POST | `/api/v1/calendar-events` | 是 | 已实现 | 查询或创建日程 |
 | PATCH/DELETE | `/api/v1/calendar-events/{id}` | 是 | 已实现 | 更新或软删除日程 |
-| GET/POST | `/api/v1/schedules` | 是 | 已实现 | `calendar-events` 的规范名称别名 |
-| PATCH/DELETE | `/api/v1/schedules/{id}` | 是 | 已实现 | Schedule 规范名称别名 |
+| GET/POST | `/api/v1/schedules` | 是 | 已实现 | Schedule 规范名称路由；与兼容路由共用资源 |
+| PATCH/DELETE | `/api/v1/schedules/{id}` | 是 | 已实现 | Schedule 规范名称路由；`calendar-events` 兼容路由保留 |
 | GET/POST/PATCH/DELETE | `/api/v1/conversations[/{id}]` | 是 | 已实现 | 会话列表、创建、重命名和删除 |
 | GET/POST | `/api/v1/conversations/{conversation_id}/messages` | 是 | 已实现 | 查询或保存聊天消息；GET 支持稳定游标分页 |
 | POST | `/api/v1/conversations/{conversation_id}/attachments` | Session/Agent Bearer | 已实现 | 上传聊天附件，单个文件最大 20 MB |
@@ -112,8 +112,8 @@ Conversation 的 `version` 是服务端乐观并发版本。重命名请求体�
 | GET | `/api/v1/agent/devices` | 是 | 已实现 | 查询当前用户的 Hermes 设备与在线状态 |
 | POST | `/api/v1/agent/devices/{device_id}/select` | 是 | 已实现 | 选择聊天消息投递设备 |
 
-当前没有网页接口或第三方日历接口。里程碑已通过项目嵌套路由
-对外提供 HTTP API。消息 POST 成功后会先持久化用户消息，再异步投递给已连接的
+服务端 API 没有官网页面服务或第三方日历连接器；仓库 `website/` 是独立的本地
+原型，不属于此 API。里程碑已通过项目嵌套路由对外提供 HTTP API。消息 POST 成功后会先持久化用户消息，再异步投递给已连接的
 Hermes；收到匹配的 `message.reply` 后，服务端会保存 `role=assistant` 的消息。消息会投递到
 当前用户选择的在线 Hermes 设备；选择状态保存在服务端，因此手机重启后仍然有效。
 
@@ -862,9 +862,9 @@ JSON 解析失败等由 Axum 提取器直接生成的错误，当前不一定符
 后续建议统一为同一个错误信封，并为验证错误增加稳定的字段路径信息，
 例如 `details.field`。
 
-## 13. 当前实现限制与后续优先级
+## 13. 当前服务端约束与范围外能力
 
-当前 API 已完成第一轮服务端路线图。以下是明确保留到后续产品阶段的能力边界：
+以下描述服务端当前实现边界，不代表整个 monorepo 只有这些能力或所有客户端均已验收：
 
 - 任务、项目、里程碑和日程的 PATCH 已区分字段省略与显式 `null`。
 - 任务/项目日期、任务截止时间和日程 RFC3339 时间戳已做格式校验。
@@ -878,9 +878,10 @@ JSON 解析失败等由 Axum 提取器直接生成的错误，当前不一定符
 - 聊天消息会保存用户消息；Agent 不在线时进入持久化投递队列，连接恢复后自动重试，
   直到匹配的 Agent 回复成功保存。
 
-- 方寸导入使用 `scripts/import-fangcun.py`，先执行 `--dry-run`；历史导入不伪造
+- 方寸历史导入使用 `scripts/import-fangcun.py`，先执行 `--dry-run`；历史导入不伪造
   `sync_events`，报告保存在 `migration_batches`。
-- 网页、内置 LLM、第三方日历连接和循环任务执行器不属于当前服务端路线图。
+- 服务端 API 不提供官网页面、内置 LLM、第三方日历连接或循环任务执行器。
+  仓库 `website/` 是单独的本地原型；Hermes/Codex 集成和 News 流水线有各自入口与验证边界。
 
 
 ### News realtime invalidation (additive)
