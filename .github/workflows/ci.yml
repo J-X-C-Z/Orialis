@@ -2,7 +2,11 @@ name: Orialis checks
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - refactor/repository-health-20261004
+      - refactor/repository-health-20261004/**
+      - health-20261004/**
   pull_request:
 
 permissions:
@@ -80,4 +84,56 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: git diff --check
+        with:
+          fetch-depth: 0
+      - name: Check changed commits for whitespace errors
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          require_commit() {
+            local sha="$1"
+            git cat-file -e "${sha}^{commit}" 2>/dev/null || {
+              echo "::error::Commit object is unavailable: ${sha}"
+              return 1
+            }
+          }
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="$(jq -r '.pull_request.base.sha // empty' "$EVENT_PATH")"
+            head="$(jq -r '.pull_request.head.sha // empty' "$EVENT_PATH")"
+            [[ -n "$base" && -n "$head" ]] || {
+              echo "::error::Pull request event is missing base/head SHA"
+              exit 1
+            }
+            require_commit "$base"
+            require_commit "$head"
+            git diff --check "${base}...${head}"
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            before="$(jq -r '.before // empty' "$EVENT_PATH")"
+            after="$(jq -r '.after // empty' "$EVENT_PATH")"
+            [[ -n "$before" && -n "$after" ]] || {
+              echo "::error::Push event is missing before/after SHA"
+              exit 1
+            }
+            [[ "$after" == "$EVENT_SHA" ]] || {
+              echo "::error::Push after SHA does not match the event SHA"
+              exit 1
+            }
+            require_commit "$after"
+            if [[ "$before" =~ ^0+$ ]]; then
+              before="$(git hash-object -t tree /dev/null)"
+            else
+              if ! require_commit "$before"; then
+                git fetch --no-tags --depth=1 origin "$before"
+                require_commit "$before"
+              fi
+            fi
+            git diff --check "$before" "$after"
+          else
+            echo "::error::Unsupported event: $EVENT_NAME"
+            exit 1
+          fi
