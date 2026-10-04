@@ -91,11 +91,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace --locked
+      - run: cargo build --locked --release -p orialis-server
       - name: Capture Clippy diagnostics
         run: python3 scripts/repo_health/clippy_diagnostics.py capture --output "$RUNNER_TEMP/clippy-candidate.jsonl"
       - name: Reject new Clippy diagnostics
@@ -132,11 +133,13 @@ jobs:
           channel: stable
           cache: true
       - working-directory: mobile
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
       - working-directory: mobile
         run: flutter analyze --no-fatal-infos
       - working-directory: mobile
         run: flutter test
+      - working-directory: mobile
+        run: flutter build apk --debug
 
   macos-client:
     needs: changes
@@ -150,7 +153,7 @@ jobs:
           channel: stable
           cache: true
       - working-directory: mobile
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
       - working-directory: mobile
         run: flutter analyze --no-fatal-infos
       - working-directory: mobile
@@ -209,13 +212,13 @@ jobs:
         with:
           python-version: "3.12.15"
       - working-directory: packages/lumina_ui
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
       - working-directory: packages/lumina_ui
         run: flutter analyze lib test
       - working-directory: packages/lumina_ui
         run: flutter test
       - working-directory: packages/lumina_ui/example
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
       - working-directory: packages/lumina_ui/example
         run: flutter test
       - run: python3 packages/lumina_tokens/generate_flutter.py --check
