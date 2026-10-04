@@ -37,6 +37,28 @@ Clippy process failure, forbidden output, generated source, a normal product
 asset, an unlisted oversized blob, and an exact allowlisted SDK blob. They use
 small temporary fixture repositories only.
 
+## Website, Vela, and Lumina CI checks (ORI-114)
+
+The workflow runs the website install/build, hardware-free Vela tests/debug
+package build, Lumina Flutter library and showcase tests, token consistency,
+and Lumina Web type/build checks. Node 22 meets Vite's Node 20.19+ minimum;
+Flutter 3.47.4 / Dart 3.13.3 meets the Flutter package constraints. The
+`changes` job resolves changed files for both push and pull-request event
+ranges. Its unit tests cover shared-contract, package-lock, and unrelated-path
+selection. Workflow/selector changes rerun all component jobs; unselected jobs
+are reported as not triggered by changed paths, not as passing checks.
+
+Physical wearable connection, signer matching, Xiaomi SDK behavior, and
+watch-side runtime acceptance remain deferred; the CI jobs do not claim device
+acceptance. The Vela build only produces the debug RPK under its ignored local
+temporary directory and does not use production signing or connect to hardware.
+
+The authoritative component commands, tool versions, path routing, execution
+SHA/exit codes, and runtime/device deferrals are recorded in
+[`repo-health-ci-matrix.md`](repo-health-ci-matrix.md). Baseline commands passed
+locally; final workflow wiring still requires branch-head push and PR Actions
+runs.
+
 ## Verification record
 
 Execution evidence (the final branch-head SHA is also recorded in the ORI-128

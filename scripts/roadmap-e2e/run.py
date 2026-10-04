@@ -54,14 +54,14 @@ def start_server() -> tuple[subprocess.Popen[str], tempfile.TemporaryDirectory[s
         "ORIALIS_DEV_DEVICE_AUTH": "false",
     })
     process = subprocess.Popen(
-        ["cargo", "run", "-q", "-p", "orialis-server"],
+        ["cargo", "run", "--locked", "-q", "-p", "orialis-server"],
         cwd=ROOT,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
     )
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         if healthy(base_url):
             return process, temp, base_url
@@ -110,20 +110,19 @@ def main() -> int:
     process = None
     temp = None
     base_url = args.base_url or "http://127.0.0.1:18443"
-    start_error = False
     try:
         if args.start_server:
             try:
                 process, temp, base_url = start_server()
                 print(f"Running live checks against temporary server {base_url}")
             except RuntimeError as error:
-                start_error = True
-                print(f"Live server could not start; live tests will report explicit skips: {error}")
+                print(f"Live server could not start; refusing to fall back to another target: {error}")
+                return 1
         elif not healthy(base_url):
             print(f"Live server unavailable at {base_url}; live tests will report explicit skips")
         python_status = run_python(base_url)
         rust_status = 0 if args.skip_rust else run_rust()
-        return 1 if start_error or python_status or rust_status else 0
+        return 1 if python_status or rust_status else 0
     finally:
         if process is not None:
             process.terminate()
