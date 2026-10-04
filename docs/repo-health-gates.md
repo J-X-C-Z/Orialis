@@ -59,6 +59,10 @@ review handoff):
   `python3 scripts/repo_health/check_changed_artifacts.py --base ff3249beae015557704f7d06404f7fb72a2ecc7d --head a2b7536e16a5361b37eea309541276aac0a13111`:
   exit 0, 7 changed paths checked (rerun during review correction).
 - `python3 -m py_compile scripts/repo_health/clippy_diagnostics.py scripts/repo_health/check_changed_artifacts.py scripts/repo_health/tests/test_gates.py` and `git diff --check`: exit 0.
-- CI workflow run: not run from this workspace; job conclusion unavailable.
+- GitHub Actions workflow run `37210208309` for correction commit
+  `052bbeb5d4c70b3bf7c23d415b42b98ce2355a6b`: completed with overall
+  conclusion `success`; all five jobs passed, including Clippy diagnostic
+  capture and reject-new-diagnostics. This is the GitHub job conclusion; no
+  separate workflow run was launched from the local workspace.
 - Production calls: none.
 - Rollback after commit: `git revert <final-branch-head>` on the task branch.
