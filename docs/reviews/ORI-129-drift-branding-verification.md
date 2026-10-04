@@ -53,3 +53,20 @@
 ## 回滚
 
 本分支仅增加本核验报告；没有产品代码、生成文件、锁、迁移、资产或 workflow 改动。回滚交付只需反向应用报告提交，不涉及数据库/生成资产/部署回滚。
+
+## 补充证据（2026-10-05，正式审核退回后最小重跑）
+
+为满足正式审核的独立复核要求，上一轮命令日志因未保存在工作树而无法回溯；现已在同一隔离 worktree 重跑并保存原始 stdout/stderr、命令行与显式退出码。日志随 PR 提交于 `docs/reviews/ORI-129-evidence/`：
+
+- `toolchain-and-pub-get.log`：Flutter/Dart 实际版本与 `flutter pub get`，退出码见文件。
+- `generation.log`：受跟踪生成输出枚举、build_runner 完整输出和生成输出/锁 diff 门禁。此轮 build_runner 读取 560 inputs / 280 combining inputs，`wrote 0 outputs`，退出码 0；唯一跟踪生成输出仍是 `mobile/lib/core/database/app_database.g.dart`，生成输出及锁 diff exit 0。较早首次运行 `wrote 279 outputs` 的摘要保持在上文，两者分别是首跑与稳定后的重跑结果。
+- `migration-outbox-tests.log`：迁移/项目 milestone/subevent/outbox 定向测试原始输出，14 tests passed，exit 0。
+- `account-sync-tests.log`：账户隔离与 sync state 定向测试原始输出，6 tests passed，exit 0。
+- `drift-gate-negative.log`：无差异正例 exit 0、临时注释制造漂移负例 exit 1、原字节恢复后 exit 0。负例已恢复，未留生成文件改动。
+
+本次按评审意见明确标记为 **skipped**：
+
+- **v1–v4 专属升级 fixture/test：skipped**（仓库中未发现对应专属 fixture；本任务未新增 fixture）。已有覆盖从 v5/v6 升至 v10，见前述映射表。
+- **APK 与 macOS app 实际打包/包内资源检查：skipped**（本任务仅核验源码、Gradle/manifest、pubspec 和图标资源消费链；没有运行平台打包，也未使用 ADB）。
+
+GitHub PR checks 的本任务独立查询曾返回 401；因此不把 PR 页面可能显示的 job 状态计为本轮独立通过证据。父任务可按 PR #7 的链接及具体 head SHA 自行读取当时检查快照。生产库、服务端迁移 checksum、设备、ADB 与外部写入仍未执行。
