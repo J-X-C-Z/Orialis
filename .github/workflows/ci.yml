@@ -85,6 +85,70 @@ jobs:
       - working-directory: mobile
         run: flutter build macos --debug --target lib/main_desktop.dart
 
+  website:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - working-directory: website
+        run: npm ci
+      - working-directory: website
+        run: npm run build
+
+  vela:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: band/vela/package-lock.json
+      - working-directory: band/vela
+        run: npm ci
+      - working-directory: band/vela
+        run: npm test
+      - working-directory: band/vela
+        run: npm run build
+
+  lumina-flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - working-directory: packages/lumina_ui
+        run: flutter pub get
+      - working-directory: packages/lumina_ui
+        run: flutter test
+      - working-directory: packages/lumina_ui
+        run: flutter analyze lib test
+      - working-directory: packages/lumina_ui/example
+        run: flutter pub get
+      - working-directory: packages/lumina_ui/example
+        run: flutter test
+      - run: python3 packages/lumina_tokens/generate_flutter.py --check
+
+  lumina-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/lumina_web/package-lock.json
+      - working-directory: packages/lumina_web
+        run: npm ci
+      - working-directory: packages/lumina_web
+        run: npm run build
+
   hygiene:
     runs-on: ubuntu-latest
     steps:

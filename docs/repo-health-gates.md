@@ -37,6 +37,31 @@ Clippy process failure, forbidden output, generated source, a normal product
 asset, an unlisted oversized blob, and an exact allowlisted SDK blob. They use
 small temporary fixture repositories only.
 
+## Website, Vela, and Lumina CI checks (ORI-114)
+
+The workflow also runs the website install/build, Vela install/unit tests/debug
+package build, Lumina Flutter package tests and analysis, its example tests,
+the generated-token consistency check, and Lumina Web install/build. These
+jobs use Node 22 (meeting Vite's Node 20.19+ minimum) and the stable Flutter
+channel (the packages declare Flutter 3.47+ and Dart 3.13+). The workflow has
+no path filters, so changes to these package sources, lockfiles, and consumers
+continue to trigger the relevant checks on pull requests and configured
+branches.
+
+Physical wearable connection, signer matching, Xiaomi SDK behavior, and
+watch-side runtime acceptance remain deferred; the CI jobs do not claim device
+acceptance. The Vela build only produces the debug RPK under its ignored local
+temporary directory and does not use production signing or connect to hardware.
+
+ORI-114 local verification on baseline `e48fa78f6cfdd1c3bbd9254ea2ed26dfc11ba50b`:
+website `npm ci && npm run build`, Vela `npm ci && npm test && npm run build`,
+Lumina UI `flutter pub get && flutter test` (142 tests) and
+`flutter analyze lib test`, showcase `flutter pub get && flutter test` (4
+tests), token generator `python3 packages/lumina_tokens/generate_flutter.py
+--check`, and Lumina Web `npm ci && npm run build` all exited 0. This is the
+matrix command baseline supplied by the coordinating lead; branch-head CI is
+still required to verify the workflow wiring.
+
 ## Verification record
 
 Execution evidence (the final branch-head SHA is also recorded in the ORI-128
