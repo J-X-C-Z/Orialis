@@ -1,0 +1,18 @@
+$ cd mobile && flutter test test/project_milestone_migration_test.dart test/subevent_migration_test.dart test/outbox_store_test.dart
+00:00 +0: loading /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/project_milestone_migration_test.dart
+00:00 +0: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/subevent_migration_test.dart: v6 data migrates to v10 with empty task links and unimportant events
+00:00 +1: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/subevent_migration_test.dart: v6 data migrates to v10 with empty task links and unimportant events
+00:00 +2: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/subevent_migration_test.dart: v6 data migrates to v10 with empty task links and unimportant events
+00:00 +3: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/project_milestone_migration_test.dart: v7 fields round-trip and active milestones have stable ordering
+00:00 +4: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/outbox_store_test.dart: v5 fixture migrates legacy Task/Schedule data and creates Outbox
+00:00 +5: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/outbox_store_test.dart: outbox mutation survives closing and reopening the database
+00:00 +6: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/outbox_store_test.dart: 500+ pending mutations remain ordered and recover after interruption
+00:00 +7: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/outbox_store_test.dart: pending mutations merge, but an in-flight mutation is immutable
+00:00 +8: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/outbox_store_test.dart: recovering an interrupted retry reuses mutationId and payload
+00:00 +9: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/outbox_store_test.dart: schedule outbox snapshot retains every v1 field
+00:00 +10: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/outbox_store_test.dart: transport retry returns the same mutation to pending
+00:00 +11: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/outbox_store_test.dart: acknowledged mutation recovery closes the entity update crash window
+00:00 +12: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/outbox_store_test.dart: failed entity/outbox transaction leaves no silent entity-only write
+00:00 +13: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/outbox_store_test.dart: server acknowledgement rebases only the next unsent mutation
+00:00 +14: All tests passed!
+migration_outbox_tests_exit=0

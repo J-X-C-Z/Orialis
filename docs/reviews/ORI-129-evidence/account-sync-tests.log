@@ -1,0 +1,11 @@
+$ cd mobile && flutter test test/desktop_account_isolation_test.dart test/sync_state_test.dart
+/Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile
+00:00 +0: loading /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/desktop_account_isolation_test.dart
+00:00 +0: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/sync_state_test.dart: sync states expose clear user-facing copy
+00:00 +1: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/desktop_account_isolation_test.dart: account and server files retain independent data and sync cursors
+00:00 +2: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/desktop_account_isolation_test.dart: account and server files retain independent data and sync cursors
+00:00 +3: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/desktop_account_isolation_test.dart: account and server files retain independent data and sync cursors
+00:00 +4: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/desktop_account_isolation_test.dart: account and server files retain independent data and sync cursors
+00:00 +5: /Users/jxcz/Agent Workspace/projects/orialis/worktrees/ori-129-mobile/mobile/test/desktop_account_isolation_test.dart: anonymous desktop skips uploads and preserves local pending mutations
+00:00 +6: All tests passed!
+account_sync_tests_exit=0

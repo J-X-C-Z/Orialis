@@ -1,0 +1,16 @@
+$ baseline: git diff --exit-code -- mobile/lib/core/database/app_database.g.dart
+baseline_diff_exit=0
+$ append temporary marker, then run git diff --exit-code -- mobile/lib/core/database/app_database.g.dart
+diff --git a/mobile/lib/core/database/app_database.g.dart b/mobile/lib/core/database/app_database.g.dart
+index 1221b32..d382e17 100644
+--- a/mobile/lib/core/database/app_database.g.dart
++++ b/mobile/lib/core/database/app_database.g.dart
+@@ -9266,3 +9266,5 @@ class $AppDatabaseManager {
+   $$ProjectMilestonesTableTableManager get projectMilestones =>
+       $$ProjectMilestonesTableTableManager(_db, _db.projectMilestones);
+ }
++
++// ORI-129 negative gate fixture
+negative_diff_exit=1
+$ restore original bytes and rerun the same diff gate
+restored_diff_exit=0

@@ -1,0 +1,14 @@
+$ git ls-files mobile | rg "\.(g|freezed|mocks)\.dart$"
+mobile/lib/core/database/app_database.g.dart
+tracked_generated_list_exit=0
+$ cd mobile && dart run build_runner build --delete-conflicting-outputs
+W These options have been removed and were ignored: --delete-conflicting-outputs
+  0s drift_dev on 560 inputs; integration_test/joint_acceptance_macos_test.dart
+  0s drift_dev on 560 inputs: 1 skipped; integration_test/joint_acceptance_test.dart
+  0s drift_dev on 560 inputs: 560 skipped
+  0s source_gen:combining_builder on 280 inputs; integration_test/joint_acceptance_macos_test.dart
+  0s source_gen:combining_builder on 280 inputs: 280 skipped
+  Built with build_runner/aot in 1s; wrote 0 outputs.
+build_runner_exit=0
+$ git diff --exit-code -- mobile/lib/core/database/app_database.g.dart mobile/pubspec.lock
+generated_and_lock_diff_exit=0
