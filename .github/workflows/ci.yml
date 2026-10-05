@@ -91,11 +91,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: dtolnay/rust-toolchain@1.88.0
         with:
-          components: rustfmt, clippy
+          components: rustfmt
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace --locked
+      - run: cargo build --locked --release -p orialis-server
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          components: clippy
       - name: Capture Clippy diagnostics
         run: python3 scripts/repo_health/clippy_diagnostics.py capture --output "$RUNNER_TEMP/clippy-candidate.jsonl"
       - name: Reject new Clippy diagnostics
@@ -120,6 +124,57 @@ jobs:
       - name: Run root black-box tests against a disposable SQLite service
         run: python3 scripts/roadmap-e2e/run.py --start-server --skip-rust
 
+  headless:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm headless port is available
+        run: |
+          if ss -ltn '( sport = :18443 )' | grep -q LISTEN; then
+            echo '::error::127.0.0.1:18443 is already in use'
+            exit 1
+          fi
+      - name: Prepare disposable data directory for the container user
+        run: |
+          mkdir -p runtime-data
+          sudo chown 10001:10001 runtime-data
+      - name: Run Linux Docker headless acceptance script
+        run: sudo scripts/platform/linux-headless-check.sh
+      - name: Record image and verify SQLite database was created
+        run: |
+          image_id="$(docker image inspect --format '{{.Id}}' orialis-server:headless-local)"
+          test -n "$image_id"
+          sudo test -f runtime-data/orialis.db
+          printf '%s\n' '### Linux headless acceptance' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' '- Image: orialis-server:headless-local' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "- Image ID: $image_id" | tee -a "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' '- SQLite database: runtime-data/orialis.db exists' >> "$GITHUB_STEP_SUMMARY"
+      - name: Restart headless service and verify health and filesystem policy
+        run: |
+          set -euo pipefail
+          docker compose -f compose.headless.yaml up -d
+          healthy=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18443/api/health >/dev/null; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+          test "$healthy" = true
+          uid="$(docker compose -f compose.headless.yaml exec -T orialis-server sh -c 'id -u')"
+          test "$uid" = 10001
+          docker compose -f compose.headless.yaml exec -T orialis-server sh -c 'test ! -w /etc && test -w /data && test -w /tmp'
+          sudo test -f runtime-data/orialis.db
+          echo 'Second start reused runtime-data/orialis.db and passed health, UID, and filesystem checks.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Capture logs and cleanly stop headless service
+        if: always()
+        run: |
+          docker compose -f compose.headless.yaml logs --no-color --tail=200 || true
+          docker compose -f compose.headless.yaml down
+
   mobile:
     needs: changes
     if: needs.changes.outputs.mobile == 'true'
@@ -132,11 +187,13 @@ jobs:
           channel: stable
           cache: true
       - working-directory: mobile
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
       - working-directory: mobile
         run: flutter analyze --no-fatal-infos
       - working-directory: mobile
         run: flutter test
+      - working-directory: mobile
+        run: flutter build apk --debug
 
   macos-client:
     needs: changes
@@ -150,7 +207,7 @@ jobs:
           channel: stable
           cache: true
       - working-directory: mobile
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
       - working-directory: mobile
         run: flutter analyze --no-fatal-infos
       - working-directory: mobile
