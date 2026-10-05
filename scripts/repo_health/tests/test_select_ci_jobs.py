@@ -76,6 +76,21 @@ class ChangedPathSelectionTests(unittest.TestCase):
         self.assertTrue(flutter_config["mobile"])
         self.assertTrue(flutter_config["macos_client"])
 
+    def test_mobile_generated_sources_and_build_inputs_route_mobile_and_macos(self):
+        for path in (
+            "mobile/lib/core/database/app_database.dart",
+            "mobile/lib/core/database/app_database.g.dart",
+            "mobile/pubspec.yaml",
+            "mobile/pubspec.lock",
+            "mobile/analysis_options.yaml",
+            "mobile/build.yaml",
+            "scripts/repo_health/check_drift_generated.py",
+        ):
+            with self.subTest(path=path):
+                selected = select_jobs([path])
+                self.assertTrue(selected["mobile"])
+                self.assertTrue(selected["macos_client"])
+
     def test_workflow_change_runs_every_component_job(self):
         selected = select_jobs([".github/workflows/ci.yml"])
         self.assertTrue(all(selected.values()))
