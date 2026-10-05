@@ -1729,7 +1729,7 @@ mod tests {
                 "no mobile event for {}",
                 frame.message_type
             );
-            assert_eq!(events[0]["kind"].as_str().is_some(), true);
+            assert!(events[0]["kind"].as_str().is_some());
         }
     }
 
