@@ -146,7 +146,7 @@ jobs:
         run: |
           image_id="$(docker image inspect --format '{{.Id}}' orialis-server:headless-local)"
           test -n "$image_id"
-          test -f runtime-data/orialis.db
+          sudo test -f runtime-data/orialis.db
           {
             echo '### Linux headless acceptance'
             echo "- Image: `orialis-server:headless-local`"
