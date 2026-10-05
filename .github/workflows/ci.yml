@@ -148,10 +148,10 @@ jobs:
           test -n "$image_id"
           sudo test -f runtime-data/orialis.db
           {
-            echo '### Linux headless acceptance'
-            echo "- Image: `orialis-server:headless-local`"
-            echo "- Image ID: `$image_id`"
-            echo '- SQLite database: `runtime-data/orialis.db` exists'
+            printf '%s\n' '### Linux headless acceptance'
+            printf '%s\n' '- Image: orialis-server:headless-local'
+            printf '%s\n' "- Image ID: $image_id"
+            printf '%s\n' '- SQLite database: runtime-data/orialis.db exists'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Restart headless service and verify health and filesystem policy
         run: |
