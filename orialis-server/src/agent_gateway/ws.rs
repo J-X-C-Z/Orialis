@@ -21,11 +21,6 @@ use uuid::Uuid;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 const DEBUG_REPLY_TIMEOUT: Duration = Duration::from_secs(60);
-const MOBILE_HEARTBEAT: Duration = Duration::from_secs(20);
-
-fn mobile_heartbeat() -> protocol::MobileEnvelope {
-    protocol::mobile_envelope(protocol::MOBILE_PING, None, serde_json::json!({}))
-}
 
 pub async fn upgrade(
     ws: WebSocketUpgrade,
@@ -80,135 +75,6 @@ fn validate_agent_token(
     }
 }
 
-/// Minimal WebSocket channel for ordinary Orialis mobile clients.
-///
-/// This is deliberately independent from the Hermes registry: it owns the
-/// connection lifecycle and protocol-level heartbeat only. Domain events can
-/// be sent later through `send_mobile`, once a broadcaster is wired in.
-pub async fn mobile_upgrade(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_mobile_socket)
-}
-
-async fn handle_mobile_socket(mut socket: WebSocket) {
-    let hello = match tokio::time::timeout(HANDSHAKE_TIMEOUT, socket.next()).await {
-        Ok(Some(Ok(Message::Text(text)))) => protocol::parse_mobile_envelope(text.as_str()),
-        Ok(Some(Ok(_))) => Err(protocol::ProtocolError::InvalidMessage),
-        Ok(Some(Err(_))) | Ok(None) | Err(_) => return,
-    };
-    let hello = match hello {
-        Ok(envelope) if envelope.message_type == protocol::MOBILE_HELLO => envelope,
-        Ok(_) => {
-            let _ = send_mobile(
-                &mut socket,
-                protocol::mobile_error("INVALID_MESSAGE", "first message must be hello", None),
-            )
-            .await;
-            return;
-        }
-        Err(error) => {
-            let _ = send_mobile(
-                &mut socket,
-                protocol::mobile_error("INVALID_MESSAGE", &error.to_string(), None),
-            )
-            .await;
-            return;
-        }
-    };
-    let connection_id = Uuid::now_v7().to_string();
-    let _ = send_mobile(
-        &mut socket,
-        protocol::mobile_envelope(
-            protocol::MOBILE_HELLO_ACK,
-            hello.request_id.clone(),
-            serde_json::json!({ "connection_id": connection_id }),
-        ),
-    )
-    .await;
-    tracing::info!(%connection_id, "orialis mobile WebSocket connected");
-
-    let mut heartbeat = tokio::time::interval(MOBILE_HEARTBEAT);
-    heartbeat.tick().await;
-    loop {
-        tokio::select! {
-            incoming = socket.next() => match incoming {
-                Some(Ok(Message::Text(text))) => {
-                    if handle_mobile_text(&mut socket, text.as_str()).await.is_err() { break; }
-                }
-                Some(Ok(Message::Ping(payload))) => {
-                    if socket.send(Message::Pong(payload)).await.is_err() { break; }
-                }
-                Some(Ok(Message::Close(_))) | None => break,
-                Some(Ok(_)) => {}
-                Some(Err(_)) => break,
-            },
-            _ = heartbeat.tick() => {
-                if send_mobile(&mut socket, mobile_heartbeat()).await.is_err() { break; }
-            }
-        }
-    }
-    tracing::info!(%connection_id, "orialis mobile WebSocket disconnected");
-}
-
-async fn handle_mobile_text(socket: &mut WebSocket, text: &str) -> Result<(), ()> {
-    let envelope = match protocol::parse_mobile_envelope(text) {
-        Ok(envelope) => envelope,
-        Err(error) => {
-            return send_mobile(
-                socket,
-                protocol::mobile_error("INVALID_MESSAGE", &error.to_string(), None),
-            )
-            .await
-        }
-    };
-    match envelope.message_type.as_str() {
-        protocol::MOBILE_PING => {
-            send_mobile(
-                socket,
-                protocol::mobile_envelope(
-                    protocol::MOBILE_PONG,
-                    envelope.request_id,
-                    Value::Object(Default::default()),
-                ),
-            )
-            .await
-        }
-        protocol::MOBILE_PONG
-        | protocol::MOBILE_EVENT
-        | protocol::MOBILE_MESSAGE
-        | protocol::MOBILE_SYNC_CHANGE_HINT => Ok(()),
-        protocol::MOBILE_HELLO => {
-            send_mobile(
-                socket,
-                protocol::mobile_error(
-                    "INVALID_MESSAGE",
-                    "hello is only valid as the first message",
-                    envelope.request_id,
-                ),
-            )
-            .await
-        }
-        _ => {
-            send_mobile(
-                socket,
-                protocol::mobile_error(
-                    "INVALID_MESSAGE",
-                    "message type is not valid from the mobile client",
-                    envelope.request_id,
-                ),
-            )
-            .await
-        }
-    }
-}
-
-async fn send_mobile(socket: &mut WebSocket, message: protocol::MobileEnvelope) -> Result<(), ()> {
-    let payload = serde_json::to_string(&message).map_err(|_| ())?;
-    socket
-        .send(Message::Text(payload.into()))
-        .await
-        .map_err(|_| ())
-}
-
 #[cfg(test)]
 mod auth_tests {
     use super::*;
@@ -242,34 +108,6 @@ mod auth_tests {
             validate_agent_token(&headers, Some("server-secret"), "production"),
             Err(StatusCode::UNAUTHORIZED)
         );
-    }
-}
-
-#[cfg(test)]
-mod mobile_tests {
-    use super::*;
-
-    #[test]
-    fn heartbeat_is_longer_than_handshake() {
-        assert!(MOBILE_HEARTBEAT > HANDSHAKE_TIMEOUT);
-    }
-
-    #[test]
-    fn heartbeat_uses_mobile_ping_envelope() {
-        let heartbeat = mobile_heartbeat();
-        assert_eq!(heartbeat.version, protocol::PROTOCOL_VERSION);
-        assert_eq!(heartbeat.message_type, protocol::MOBILE_PING);
-        assert_eq!(heartbeat.request_id, None);
-        assert_eq!(heartbeat.payload, serde_json::json!({}));
-        assert_eq!(
-            protocol::parse_mobile_envelope(&serde_json::to_string(&heartbeat).unwrap()).unwrap(),
-            heartbeat
-        );
-    }
-
-    #[test]
-    fn mobile_heartbeat_interval_is_stable() {
-        assert_eq!(MOBILE_HEARTBEAT, Duration::from_secs(20));
     }
 }
 
