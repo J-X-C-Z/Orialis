@@ -84,6 +84,7 @@ class ChangedPathSelectionTests(unittest.TestCase):
             "mobile/pubspec.lock",
             "mobile/analysis_options.yaml",
             "mobile/build.yaml",
+            "scripts/repo_health/check_drift_generated.py",
         ):
             with self.subTest(path=path):
                 selected = select_jobs([path])

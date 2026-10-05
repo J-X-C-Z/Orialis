@@ -87,6 +87,7 @@ def select_jobs(paths: list[str]) -> dict[str, bool]:
 
     rust_shared = ("Cargo.toml", "Cargo.lock")
     flutter_shared = ("mobile/pubspec.yaml", "mobile/pubspec.lock")
+    mobile_drift_gate = ("scripts/repo_health/check_drift_generated.py",)
     return {
         "rust": changed("orialis-core", "orialis-server", "protocol", "packages/contracts",
                         "scripts/roadmap-e2e", "tests/roadmap",
@@ -99,9 +100,9 @@ def select_jobs(paths: list[str]) -> dict[str, bool]:
                           "integrations/hermes", "scripts", "tests", "protocol", "packages/contracts",
                           exact=("scripts/requirements-contracts.txt",)),
         "mobile": changed("mobile", "packages/lumina_ui", "packages/lumina_tokens", "protocol",
-                          exact=flutter_shared),
+                          exact=(*flutter_shared, *mobile_drift_gate)),
         "macos_client": changed("mobile", "packages/lumina_ui", "packages/lumina_tokens",
-                                "protocol", exact=flutter_shared),
+                                "protocol", exact=(*flutter_shared, *mobile_drift_gate)),
         "website": changed("website"),
         "vela": changed("band/vela", "protocol", "packages/contracts"),
         "lumina_flutter": changed("packages/lumina_ui", "packages/lumina_tokens"),
