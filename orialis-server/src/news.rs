@@ -133,12 +133,36 @@ struct ProjectReportRow {
     updated_at: String,
 }
 
-fn api_error(status: StatusCode, code: &str, message: impl Into<String>) -> Response {
-    (
+fn api_error(status: StatusCode, code: &str, message: impl Into<String>) -> NewsError {
+    let response = (
         status,
         Json(json!({"error":{"code":code,"message":message.into()}})),
     )
-        .into_response()
+        .into_response();
+    NewsError(Box::new(response))
+}
+
+#[derive(Debug)]
+struct NewsError(Box<Response>);
+
+impl From<Response> for NewsError {
+    fn from(response: Response) -> Self {
+        Self(Box::new(response))
+    }
+}
+
+impl IntoResponse for NewsError {
+    fn into_response(self) -> Response {
+        *self.0
+    }
+}
+
+impl std::ops::Deref for NewsError {
+    type Target = Response;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 fn now() -> String {
@@ -169,7 +193,7 @@ fn session_token(headers: &HeaderMap) -> Option<String> {
         })
 }
 
-async fn session_user(state: &NewsState, headers: &HeaderMap) -> Result<String, Response> {
+async fn session_user(state: &NewsState, headers: &HeaderMap) -> Result<String, NewsError> {
     let Some(token) = session_token(headers) else {
         return Err(api_error(
             StatusCode::UNAUTHORIZED,
@@ -214,7 +238,7 @@ async fn news_revision(state: &NewsState, user: &str) -> Result<String, sqlx::Er
 async fn news_stream(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
-) -> Result<Response, Response> {
+) -> Result<Response, NewsError> {
     let user = session_user(&state, &headers).await?;
     let previous = headers
         .get("last-event-id")
@@ -275,7 +299,7 @@ async fn news_stream(
     Ok(response)
 }
 
-async fn publisher_user(state: &NewsState, headers: &HeaderMap) -> Result<String, Response> {
+async fn publisher_user(state: &NewsState, headers: &HeaderMap) -> Result<String, NewsError> {
     let supplied = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -320,7 +344,7 @@ async fn project_publisher_user(
     state: &NewsState,
     headers: &HeaderMap,
     requested_user: Option<&str>,
-) -> Result<String, Response> {
+) -> Result<String, NewsError> {
     let user_id = match session_user(state, headers).await {
         Ok(user_id) => user_id,
         Err(_) => publisher_user(state, headers).await?,
@@ -336,7 +360,7 @@ async fn project_publisher_user(
 }
 
 fn source_is_valid(source: &str, allowed: &[&str]) -> bool {
-    allowed.iter().any(|candidate| source == *candidate)
+    allowed.contains(&source)
 }
 
 fn valid_repo_name(value: &str) -> bool {
@@ -432,7 +456,7 @@ async fn start_task(
     input: &PublishInput,
     owner_user_id: &str,
     operation: &str,
-) -> Result<Option<Value>, Response> {
+) -> Result<Option<Value>, NewsError> {
     if input.task_id.trim().is_empty() || input.task_id.len() > 128 {
         return Err(api_error(
             StatusCode::BAD_REQUEST,
@@ -538,7 +562,7 @@ async fn finish_task(
     state: &NewsState,
     input: &PublishInput,
     result: &Value,
-) -> Result<Value, Response> {
+) -> Result<Value, NewsError> {
     let finished_at = now();
     let result_json = serde_json::to_string(result).map_err(|_| {
         api_error(
@@ -614,7 +638,7 @@ async fn get_public_cache(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
     uri: axum::http::Uri,
-) -> Result<Json<Envelope>, Response> {
+) -> Result<Json<Envelope>, NewsError> {
     session_user(&state, &headers).await?;
     let mut key = uri
         .path()
@@ -656,7 +680,7 @@ async fn get_github_brief(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
     Path(period): Path<String>,
-) -> Result<Json<Envelope>, Response> {
+) -> Result<Json<Envelope>, NewsError> {
     session_user(&state, &headers).await?;
     if !matches!(period.as_str(), "daily" | "weekly") {
         return Err(api_error(
@@ -684,7 +708,7 @@ async fn get_aihot_event(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<Json<Envelope>, Response> {
+) -> Result<Json<Envelope>, NewsError> {
     session_user(&state, &headers).await?;
     let story = get_cache(
         &state,
@@ -711,7 +735,7 @@ async fn get_aihot_report(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
     Path(period): Path<String>,
-) -> Result<Json<Envelope>, Response> {
+) -> Result<Json<Envelope>, NewsError> {
     session_user(&state, &headers).await?;
     if !matches!(period.as_str(), "daily" | "weekly" | "monthly") {
         return Err(api_error(
@@ -735,7 +759,7 @@ async fn get_github_repo(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
     Path((owner, repo)): Path<(String, String)>,
-) -> Result<Json<Envelope>, Response> {
+) -> Result<Json<Envelope>, NewsError> {
     session_user(&state, &headers).await?;
     if !valid_repo_name(&owner) || !valid_repo_name(&repo) {
         return Err(api_error(
@@ -781,11 +805,11 @@ async fn publish_aihot(
     headers: HeaderMap,
     uri: axum::http::Uri,
     Json(input): Json<PublishInput>,
-) -> Result<Json<Value>, Response> {
+) -> Result<Json<Value>, NewsError> {
     let kind = uri
         .path()
         .trim_start_matches("/api/v1/news/publish/aihot/")
-        .replace('/', "/");
+        .to_owned();
     let owner = publisher_user(&state, &headers).await?;
     let valid = matches!(
         kind.as_str(),
@@ -907,7 +931,7 @@ async fn publish_github(
     headers: HeaderMap,
     Path(period): Path<String>,
     Json(input): Json<PublishInput>,
-) -> Result<Json<Value>, Response> {
+) -> Result<Json<Value>, NewsError> {
     let owner = publisher_user(&state, &headers).await?;
     let new_payload = input.result.get("repositories").is_some();
     if !matches!(period.as_str(), "daily" | "weekly")
@@ -991,7 +1015,7 @@ async fn publish_github(
     Ok(Json(finish_task(&state, &input, &input.result).await?))
 }
 
-fn report_date(input: &PublishInput, period: &str) -> Result<String, Response> {
+fn report_date(input: &PublishInput, period: &str) -> Result<String, NewsError> {
     let date = input
         .report_date
         .clone()
@@ -1033,7 +1057,7 @@ async fn publish_project_report(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
     Json(input): Json<PublishInput>,
-) -> Result<Json<Value>, Response> {
+) -> Result<Json<Value>, NewsError> {
     let owner = project_publisher_user(&state, &headers, input.user_id.as_deref()).await?;
     let period = input.period.as_deref().unwrap_or("daily");
     if !matches!(period, "daily" | "weekly") || input.result.is_null() || !input.result.is_object()
@@ -1119,7 +1143,7 @@ async fn publish_failure(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
     Json(input): Json<PublishInput>,
-) -> Result<Json<Value>, Response> {
+) -> Result<Json<Value>, NewsError> {
     let owner = publisher_user(&state, &headers).await?;
     if !source_is_valid(
         &input.source,
@@ -1262,7 +1286,7 @@ async fn publish_failure(
 async fn get_projects_daily(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
-) -> Result<Json<Envelope>, Response> {
+) -> Result<Json<Envelope>, NewsError> {
     let owner = session_user(&state, &headers).await?;
     let rows = sqlx::query_as::<_, ProjectReportRow>("SELECT project_id,period,report_date,report_json,source,generated_at,updated_at FROM news_project_reports WHERE user_id=? AND project_key='' AND period='daily' ORDER BY report_date DESC LIMIT 30")
         .bind(&owner)
@@ -1299,7 +1323,7 @@ async fn get_projects_daily(
 async fn get_projects(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
-) -> Result<Json<Envelope>, Response> {
+) -> Result<Json<Envelope>, NewsError> {
     let owner = session_user(&state, &headers).await?;
     let projects = sqlx::query_as::<_, (String,String,Option<String>,Option<String>,String,Option<String>,String)>("SELECT id,name,goal,description,status,start_date,updated_at FROM projects WHERE user_id=? AND deleted_at IS NULL ORDER BY updated_at DESC,id")
         .bind(&owner)
@@ -1375,7 +1399,7 @@ async fn get_project(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<Json<Envelope>, Response> {
+) -> Result<Json<Envelope>, NewsError> {
     let owner = session_user(&state, &headers).await?;
     let project = sqlx::query_as::<_, (String,String,Option<String>,Option<String>,String,Option<String>,String)>("SELECT id,name,goal,description,status,start_date,updated_at FROM projects WHERE user_id=? AND id=? AND deleted_at IS NULL")
         .bind(&owner).bind(&id).fetch_optional(&state.pool).await
@@ -1406,7 +1430,7 @@ async fn get_project_reports(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<Json<Envelope>, Response> {
+) -> Result<Json<Envelope>, NewsError> {
     let owner = session_user(&state, &headers).await?;
     let belongs = sqlx::query_scalar::<_, i64>(
         "SELECT EXISTS(SELECT 1 FROM projects WHERE id=? AND user_id=? AND deleted_at IS NULL)",
@@ -1479,7 +1503,7 @@ async fn get_publish_task(
     State(state): State<Arc<NewsState>>,
     headers: HeaderMap,
     Path(task_id): Path<String>,
-) -> Result<Json<Value>, Response> {
+) -> Result<Json<Value>, NewsError> {
     let user = session_user(&state, &headers).await?;
     let row = sqlx::query_as::<_, (String,String,String,Option<String>,Option<String>,String)>("SELECT task_id,status,started_at,finished_at,source,error FROM news_publish_tasks WHERE task_id=? AND owner_user_id=?")
         .bind(task_id).bind(user).fetch_optional(&state.pool).await

@@ -143,11 +143,14 @@ async fn dispatch(state: Arc<AppState>, chat: &str, id: &str) {
     .await;
 }
 async fn reply(state: &AppState, command: AgentCommand, id: &str) {
-    let AgentCommand::Send(GatewayMessage::MessageSend {
+    let AgentCommand::Send(message) = command else {
+        panic!("wrong command")
+    };
+    let GatewayMessage::MessageSend {
         message_id,
         conversation_id,
         ..
-    }) = command
+    } = *message
     else {
         panic!("wrong command")
     };
