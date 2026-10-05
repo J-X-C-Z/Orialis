@@ -19,6 +19,10 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const MOBILE_EVENT_BUFFER: usize = 128;
 
+fn mobile_heartbeat() -> MobileEnvelope {
+    protocol::mobile_envelope(protocol::MOBILE_PING, None, serde_json::json!({}))
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct MobileRegistry {
     channels: Arc<Mutex<HashMap<String, broadcast::Sender<MobileEnvelope>>>>,
@@ -139,13 +143,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>, user_id: Str
                 Err(broadcast::error::RecvError::Closed) => break,
             },
             _ = heartbeat.tick() => {
-                let ping = MobileEnvelope {
-                    version: PROTOCOL_VERSION,
-                    message_type: "ping".into(),
-                    request_id: None,
-                    payload: serde_json::json!({}),
-                };
-                if send_envelope(&mut socket, ping).await.is_err() { break; }
+                if send_envelope(&mut socket, mobile_heartbeat()).await.is_err() { break; }
             }
         }
     }
@@ -527,6 +525,34 @@ async fn send_envelope(socket: &mut WebSocket, envelope: MobileEnvelope) -> Resu
         .send(Message::Text(text.into()))
         .await
         .map_err(|_| ())
+}
+
+#[cfg(test)]
+mod mobile_connection_tests {
+    use super::*;
+
+    #[test]
+    fn heartbeat_is_longer_than_handshake() {
+        assert!(HEARTBEAT_INTERVAL > HANDSHAKE_TIMEOUT);
+    }
+
+    #[test]
+    fn heartbeat_uses_mobile_ping_envelope() {
+        let heartbeat = mobile_heartbeat();
+        assert_eq!(heartbeat.version, PROTOCOL_VERSION);
+        assert_eq!(heartbeat.message_type, protocol::MOBILE_PING);
+        assert_eq!(heartbeat.request_id, None);
+        assert_eq!(heartbeat.payload, serde_json::json!({}));
+        assert_eq!(
+            protocol::parse_mobile_envelope(&serde_json::to_string(&heartbeat).unwrap()).unwrap(),
+            heartbeat
+        );
+    }
+
+    #[test]
+    fn mobile_heartbeat_interval_is_stable() {
+        assert_eq!(HEARTBEAT_INTERVAL, Duration::from_secs(20));
+    }
 }
 
 #[cfg(test)]

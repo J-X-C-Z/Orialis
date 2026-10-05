@@ -4,6 +4,10 @@ mod health;
 mod mobile_realtime;
 mod news;
 mod node_control;
+// Experimental platform storage helper. Compiled with the server crate, but
+// currently has no production caller and protects no route.
+#[allow(dead_code)]
+mod platform_paths;
 
 use agent_gateway::AgentRegistry;
 use axum::{
