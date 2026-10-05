@@ -136,6 +136,10 @@ jobs:
             echo '::error::127.0.0.1:18443 is already in use'
             exit 1
           fi
+      - name: Prepare disposable data directory for the container user
+        run: |
+          mkdir -p runtime-data
+          sudo chown 10001:10001 runtime-data
       - name: Run Linux Docker headless acceptance script
         run: scripts/platform/linux-headless-check.sh
       - name: Record image and verify SQLite database was created
