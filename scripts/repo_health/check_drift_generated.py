@@ -60,6 +60,19 @@ def main() -> int:
     command = ["dart", "run", "build_runner", "build"]
     print(f"Running in {root / 'mobile'}: {' '.join(command)}", flush=True)
     generated_result = subprocess.run(command, cwd=root / "mobile")
+
+    changed_protected = []
+    for path in protected:
+        protected_path = root / path
+        after = protected_path.read_bytes() if protected_path.is_file() else None
+        after_hash = hashlib.sha256(after).hexdigest() if after is not None else None
+        if after != before[path] or after_hash != before_hashes[path]:
+            changed_protected.append(path)
+    if changed_protected:
+        print("ERROR: generation changed protected lock/migration files:", file=sys.stderr)
+        for path in changed_protected:
+            print(f"  {path}", file=sys.stderr)
+
     if generated_result.returncode:
         print(
             "ERROR: Drift generation failed with "
@@ -67,17 +80,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return generated_result.returncode
-
-    changed_protected = []
-    for path in protected:
-        after = (root / path).read_bytes()
-        after_hash = hashlib.sha256(after).hexdigest()
-        if after != before[path] or after_hash != before_hashes[path]:
-            changed_protected.append(path)
     if changed_protected:
-        print("ERROR: generation changed protected lock/migration files:", file=sys.stderr)
-        for path in changed_protected:
-            print(f"  {path}", file=sys.stderr)
         return 1
 
     after_generated = sorted(
