@@ -188,6 +188,8 @@ jobs:
           cache: true
       - working-directory: mobile
         run: flutter pub get --enforce-lockfile
+      - name: Verify tracked Drift outputs are reproducible
+        run: python3 scripts/repo_health/check_drift_generated.py
       - working-directory: mobile
         run: flutter analyze --no-fatal-infos
       - working-directory: mobile
