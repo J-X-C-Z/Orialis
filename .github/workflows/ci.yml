@@ -169,7 +169,7 @@ jobs:
           uid="$(docker compose -f compose.headless.yaml exec -T orialis-server sh -c 'id -u')"
           test "$uid" = 10001
           docker compose -f compose.headless.yaml exec -T orialis-server sh -c 'test ! -w /etc && test -w /data && test -w /tmp'
-          test -f runtime-data/orialis.db
+          sudo test -f runtime-data/orialis.db
           echo 'Second start reused runtime-data/orialis.db and passed health, UID, and filesystem checks.' >> "$GITHUB_STEP_SUMMARY"
       - name: Capture logs and cleanly stop headless service
         if: always()
