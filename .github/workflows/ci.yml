@@ -124,6 +124,55 @@ jobs:
       - name: Run root black-box tests against a disposable SQLite service
         run: python3 scripts/roadmap-e2e/run.py --start-server --skip-rust
 
+  headless:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm headless port is available
+        run: |
+          if ss -ltn '( sport = :18443 )' | grep -q LISTEN; then
+            echo '::error::127.0.0.1:18443 is already in use'
+            exit 1
+          fi
+      - name: Run Linux Docker headless acceptance script
+        run: scripts/platform/linux-headless-check.sh
+      - name: Record image and verify SQLite database was created
+        run: |
+          image_id="$(docker image inspect --format '{{.Id}}' orialis-server:headless-local)"
+          test -n "$image_id"
+          test -f runtime-data/orialis.db
+          {
+            echo '### Linux headless acceptance'
+            echo "- Image: `orialis-server:headless-local`"
+            echo "- Image ID: `$image_id`"
+            echo '- SQLite database: `runtime-data/orialis.db` exists'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Restart headless service and verify health and filesystem policy
+        run: |
+          set -euo pipefail
+          docker compose -f compose.headless.yaml up -d
+          healthy=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18443/api/health >/dev/null; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+          test "$healthy" = true
+          uid="$(docker compose -f compose.headless.yaml exec -T orialis-server sh -c 'id -u')"
+          test "$uid" = 10001
+          docker compose -f compose.headless.yaml exec -T orialis-server sh -c 'test ! -w /etc && test -w /data && test -w /tmp'
+          test -f runtime-data/orialis.db
+          echo 'Second start reused runtime-data/orialis.db and passed health, UID, and filesystem checks.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Capture logs and cleanly stop headless service
+        if: always()
+        run: |
+          docker compose -f compose.headless.yaml logs --no-color --tail=200 || true
+          docker compose -f compose.headless.yaml down
+
   mobile:
     needs: changes
     if: needs.changes.outputs.mobile == 'true'
