@@ -101,15 +101,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: clippy
-      - name: Capture Clippy diagnostics
-        run: python3 scripts/repo_health/clippy_diagnostics.py capture --output "$RUNNER_TEMP/clippy-candidate.jsonl"
-      - name: Reject new Clippy diagnostics
-        run: >-
-          python3 scripts/repo_health/clippy_diagnostics.py compare
-          --baseline .github/repo-health/clippy-baseline.json
-          --candidate "$RUNNER_TEMP/clippy-candidate.jsonl"
-          --baseline-sha c5d04460df3adf2ffb71ede6530a1c5af85c6dcc
-          --candidate-sha "$GITHUB_SHA"
+      - name: Run strict workspace Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Check historical migration checksums
         run: |
           reference_root="$RUNNER_TEMP/migration-reference"
