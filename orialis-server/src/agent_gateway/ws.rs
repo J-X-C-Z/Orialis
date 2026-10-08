@@ -779,7 +779,7 @@ pub(crate) async fn dispatch_message(
             return;
         }
     };
-    let result = sqlx::query(
+    if let Err(error) = sqlx::query(
         "INSERT INTO messages (id,user_id,conversation_id,role,content,attachments_json)
          VALUES (?,?,?,'assistant',?,?) ON CONFLICT(id) DO NOTHING",
     )
@@ -789,9 +789,9 @@ pub(crate) async fn dispatch_message(
     .bind(&content)
     .bind(&attachments_json)
     .execute(&mut *transaction)
-    .await;
-    let Ok(result) = result else {
-        tracing::error!(%message_id, "failed to persist Hermes reply");
+    .await
+    {
+        tracing::error!(%error, %message_id, "failed to persist Hermes reply");
         fail_delivery(
             &state,
             &message_id,

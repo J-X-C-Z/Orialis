@@ -45,15 +45,20 @@ pub struct MobileEnvelope {
     pub payload: Value,
 }
 
+#[cfg(test)]
 pub const MOBILE_HELLO: &str = "hello";
+#[cfg(test)]
 pub const MOBILE_HELLO_ACK: &str = "hello.ack";
 pub const MOBILE_PING: &str = "ping";
+#[cfg(test)]
 pub const MOBILE_PONG: &str = "pong";
 pub const MOBILE_EVENT: &str = "event";
 pub const MOBILE_MESSAGE: &str = "message";
 pub const MOBILE_SYNC_CHANGE_HINT: &str = "sync.change_hint";
+#[cfg(test)]
 pub const MOBILE_ERROR: &str = "error";
 
+#[cfg(test)]
 const MOBILE_TYPES: &[&str] = &[
     MOBILE_HELLO,
     MOBILE_HELLO_ACK,
@@ -65,6 +70,7 @@ const MOBILE_TYPES: &[&str] = &[
     MOBILE_ERROR,
 ];
 
+#[cfg(test)]
 pub fn parse_mobile_envelope(input: &str) -> Result<MobileEnvelope, ProtocolError> {
     let envelope: MobileEnvelope =
         serde_json::from_str(input).map_err(|_| ProtocolError::InvalidJson)?;
@@ -91,14 +97,6 @@ pub fn mobile_envelope(
         request_id,
         payload,
     }
-}
-
-pub fn mobile_error(code: &str, message: &str, request_id: Option<String>) -> MobileEnvelope {
-    mobile_envelope(
-        MOBILE_ERROR,
-        request_id,
-        serde_json::json!({ "code": code, "message": message }),
-    )
 }
 
 pub fn mobile_event(payload: Value) -> MobileEnvelope {
@@ -1055,17 +1053,16 @@ fn validate_event(message: &GatewayMessage) -> Result<(), ProtocolError> {
                 ProtocolError::InvalidMessage
             });
         }
-        if event_type.starts_with("artifact.") {
-            if payload
+        if event_type.starts_with("artifact.")
+            && payload
                 .get("mime_type")
                 .and_then(Value::as_str)
                 .is_some_and(|mime| {
                     let mime = mime.to_ascii_lowercase();
                     mime.starts_with("audio/") || mime.starts_with("video/")
                 })
-            {
-                return Err(ProtocolError::InvalidMessage);
-            }
+        {
+            return Err(ProtocolError::InvalidMessage);
         }
         for value in [session_id, correlation_id, causation_id, idempotency_key]
             .into_iter()
@@ -1565,11 +1562,7 @@ pub fn extension_mobile_events(frame: &ExtensionFrame) -> Vec<Value> {
         "typing" | "typing.start" | "typing.stop" => {
             let state = raw["state"].as_str().unwrap_or("");
             let active =
-                if frame.message_type.ends_with("stop") || state == "stop" || state == "stopped" {
-                    false
-                } else {
-                    true
-                };
+                !(frame.message_type.ends_with("stop") || state == "stop" || state == "stopped");
             vec![serde_json::json!({
                 "kind": "agent.typing",
                 "active": active,

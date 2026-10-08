@@ -4,23 +4,24 @@ This additive gate set is based on accepted ORI-113 commit
 `ff3249beae015557704f7d06404f7fb72a2ecc7d`. It retains ORI-113's already
 resolved PR three-dot / push before-after diff range.
 
-## Clippy no-regression baseline
+## Strict Clippy gate
 
-`.github/repo-health/clippy-baseline.json` records compiler diagnostics
-captured from `c5d04460df3adf2ffb71ede6530a1c5af85c6dcc` with rustc and Cargo
-1.98.1. The command, stored in that file and run by the capture script, is:
+Rust changes run the full locked workspace Clippy matrix with the pinned
+Rust/Cargo 1.98.1 toolchain:
 
 ```text
-cargo clippy --workspace --all-targets --all-features --message-format=json --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```
 
-The comparator counts fingerprints by severity, lint code, package and target,
-diagnostic message, repo-relative primary file, and normalized primary span
-text/label. It deliberately omits line and column positions. New diagnostic
-counts fail CI; unchanged diagnostics and removals pass. The cargo process exit
-code is propagated, so compiler/process failure cannot become a passing
-comparison. This preserves the known findings; this gate does not claim Clippy
-is warning-free.
+Every warning is an error, and Cargo's exit code propagates directly to the
+Rust CI job. The approved ORI-124 source corrections remove the findings that
+previously prevented this strict command from passing. There is no diagnostic
+baseline allowance in the active workflow.
+
+On the isolated ORI-114 candidate, the corrected Rust tree was checked with
+rustc/Cargo 1.98.1 using the exact locked command above; it exited 0. The
+pre-correction integration tree was rejected by this command with 35 Clippy
+diagnostic errors, confirming the gate detects the prior findings.
 
 ## Changed artifact hygiene
 

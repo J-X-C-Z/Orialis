@@ -1126,36 +1126,37 @@ async fn authenticated_user_or_agent(
     }
 }
 
-async fn append_event<'e, E>(
-    executor: E,
-    user_id: &str,
-    entity_type: &str,
-    entity_id: &str,
-    operation: &str,
+struct AppendEvent<'a> {
+    user_id: &'a str,
+    entity_type: &'a str,
+    entity_id: &'a str,
+    operation: &'a str,
     entity_version: i64,
     payload_json: Option<String>,
     mutation_id: Option<String>,
-) -> Result<(), AppError>
+}
+
+async fn append_event<'e, E>(executor: E, event: AppendEvent<'_>) -> Result<(), AppError>
 where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
     let timestamp = now();
-    let tombstone = operation == "delete";
+    let tombstone = event.operation == "delete";
     sqlx::query(
         "INSERT INTO sync_events
          (id,user_id,cursor,entity_type,entity_id,operation,entity_version,tombstone,payload_json,mutation_id,deleted_at,created_at,updated_at,version)
          VALUES (?,?,(SELECT COALESCE(MAX(cursor),0)+1 FROM sync_events WHERE user_id=?),?,?,?,?,?,?,?,?,?,?,1)",
     )
     .bind(new_id())
-    .bind(user_id)
-    .bind(user_id)
-    .bind(entity_type)
-    .bind(entity_id)
-    .bind(operation)
-    .bind(entity_version)
+    .bind(event.user_id)
+    .bind(event.user_id)
+    .bind(event.entity_type)
+    .bind(event.entity_id)
+    .bind(event.operation)
+    .bind(event.entity_version)
     .bind(tombstone)
-    .bind(payload_json)
-    .bind(mutation_id)
+    .bind(event.payload_json)
+    .bind(event.mutation_id)
     .bind(if tombstone { Some(timestamp.clone()) } else { None::<String> })
     .bind(&timestamp)
     .bind(&timestamp)
@@ -1937,7 +1938,7 @@ async fn upload_attachments(
         // while Unix Path::file_name only strips forward slashes. Normalize
         // both separators at the HTTP boundary before persisting metadata.
         let name = file_name
-            .rsplit(|character| character == '/' || character == '\\')
+            .rsplit(['/', '\\'])
             .next()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or("文件")
@@ -2077,6 +2078,7 @@ async fn canonical_attachment(
     })
 }
 
+#[cfg(test)]
 fn attachment_download_token<'a>(
     public_url: &str,
     id: &str,
@@ -2355,13 +2357,15 @@ async fn update_child_completion(
             let child = fetch_task(&mut **tx, user_id, &child_id).await?;
             append_event(
                 &mut **tx,
-                user_id,
-                "task",
-                &child_id,
-                "upsert",
-                child.version,
-                Some(serde_json::to_string(&child).unwrap()),
-                None,
+                AppendEvent {
+                    user_id,
+                    entity_type: "task",
+                    entity_id: &child_id,
+                    operation: "upsert",
+                    entity_version: child.version,
+                    payload_json: Some(serde_json::to_string(&child).unwrap()),
+                    mutation_id: None,
+                },
             )
             .await?;
         }
@@ -2408,13 +2412,15 @@ async fn reconcile_parent_completion(
         let updated_parent = fetch_task(&mut **tx, user_id, parent_id).await?;
         append_event(
             &mut **tx,
-            user_id,
-            "task",
-            parent_id,
-            "upsert",
-            updated_parent.version,
-            Some(serde_json::to_string(&updated_parent).unwrap()),
-            None,
+            AppendEvent {
+                user_id,
+                entity_type: "task",
+                entity_id: parent_id,
+                operation: "upsert",
+                entity_version: updated_parent.version,
+                payload_json: Some(serde_json::to_string(&updated_parent).unwrap()),
+                mutation_id: None,
+            },
         )
         .await?;
     }
@@ -2451,13 +2457,15 @@ async fn soft_delete_children(
         .await?;
         append_event(
             &mut **tx,
-            user_id,
-            "task",
-            &child_id,
-            "delete",
-            version + 1,
-            None,
-            None,
+            AppendEvent {
+                user_id,
+                entity_type: "task",
+                entity_id: &child_id,
+                operation: "delete",
+                entity_version: version + 1,
+                payload_json: None,
+                mutation_id: None,
+            },
         )
         .await?;
     }
@@ -2552,13 +2560,15 @@ async fn create_task(
     update_child_completion(&mut tx, &user_id, &task, false).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "task",
-        &id,
-        "upsert",
-        task.version,
-        Some(serde_json::to_string(&task).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "task",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: task.version,
+            payload_json: Some(serde_json::to_string(&task).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -2675,13 +2685,15 @@ async fn update_task(
     update_child_completion(&mut tx, &user_id, &task, was_completed).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "task",
-        &id,
-        "upsert",
-        task.version,
-        Some(serde_json::to_string(&task).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "task",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: task.version,
+            payload_json: Some(serde_json::to_string(&task).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -2719,13 +2731,15 @@ async fn delete_task(
     }
     append_event(
         &mut *tx,
-        &user_id,
-        "task",
-        &id,
-        "delete",
-        task.version + 1,
-        None,
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "task",
+            entity_id: &id,
+            operation: "delete",
+            entity_version: task.version + 1,
+            payload_json: None,
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     if let Some(parent_id) = task.parent_task_id.as_deref() {
@@ -2868,13 +2882,15 @@ async fn create_project(
     let project = fetch_project(&mut *tx, &user_id, &id).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "project",
-        &id,
-        "upsert",
-        project.version,
-        Some(serde_json::to_string(&project).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "project",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: project.version,
+            payload_json: Some(serde_json::to_string(&project).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -2922,13 +2938,15 @@ async fn update_project(
     let project = fetch_project(&mut *tx, &user_id, &id).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "project",
-        &id,
-        "upsert",
-        project.version,
-        Some(serde_json::to_string(&project).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "project",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: project.version,
+            payload_json: Some(serde_json::to_string(&project).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3034,25 +3052,29 @@ async fn delete_project(
     for (milestone_id, version) in milestones {
         append_event(
             &mut *tx,
-            &user_id,
-            "project_milestone",
-            &milestone_id,
-            "delete",
-            version + 1,
-            None,
-            None,
+            AppendEvent {
+                user_id: &user_id,
+                entity_type: "project_milestone",
+                entity_id: &milestone_id,
+                operation: "delete",
+                entity_version: version + 1,
+                payload_json: None,
+                mutation_id: None,
+            },
         )
         .await?;
     }
     append_event(
         &mut *tx,
-        &user_id,
-        "project",
-        &id,
-        "delete",
-        project.version + 1,
-        None,
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "project",
+            entity_id: &id,
+            operation: "delete",
+            entity_version: project.version + 1,
+            payload_json: None,
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3412,13 +3434,15 @@ async fn create_milestone(
     let milestone = fetch_milestone(&mut *tx, &user_id, &project_id, &id).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "project_milestone",
-        &id,
-        "upsert",
-        milestone.version,
-        Some(serde_json::to_string(&milestone).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "project_milestone",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: milestone.version,
+            payload_json: Some(serde_json::to_string(&milestone).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3482,13 +3506,15 @@ async fn update_milestone(
     let milestone = fetch_milestone(&mut *tx, &user_id, &project_id, &id).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "project_milestone",
-        &id,
-        "upsert",
-        milestone.version,
-        Some(serde_json::to_string(&milestone).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "project_milestone",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: milestone.version,
+            payload_json: Some(serde_json::to_string(&milestone).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3522,13 +3548,15 @@ async fn delete_milestone(
     }
     append_event(
         &mut *tx,
-        &user_id,
-        "project_milestone",
-        &id,
-        "delete",
-        current.version + 1,
-        None,
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "project_milestone",
+            entity_id: &id,
+            operation: "delete",
+            entity_version: current.version + 1,
+            payload_json: None,
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3661,13 +3689,15 @@ async fn create_event(
     let event = fetch_event(&mut *tx, &user_id, &id).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "calendar_event",
-        &id,
-        "upsert",
-        event.version,
-        Some(serde_json::to_string(&event).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "calendar_event",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: event.version,
+            payload_json: Some(serde_json::to_string(&event).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3706,13 +3736,15 @@ async fn update_event(
     let event = fetch_event(&mut *tx, &user_id, &id).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "calendar_event",
-        &id,
-        "upsert",
-        event.version,
-        Some(serde_json::to_string(&event).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "calendar_event",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: event.version,
+            payload_json: Some(serde_json::to_string(&event).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3741,13 +3773,15 @@ async fn delete_event(
     }
     append_event(
         &mut *tx,
-        &user_id,
-        "calendar_event",
-        &id,
-        "delete",
-        event.version + 1,
-        None,
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "calendar_event",
+            entity_id: &id,
+            operation: "delete",
+            entity_version: event.version + 1,
+            payload_json: None,
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     // Keep the schedule tombstone ahead of its child tombstones for clients
@@ -3921,8 +3955,8 @@ mod attachment_tests {
     #[test]
     fn attachment_limits_cover_single_total_and_count() {
         assert_eq!(MAX_ATTACHMENT_BYTES, 20 * 1024 * 1024);
-        assert!(MAX_TOTAL_ATTACHMENT_BYTES >= MAX_ATTACHMENT_BYTES);
-        assert!(MAX_ATTACHMENT_REQUEST_BYTES > MAX_TOTAL_ATTACHMENT_BYTES);
+        const { assert!(MAX_TOTAL_ATTACHMENT_BYTES >= MAX_ATTACHMENT_BYTES) };
+        const { assert!(MAX_ATTACHMENT_REQUEST_BYTES > MAX_TOTAL_ATTACHMENT_BYTES) };
         assert_eq!(MAX_ATTACHMENT_COUNT, 10);
     }
 
@@ -4347,13 +4381,15 @@ mod attachment_tests {
         .unwrap();
         append_event(
             &mut *tx,
-            "user-1",
-            "task",
-            "parent",
-            "delete",
-            parent.version + 1,
-            None,
-            None,
+            AppendEvent {
+                user_id: "user-1",
+                entity_type: "task",
+                entity_id: "parent",
+                operation: "delete",
+                entity_version: parent.version + 1,
+                payload_json: None,
+                mutation_id: None,
+            },
         )
         .await
         .unwrap();
@@ -4377,13 +4413,15 @@ mod attachment_tests {
         .unwrap();
         append_event(
             &mut *tx,
-            "user-1",
-            "calendar_event",
-            "schedule-1",
-            "delete",
-            schedule_version + 1,
-            None,
-            None,
+            AppendEvent {
+                user_id: "user-1",
+                entity_type: "calendar_event",
+                entity_id: "schedule-1",
+                operation: "delete",
+                entity_version: schedule_version + 1,
+                payload_json: None,
+                mutation_id: None,
+            },
         )
         .await
         .unwrap();
