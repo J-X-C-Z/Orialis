@@ -1698,13 +1698,14 @@ mod tests {
                 .await
                 .is_err()
         );
-        sqlx::query("INSERT INTO news_cache(cache_key,data_json,updated_at,source,task_id) VALUES ('github:daily','[]',?,'githot.dev','new-task')")
-            .bind(now()).execute(&state.pool).await.unwrap();
-        let event = tokio::time::timeout(std::time::Duration::from_secs(2), resumed.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
+        let (insert_result, event) = tokio::join!(
+            sqlx::query("INSERT INTO news_cache(cache_key,data_json,updated_at,source,task_id) VALUES ('github:daily','[]',?,'githot.dev','new-task')")
+                .bind(now())
+                .execute(&state.pool),
+            tokio::time::timeout(std::time::Duration::from_secs(2), resumed.next())
+        );
+        insert_result.unwrap();
+        let event = event.unwrap().unwrap().unwrap();
         let updated = news_revision(&state, "user-a").await.unwrap();
         assert_ne!(revision, updated);
         assert!(String::from_utf8(event.to_vec())
