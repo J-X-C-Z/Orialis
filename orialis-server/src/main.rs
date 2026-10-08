@@ -836,10 +836,7 @@ async fn main() {
         .route("/api/v1/health", get(health::health))
         .route("/api/v1/meta", get(health::meta))
         .route("/api/v1/capabilities", get(health::capabilities))
-        .route("/api/v1/auth/register", post(register))
-        .route("/api/v1/auth/login", post(login))
-        .route("/api/v1/auth/logout", post(logout))
-        .route("/api/v1/auth/session", get(current_session))
+        .merge(auth_router())
         .route("/api/v1/tasks", get(list_tasks).post(create_task))
         .route("/api/v1/tasks/{id}", patch(update_task).delete(delete_task))
         .route("/api/v1/projects", get(list_projects).post(create_project))
@@ -920,6 +917,14 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .expect("Orialis server failed");
+}
+
+fn auth_router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/v1/auth/register", post(register))
+        .route("/api/v1/auth/login", post(login))
+        .route("/api/v1/auth/logout", post(logout))
+        .route("/api/v1/auth/session", get(current_session))
 }
 
 fn now() -> String {
@@ -4508,3 +4513,6 @@ mod attachment_tests {
 
 #[cfg(test)]
 mod conversation_routing_tests;
+
+#[cfg(test)]
+mod auth_tests;
