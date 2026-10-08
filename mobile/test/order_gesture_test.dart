@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:orialis_mobile/features/projects/data/project_repository.dart';
-import 'package:orialis_mobile/app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/core/config/app_config.dart';
 import 'package:orialis_mobile/features/events/data/event_repository.dart';
 import 'lumina_chat_flow_test.dart' show openChat, iconAction;

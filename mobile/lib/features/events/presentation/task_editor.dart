@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/app.dart';
-import '../../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import '../../../core/database/app_database.dart';
 import '../../../pages/shared/page_parts.dart';
 import '../data/event_repository.dart';
@@ -160,7 +160,7 @@ class _TaskEditorState extends ConsumerState<_TaskEditor> {
         value: _urgent,
         onChanged: (v) => setState(() => _urgent = v),
       ),
-      OrialisListRow(
+      LuminaListRow(
         title: '截止日期',
         subtitle: _due == null ? '未设置' : dateKey(_due!),
         trailing: _due == null
@@ -183,7 +183,7 @@ class _TaskEditorState extends ConsumerState<_TaskEditor> {
           if (d != null && mounted) setState(() => _due = d);
         },
       ),
-      OrialisListRow(
+      LuminaListRow(
         title: '截止时间',
         subtitle: _time ?? '未设置',
         trailing: _time == null
@@ -205,7 +205,7 @@ class _TaskEditorState extends ConsumerState<_TaskEditor> {
         stream: ref.watch(projectRepositoryProvider).watchProjects(),
         builder: (context, snapshot) {
           final projects = snapshot.data ?? const <Project>[];
-          return OrialisListRow(
+          return LuminaListRow(
             title: '所属项目',
             subtitle: _project == null
                 ? '无'
@@ -255,7 +255,7 @@ class _TaskEditorState extends ConsumerState<_TaskEditor> {
         ),
       ],
       if (_error != null)
-        Text(_error!, style: const TextStyle(color: AppColors.danger)),
+        Text(_error!, style: const TextStyle(color: LuminaBaseColors.danger)),
       Row(
         children: [
           Expanded(

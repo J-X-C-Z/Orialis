@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../app/app.dart';
-import '../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show OrialisPageScaffold;
 import '../../core/database/app_database.dart';
 import '../../features/events/presentation/task_editor.dart';
 import '../../features/events/presentation/task_children.dart';
@@ -101,7 +103,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
                     ..sort((a, b) => a.startAt.compareTo(b.startAt));
               final next = remaining.firstOrNull;
               final sections = <Widget>[
-                OrialisSection(
+                LuminaSection(
                   title: '现在关注',
                   raised: true,
                   trailing: Row(
@@ -124,7 +126,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
                     children: _orderedTasks(focus, 'today:focus'),
                   ),
                 ),
-                OrialisSection(
+                LuminaSection(
                   title: '下一安排',
                   raised: true,
                   trailing: LuminaButton(
@@ -145,7 +147,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
                   ),
                   child: next == null ? _empty('今天没有接下来的安排。') : _schedule(next),
                 ),
-                OrialisSection(
+                LuminaSection(
                   title: '最近截止',
                   raised: true,
                   trailing: LuminaIconButton(
@@ -165,7 +167,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
                     ),
                   ),
                 ),
-                OrialisSection(
+                LuminaSection(
                   title: '今日稍后',
                   raised: true,
                   child: remaining.length < 2
@@ -312,7 +314,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
       ),
   ];
 
-  Widget _task(Task t) => OrialisListRow(
+  Widget _task(Task t) => LuminaListRow(
     key: ValueKey(t.id),
     depth: LuminaSurfaceDepth.recessed,
     title: t.title,
@@ -348,7 +350,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
           ),
     ),
   );
-  Widget _schedule(CalendarEvent s) => OrialisListRow(
+  Widget _schedule(CalendarEvent s) => LuminaListRow(
     depth: LuminaSurfaceDepth.recessed,
     title: s.title,
     leading: const LuminaIcon(LuminaIcons.clock),

@@ -4,7 +4,9 @@ import 'package:dio/dio.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app.dart';
-import '../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show OrialisPageScaffold;
 import '../shared/page_parts.dart';
 import '../../core/config/app_config.dart';
 import '../../core/network/orialis_api_client.dart';
@@ -209,7 +211,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                       ],
                     ),
                     const QuietLabel('留住想法，安排生活。'),
-                    OrialisListRow(
+                    LuminaListRow(
                       title: _loadingSession ? '正在检查账户…' : _username ?? '未登录',
                       subtitle: _username == null ? '本地可用，登录后可跨设备同步' : '已登录',
                       leading: const LuminaIcon(LuminaIcons.person),
@@ -228,18 +230,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   ],
                 ),
               ),
-              OrialisSection(
+              LuminaSection(
                 title: '连接与同步',
                 child: ContentStack(
                   children: [
-                    OrialisListRow(
+                    LuminaListRow(
                       title: '服务器',
                       subtitle: '$_serverUrl · $_serverState',
                       leading: const LuminaIcon(LuminaIcons.server),
                       trailing: const LuminaIcon(LuminaIcons.chevronRight),
                       onTap: _editServerUrl,
                     ),
-                    OrialisListRow(
+                    LuminaListRow(
                       title: _syncState.label,
                       subtitle: _syncState.message,
                       leading: const LuminaIcon(LuminaIcons.sync),
@@ -270,7 +272,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   ],
                 ),
               ),
-              OrialisSection(
+              LuminaSection(
                 title: '显示与动效',
                 child: ContentStack(
                   children: [
@@ -292,7 +294,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         }
                       },
                     ),
-                    OrialisListRow(
+                    LuminaListRow(
                       title: '高性能模式',
                       subtitle: '减少实时玻璃模糊，保留色彩、阴影与自然动效',
                       trailing: LuminaSwitch(
@@ -315,13 +317,13 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               ),
               FutureBuilder<String>(
                 future: _deviceId,
-                builder: (_, s) => OrialisListRow(
+                builder: (_, s) => LuminaListRow(
                   title: '当前设备',
                   subtitle: s.data ?? '正在初始化…',
                   leading: const LuminaIcon(LuminaIcons.devices),
                 ),
               ),
-              OrialisListRow(
+              LuminaListRow(
                 title: '设备中心',
                 subtitle: '查看设备、切换当前设备并管理默认设备',
                 leading: const LuminaIcon(LuminaIcons.devices),
@@ -329,7 +331,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 onTap: () => context.push('/devices'),
               ),
               if (!ref.watch(desktopModeProvider))
-                OrialisListRow(
+                LuminaListRow(
                   title: '系统提醒与桌面',
                   subtitle: '任务提醒、今日卡片与小米超级岛',
                   leading: const LuminaIcon(LuminaIcons.devices),
@@ -337,7 +339,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   onTap: () => context.push('/system'),
                 ),
               if (!ref.watch(desktopModeProvider))
-                OrialisListRow(
+                LuminaListRow(
                   title: '手环连接',
                   subtitle: '连接状态、互联权限与消息诊断',
                   leading: const LuminaIcon(LuminaIcons.devices),

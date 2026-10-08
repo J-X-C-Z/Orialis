@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/app.dart';
-import '../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show LuminaCardMemory, OrialisPageScaffold;
 import '../../core/database/app_database.dart';
 import '../../features/projects/data/project_repository.dart';
 import '../../features/events/presentation/task_editor.dart';
@@ -189,7 +191,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                       ),
                     ),
                     if (projects.isEmpty)
-                      const OrialisEmptyState(text: '为一个稍长的目标建立项目，再拆成可完成的里程碑。'),
+                      const LuminaEmptyState(text: '为一个稍长的目标建立项目，再拆成可完成的里程碑。'),
                     for (final p in projects)
                       LongPressOrderable<Project>(
                         key: ValueKey('order:projects:${p.id}'),
@@ -638,7 +640,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
             empty: const QuietLabel('还没有里程碑。'),
             children: [
               for (final m in snapshot.data ?? const <ProjectMilestone>[])
-                OrialisListRow(
+                LuminaListRow(
                   key: ValueKey(m.id),
                   depth: LuminaSurfaceDepth.recessed,
                   title: m.title,
@@ -672,7 +674,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         },
       ),
       const LuminaEngravedDivider(),
-      const OrialisSectionHeader(title: '关联事件'),
+      const LuminaSectionHeader(title: '关联事件'),
       StreamBuilder<List<Task>>(
         stream: ref
             .watch(projectRepositoryProvider)
@@ -690,7 +692,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                   key: const ValueKey('next-action'),
                 ),
               for (final t in tasks)
-                OrialisListRow(
+                LuminaListRow(
                   key: ValueKey(t.id),
                   depth: LuminaSurfaceDepth.recessed,
                   title: t.title,
@@ -765,7 +767,7 @@ class _NameEditorState extends State<_NameEditor> {
       Text(widget.title, style: LuminaTheme.of(context).textTheme.titleLarge),
       LuminaTextField(controller: _name, label: '名称', autofocus: true),
       if (widget.date)
-        OrialisListRow(
+        LuminaListRow(
           title: '截止日期',
           subtitle: _detail.text.isEmpty ? '未设置' : _detail.text,
           onTap: () async {

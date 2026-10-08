@@ -1,6 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import '../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show DesktopLayoutScope;
 
 /// Desktop navigation reuses the same local-first product pages.
 class DesktopShell extends StatefulWidget {

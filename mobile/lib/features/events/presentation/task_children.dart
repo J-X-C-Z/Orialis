@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/app.dart';
-import '../../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import '../../../core/database/app_database.dart';
 import '../../../pages/shared/page_parts.dart';
 import 'task_editor.dart';
@@ -97,7 +97,7 @@ class _TaskChildrenPanelState extends ConsumerState<TaskChildrenPanel> {
               ),
               children: [
                 for (final task in children)
-                  OrialisListRow(
+                  LuminaListRow(
                     key: ValueKey(task.id),
                     depth: LuminaSurfaceDepth.recessed,
                     title: task.title,

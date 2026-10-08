@@ -1,4 +1,4 @@
-import '../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 class ContentStack extends StatelessWidget {
   const ContentStack({required this.children, this.gap = 12, super.key});
@@ -21,7 +21,7 @@ class PageFailure extends StatelessWidget {
   const PageFailure({this.message = '暂时无法读取，请稍后重试。', super.key});
   final String message;
   @override
-  Widget build(BuildContext context) => OrialisEmptyState(text: message);
+  Widget build(BuildContext context) => LuminaEmptyState(text: message);
 }
 
 Future<String?> chooseRecordAction(BuildContext context) =>

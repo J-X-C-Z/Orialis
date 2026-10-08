@@ -21,8 +21,7 @@ import '../core/sync/sync_coordinator.dart';
 import '../core/sync/desktop_local_changes.dart';
 import '../features/system_integration/system_integration_controller.dart';
 import 'router/app_router.dart';
-import 'design/app_theme.dart';
-import 'design/lumina_blur.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 // Keep the installed app's Node lease independent of Device Center routes.
 final nodeHeartbeatLifecycleProvider = Provider<NodeHeartbeatLifecycle?>((ref) {

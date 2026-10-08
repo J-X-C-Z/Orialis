@@ -1,4 +1,4 @@
-import '../../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 import '../domain/agent_event_state.dart';
 import 'safe_markdown.dart';
@@ -79,7 +79,7 @@ class _EventCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.item),
+      padding: const EdgeInsets.only(bottom: LuminaSpacing.item),
       child: LuminaSurface(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -89,10 +89,10 @@ class _EventCard extends StatelessWidget {
               children: [
                 LuminaIcon(
                   icon,
-                  size: AppIconSize.control,
+                  size: LuminaIconSize.control,
                   color: color ?? LuminaTheme.of(context).colors.accent,
                 ),
-                const SizedBox(width: AppSpacing.controlGap),
+                const SizedBox(width: LuminaSpacing.controlGap),
                 Expanded(
                   child: Text(
                     title,
@@ -102,7 +102,7 @@ class _EventCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: AppSpacing.controlGap),
+            const SizedBox(height: LuminaSpacing.controlGap),
             child,
           ],
         ),
@@ -135,12 +135,12 @@ class _ToolTimelineCard extends StatelessWidget {
     child: Column(
       children: [
         for (final item in items)
-          OrialisListRow(
+          LuminaListRow(
             leading: LuminaIcon(
               item.status == 'running'
                   ? LuminaIcons.clock
                   : LuminaIcons.checkCircle,
-              size: AppIconSize.control,
+              size: LuminaIconSize.control,
             ),
             title: item.name,
             subtitle: item.detail,
@@ -202,10 +202,10 @@ class _ClarifyCardState extends State<_ClarifyCard> {
       children: [
         Text(widget.request.question),
         if (widget.request.options.isNotEmpty) ...[
-          const SizedBox(height: AppSpacing.controlGap),
+          const SizedBox(height: LuminaSpacing.controlGap),
           Wrap(
-            spacing: AppSpacing.controlGap,
-            runSpacing: AppSpacing.tight,
+            spacing: LuminaSpacing.controlGap,
+            runSpacing: LuminaSpacing.tight,
             children: [
               for (final option in widget.request.options)
                 LuminaButton(
@@ -215,7 +215,7 @@ class _ClarifyCardState extends State<_ClarifyCard> {
             ],
           ),
         ],
-        const SizedBox(height: AppSpacing.controlGap),
+        const SizedBox(height: LuminaSpacing.controlGap),
         Row(
           children: [
             Expanded(
@@ -225,7 +225,7 @@ class _ClarifyCardState extends State<_ClarifyCard> {
                 hintText: '自定义回答',
               ),
             ),
-            const SizedBox(width: AppSpacing.controlGap),
+            const SizedBox(width: LuminaSpacing.controlGap),
             LuminaIconButton(
               onPressed: _sending
                   ? null

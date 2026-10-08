@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orialis_mobile/app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show LuminaCardMemory;
 import 'lumina_components_test.dart' show harness;
 
 void main() {
@@ -219,7 +221,7 @@ void main() {
             width: 320,
             child: LuminaCompletionList(
               children: [
-                OrialisListRow(
+                LuminaListRow(
                   key: const ValueKey('retained'),
                   title: 'milestone',
                   leading: LuminaCheck(value: false, onChanged: (_) async {}),
@@ -347,7 +349,7 @@ void main() {
                   empty: const Text('empty'),
                   children: [
                     if (visible)
-                      OrialisListRow(
+                      LuminaListRow(
                         key: const ValueKey('task'),
                         title: 'task',
                         depth: LuminaSurfaceDepth.recessed,
@@ -407,7 +409,7 @@ void main() {
         Center(
           child: LuminaCompletionList(
             children: [
-              OrialisListRow(
+              LuminaListRow(
                 key: const ValueKey('task'),
                 title: 'task',
                 trailing: LuminaCheck(

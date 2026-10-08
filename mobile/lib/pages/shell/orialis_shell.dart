@@ -1,6 +1,8 @@
 import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart' show NavigationDestination;
-import '../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show LuminaConversationVisibility;
 import '../shared/mobile_navigation.dart';
 
 class OrialisShell extends StatefulWidget {

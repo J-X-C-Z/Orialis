@@ -1,4 +1,4 @@
-import '../../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 enum MarkdownBlockType { heading, paragraph, code, bullets, ordered, table }
 
@@ -196,7 +196,7 @@ class _BlockView extends StatelessWidget {
           _ => LuminaTheme.of(context).textTheme.titleMedium,
         };
         return Padding(
-          padding: const EdgeInsets.only(top: AppSpacing.compact, bottom: 4),
+          padding: const EdgeInsets.only(top: LuminaSpacing.compact, bottom: 4),
           child: _InlineText(
             text: block.lines.single,
             style: style.copyWith(fontWeight: FontWeight.w700),
@@ -206,10 +206,10 @@ class _BlockView extends StatelessWidget {
         return Container(
           width: double.infinity,
           margin: const EdgeInsets.symmetric(vertical: 4),
-          padding: const EdgeInsets.all(AppSpacing.item),
+          padding: const EdgeInsets.all(LuminaSpacing.item),
           decoration: BoxDecoration(
             color: LuminaTheme.of(context).colors.accentSoft,
-            borderRadius: BorderRadius.circular(AppRadius.attachment),
+            borderRadius: BorderRadius.circular(LuminaRadius.attachment),
           ),
           child: LuminaSelectableText(
             block.lines.join('\n'),
