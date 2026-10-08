@@ -100,9 +100,17 @@ class _LuminaTextFieldState extends State<LuminaTextField> {
                       ),
                     ),
                   Semantics(
-                    textField: true,
                     label: widget.label,
                     enabled: widget.enabled,
+                    onFocus: widget.enabled
+                        ? () {
+                            if (widget.readOnly) {
+                              focus.requestFocus();
+                            } else {
+                              _editorKey.currentState?.requestKeyboard();
+                            }
+                          }
+                        : null,
                     child: ExcludeFocus(
                       excluding: !widget.enabled,
                       child: IgnorePointer(

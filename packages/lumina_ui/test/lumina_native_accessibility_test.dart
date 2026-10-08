@@ -1,6 +1,7 @@
 import 'dart:ui' show SemanticsAction;
 
 import 'package:flutter/material.dart' as m;
+import 'package:flutter/rendering.dart' show RenderEditable;
 import 'package:flutter/semantics.dart' show SemanticsNode;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -277,4 +278,254 @@ void main() {
       semantics.dispose();
     },
   );
+
+  testWidgets('text field exposes one actionable semantic text node', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final enabledController = TextEditingController(text: 'seed');
+    final enabledFocus = FocusNode();
+    final disabledController = TextEditingController(text: 'locked');
+    final disabledFocus = FocusNode();
+    final readOnlyController = TextEditingController(text: 'read-only');
+    final readOnlyFocus = FocusNode();
+    final limitedController = TextEditingController();
+    final limitedFocus = FocusNode();
+    await tester.pumpWidget(
+      host(
+        Column(
+          children: [
+            LuminaTextField(
+              key: const ValueKey('enabled-probe'),
+              controller: enabledController,
+              focusNode: enabledFocus,
+              label: 'Probe',
+            ),
+            LuminaTextField(
+              key: const ValueKey('disabled-probe'),
+              controller: disabledController,
+              focusNode: disabledFocus,
+              label: 'Disabled Probe',
+              enabled: false,
+            ),
+            LuminaTextField(
+              key: const ValueKey('read-only-probe'),
+              controller: readOnlyController,
+              focusNode: readOnlyFocus,
+              label: 'Read Only Probe',
+              readOnly: true,
+            ),
+            LuminaTextField(
+              key: const ValueKey('limited-probe'),
+              controller: limitedController,
+              focusNode: limitedFocus,
+              label: 'Limited Probe',
+              maxLength: 5,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    List<SemanticsNode> allNodes() {
+      final root = tester
+          .binding
+          .renderViews
+          .single
+          .owner!
+          .semanticsOwner!
+          .rootSemanticsNode!;
+      final result = <SemanticsNode>[];
+      void visit(SemanticsNode node) {
+        result.add(node);
+        node.visitChildren((child) {
+          visit(child);
+          return true;
+        });
+      }
+
+      visit(root);
+      return result;
+    }
+
+    final beforeNodes = allNodes();
+    // ignore: avoid_print
+    print(
+      'LUMINA_SEMANTICS_TREE\n'
+      '${beforeNodes.map((node) => node.getSemanticsData()).join('\n')}',
+    );
+    final enabledNodes = beforeNodes
+        .where(
+          (node) =>
+              node.getSemanticsData().label == 'Probe' &&
+              node.getSemanticsData().value == 'seed',
+        )
+        .toList();
+    expect(
+      enabledNodes,
+      hasLength(1),
+      reason:
+          'Expected one Probe node containing the controller seed; real tree: '
+          '${beforeNodes.map((node) => node.getSemanticsData()).join(' | ')}',
+    );
+    final enabledNode = enabledNodes.single;
+    final enabledData = enabledNode.getSemanticsData();
+    // Log the framework's real semantics tree for both pre-fix and post-fix
+    // runs; AX/DOM values alone are not accepted as controller evidence.
+    // ignore: avoid_print
+    print('LUMINA_SEMANTICS_PROBE enabled=$enabledData');
+    expect(enabledData.value, 'seed');
+    expect(enabledData.flagsCollection.isTextField, isTrue);
+    expect(enabledData.hasAction(SemanticsAction.focus), isTrue);
+
+    enabledNode.owner!.performAction(enabledNode.id, SemanticsAction.focus);
+    await tester.pump();
+    expect(enabledFocus.hasFocus, isTrue);
+    expect(tester.testTextInput.isVisible, isTrue);
+    final focusedEnabledNode = allNodes().singleWhere(
+      (node) =>
+          node.getSemanticsData().label == 'Probe' &&
+          node.getSemanticsData().value == 'seed',
+    );
+    expect(
+      focusedEnabledNode.getSemanticsData().hasAction(SemanticsAction.setText),
+      isTrue,
+    );
+    focusedEnabledNode.owner!.performAction(
+      focusedEnabledNode.id,
+      SemanticsAction.setText,
+      'real',
+    );
+    await tester.pump();
+    expect(enabledController.text, 'real');
+    expect(
+      allNodes()
+          .singleWhere(
+            (node) =>
+                node.getSemanticsData().label == 'Probe' &&
+                node.getSemanticsData().value == 'real',
+          )
+          .getSemanticsData()
+          .value,
+      'real',
+    );
+    final renderedText = _renderEditable(
+      tester.renderObject<RenderObject>(
+        find.descendant(
+          of: find.byKey(const ValueKey('enabled-probe')),
+          matching: find.byType(EditableText),
+        ),
+      ),
+    ).text!.toPlainText();
+    expect(renderedText, 'real');
+    // ignore: avoid_print
+    print(
+      'LUMINA_SEMANTICS_RESULT label=Probe controller=${enabledController.text} '
+      'render=$renderedText focus=${enabledFocus.hasFocus} '
+      'keyboard=${tester.testTextInput.isVisible}',
+    );
+
+    final disabledNode = allNodes().singleWhere(
+      (node) =>
+          node.getSemanticsData().label == 'Disabled Probe' &&
+          node.getSemanticsData().value == 'locked',
+    );
+    final disabledData = disabledNode.getSemanticsData();
+    // ignore: avoid_print
+    print('LUMINA_SEMANTICS_PROBE disabled=$disabledData');
+    expect(disabledData.value, 'locked');
+    expect(disabledData.flagsCollection.isTextField, isTrue);
+    expect(
+      disabledData.flagsCollection.isEnabled.toString(),
+      'Tristate.isFalse',
+    );
+    expect(disabledData.hasAction(SemanticsAction.focus), isFalse);
+    expect(disabledData.hasAction(SemanticsAction.setText), isFalse);
+    disabledNode.owner!.performAction(
+      disabledNode.id,
+      SemanticsAction.setText,
+      'intrusion',
+    );
+    await tester.pump();
+    expect(disabledController.text, 'locked');
+    expect(disabledFocus.hasFocus, isFalse);
+    expect(tester.takeException(), isNull);
+
+    final readOnlyNode = allNodes().singleWhere(
+      (node) =>
+          node.getSemanticsData().label == 'Read Only Probe' &&
+          node.getSemanticsData().value == 'read-only',
+    );
+    final readOnlyData = readOnlyNode.getSemanticsData();
+    expect(readOnlyData.flagsCollection.isReadOnly, isTrue);
+    expect(readOnlyData.hasAction(SemanticsAction.focus), isTrue);
+    expect(readOnlyData.hasAction(SemanticsAction.setText), isFalse);
+    readOnlyNode.owner!.performAction(
+      readOnlyNode.id,
+      SemanticsAction.setText,
+      'intrusion',
+    );
+    readOnlyNode.owner!.performAction(readOnlyNode.id, SemanticsAction.focus);
+    await tester.pump();
+    expect(readOnlyController.text, 'read-only');
+    expect(readOnlyFocus.hasFocus, isTrue);
+    expect(tester.testTextInput.isVisible, isFalse);
+    expect(tester.takeException(), isNull);
+
+    final limitedNode = allNodes().singleWhere(
+      (node) =>
+          node.getSemanticsData().label == 'Limited Probe' &&
+          node.getSemanticsData().flagsCollection.isTextField,
+    );
+    limitedNode.owner!.performAction(limitedNode.id, SemanticsAction.focus);
+    await tester.pump();
+    final focusedLimitedNode = allNodes().singleWhere(
+      (node) =>
+          node.getSemanticsData().label == 'Limited Probe' &&
+          node.getSemanticsData().flagsCollection.isTextField,
+    );
+    expect(
+      focusedLimitedNode.getSemanticsData().hasAction(SemanticsAction.setText),
+      isTrue,
+    );
+    focusedLimitedNode.owner!.performAction(
+      focusedLimitedNode.id,
+      SemanticsAction.setText,
+      '123456',
+    );
+    await tester.pump();
+    expect(limitedController.text, '12345');
+    expect(
+      allNodes().any(
+        (node) =>
+            node.getSemanticsData().label == 'Limited Probe' &&
+            node.getSemanticsData().value == '12345',
+      ),
+      isTrue,
+    );
+
+    semantics.dispose();
+    enabledController.dispose();
+    disabledController.dispose();
+    readOnlyController.dispose();
+    limitedController.dispose();
+    enabledFocus.dispose();
+    disabledFocus.dispose();
+    readOnlyFocus.dispose();
+    limitedFocus.dispose();
+  });
+}
+
+RenderEditable _renderEditable(RenderObject root) {
+  RenderEditable? result;
+  void visit(RenderObject child) {
+    if (child is RenderEditable) {
+      result = child;
+    } else {
+      child.visitChildren(visit);
+    }
+  }
+
+  visit(root);
+  return result ?? (throw TestFailure('EditableText has no RenderEditable'));
 }
