@@ -1,4 +1,5 @@
 import 'package:drift/native.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -58,6 +59,60 @@ class _OfflineSync extends SyncCoordinator {
 }
 
 void main() {
+  testWidgets(
+    'root Material inherits Lumina body text on empty project detail',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(1180, 800);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+      final database = AppDatabase(executor: NativeDatabase.memory());
+      final config = _LocalConfig();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            databaseProvider.overrideWithValue(database),
+            desktopModeProvider.overrideWithValue(true),
+            appConfigProvider.overrideWithValue(config),
+            syncCoordinatorProvider.overrideWith(
+              (ref) => _OfflineSync(
+                realtime: ref.read(realtimeClientProvider),
+                chatRepository: null,
+              ),
+            ),
+          ],
+          child: const OrialisApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('项目').last);
+      await tester.pumpAndSettle();
+
+      const detail = '建立项目，再用里程碑和关联事件把想法变成进展。';
+      final detailFinder = find.text(detail);
+      expect(detailFinder, findsOneWidget);
+      expect(tester.widget<Text>(detailFinder).style, isNull);
+      final theme = LuminaTheme.of(tester.element(detailFinder));
+      final paragraph = tester.renderObject<RenderParagraph>(detailFinder);
+      expect(paragraph.text.style?.color, theme.textTheme.bodyMedium.color);
+
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+      await tester.pumpAndSettle();
+      final lightTheme = LuminaTheme.of(tester.element(detailFinder));
+      expect(
+        tester.renderObject<RenderParagraph>(detailFinder).text.style?.color,
+        lightTheme.textTheme.bodyMedium.color,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await database.close();
+    },
+  );
+
   testWidgets(
     'desktop destinations and offline task creation work at wide and narrow sizes',
     (tester) async {

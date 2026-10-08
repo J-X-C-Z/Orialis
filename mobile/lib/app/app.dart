@@ -21,6 +21,7 @@ import '../core/sync/sync_coordinator.dart';
 import '../core/sync/desktop_local_changes.dart';
 import '../features/system_integration/system_integration_controller.dart';
 import 'router/app_router.dart';
+
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 // Keep the installed app's Node lease independent of Device Center routes.
@@ -309,6 +310,7 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
                   : SystemUiOverlayStyle.dark,
               child: Material(
                 color: LuminaTheme.of(context).colors.paper,
+                textStyle: LuminaTheme.of(context).textTheme.bodyMedium,
                 child: child ?? const SizedBox.shrink(),
               ),
             ),
