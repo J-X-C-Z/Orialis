@@ -3959,3 +3959,6 @@ mod auth_tests;
 
 #[cfg(test)]
 mod attachments_tests;
+
+#[cfg(test)]
+mod tasks_tests;
