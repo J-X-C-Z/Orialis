@@ -2,8 +2,8 @@
   "package": "top.jxcz.orialis",
   "name": "Orialis",
   "icon": "/common/icon.png",
-  "versionName": "0.5.0-linked",
-  "versionCode": 6,
+  "versionName": "1.0.0",
+  "versionCode": 7,
   "minPlatformVersion": 1000,
   "features": [
     {
