@@ -4230,3 +4230,6 @@ mod conversation_routing_tests;
 
 #[cfg(test)]
 mod auth_tests;
+
+#[cfg(test)]
+mod attachments_tests;
