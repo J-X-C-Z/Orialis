@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show OrialisPageScaffold;
 import '../../pages/shared/page_parts.dart';
 import 'wear_transport.dart';
 import 'wear_providers.dart';
@@ -79,7 +81,7 @@ class _WearConnectionPageState extends ConsumerState<WearConnectionPage>
                     ],
                   ),
                 ),
-                OrialisSection(
+                LuminaSection(
                   title: '连接状态',
                   child: ContentStack(
                     children: [
@@ -90,7 +92,7 @@ class _WearConnectionPageState extends ConsumerState<WearConnectionPage>
                     ],
                   ),
                 ),
-                OrialisSection(
+                LuminaSection(
                   title: '连接诊断',
                   child: ContentStack(
                     children: [
@@ -141,12 +143,12 @@ class _WearConnectionPageState extends ConsumerState<WearConnectionPage>
                 if (diagnostics.nodeIds.isEmpty)
                   const QuietLabel('尚未发现手环。请先在小米运动健康中连接手环，并保持其在后台运行。'),
                 for (final node in diagnostics.nodeIds)
-                  OrialisListRow(
+                  LuminaListRow(
                     title: node,
                     subtitle: node == state.selectedNode ? '当前连接手环' : '发现的手环',
                     onTap: state.busy ? null : () => manager.selectNode(node),
                   ),
-                OrialisSection(
+                LuminaSection(
                   title: '同步到手环',
                   child: ContentStack(
                     children: [
@@ -207,7 +209,7 @@ class _WearConnectionPageState extends ConsumerState<WearConnectionPage>
                     ],
                   ),
                 ),
-                OrialisSection(
+                LuminaSection(
                   title: '消息诊断',
                   child: ContentStack(
                     children: [
@@ -243,7 +245,7 @@ class _WearConnectionPageState extends ConsumerState<WearConnectionPage>
   }
 
   Widget _row(String label, String value) =>
-      OrialisListRow(title: label, subtitle: value);
+      LuminaListRow(title: label, subtitle: value);
   String _presence(WearPresence value) => switch (value) {
     WearPresence.online => '在线',
     WearPresence.offline => '离线',

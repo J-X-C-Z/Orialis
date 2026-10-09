@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orialis_mobile/app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 Widget _harness(Widget child, {bool highPerformance = true}) => LuminaTheme(
   highPerformanceMode: highPerformance,

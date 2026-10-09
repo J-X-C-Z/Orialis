@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app.dart';
-import '../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show OrialisPageScaffold;
 import '../chat/chat_page.dart' show agentChatServiceProvider;
 import '../shared/page_parts.dart';
 
@@ -116,11 +118,11 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
             ContentStack(
               gap: 24,
               children: [
-                OrialisSection(
+                LuminaSection(
                   title: '系统展示',
                   child: ContentStack(
                     children: [
-                      OrialisListRow(
+                      LuminaListRow(
                         title: '开启提醒与桌面卡片',
                         subtitle: '将当前账户的任务和日程显示到系统；关闭后清除提醒和卡片内容',
                         trailing: LuminaSwitch(
@@ -140,11 +142,11 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
                     ],
                   ),
                 ),
-                OrialisSection(
+                LuminaSection(
                   title: '提醒',
                   child: ContentStack(
                     children: [
-                      OrialisListRow(
+                      LuminaListRow(
                         title: '通知权限',
                         subtitle: notification ? '已允许' : '未允许，系统提醒暂不可见',
                         onTap: system == null || _busy
@@ -165,7 +167,7 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
                                 }
                               }),
                       ),
-                      OrialisListRow(
+                      LuminaListRow(
                         title: '准时提醒',
                         subtitle: exact ? '已允许精确提醒' : '当前采用系统调度，省电模式可能延迟提醒',
                         onTap: system == null || _busy || exact
@@ -217,7 +219,7 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
                     ],
                   ),
                 ),
-                OrialisSection(
+                LuminaSection(
                   title: '桌面卡片与快捷入口',
                   child: ContentStack(
                     children: [
@@ -249,7 +251,7 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
                     ],
                   ),
                 ),
-                OrialisSection(
+                LuminaSection(
                   title: '小米超级岛',
                   child: QuietLabel(
                     focus

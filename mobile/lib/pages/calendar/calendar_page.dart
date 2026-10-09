@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/app.dart';
-import '../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show OrialisPageScaffold;
 import '../../core/database/app_database.dart';
 import '../../features/events/presentation/task_children.dart';
 import '../../features/events/presentation/task_editor.dart';
@@ -458,7 +460,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 animateChanges: true,
                 children: [
                   for (final task in due)
-                    OrialisListRow(
+                    LuminaListRow(
                       key: ValueKey(task.id),
                       depth: LuminaSurfaceDepth.recessed,
                       title: task.title,
@@ -528,7 +530,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 if (ongoing)
                   Text(
                     '进行中',
-                    style: text.labelSmall.copyWith(color: AppColors.accent),
+                    style: text.labelSmall.copyWith(color: LuminaBaseColors.accent),
                   ),
               ],
             ),
@@ -539,7 +541,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
             palette: s.important
                 ? LuminaCardPalette.ocean
                 : LuminaCardPalette.mist,
-            child: OrialisListRow(
+            child: LuminaListRow(
               depth: LuminaSurfaceDepth.recessed,
               title: s.title,
               subtitle: [
@@ -1100,7 +1102,7 @@ class _ScheduleEditorState extends State<_ScheduleEditor> {
         label: '标题',
         autofocus: widget.event == null,
       ),
-      OrialisListRow(
+      LuminaListRow(
         title: '全天',
         trailing: LuminaSwitch(
           value: _allDay,
@@ -1111,7 +1113,7 @@ class _ScheduleEditorState extends State<_ScheduleEditor> {
         Row(
           children: [
             Expanded(
-              child: OrialisListRow(
+              child: LuminaListRow(
                 title: start ? '开始' : '结束',
                 subtitle: dateKey(start ? _start : _end),
                 onTap: () => _pick(start, false),
@@ -1128,7 +1130,7 @@ class _ScheduleEditorState extends State<_ScheduleEditor> {
           ],
         ),
       LuminaTextField(controller: _location, label: '地点'),
-      OrialisListRow(
+      LuminaListRow(
         title: '重要日程',
         trailing: LuminaSwitch(
           value: _important,
@@ -1142,7 +1144,7 @@ class _ScheduleEditorState extends State<_ScheduleEditor> {
         keyboardType: TextInputType.number,
       ),
       if (_error != null)
-        Text(_error!, style: const TextStyle(color: AppColors.danger)),
+        Text(_error!, style: const TextStyle(color: LuminaBaseColors.danger)),
       LuminaButton(
         onPressed: _saving ? null : _save,
         child: Text(_saving ? '保存中…' : '保存'),

@@ -2,7 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orialis_mobile/app/app.dart';
-import 'package:orialis_mobile/app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/core/config/app_config.dart';
 import 'package:orialis_mobile/core/database/app_database.dart';
 import 'package:orialis_mobile/core/sync/sync_coordinator.dart';
@@ -433,13 +433,13 @@ void main() {
           .first,
     );
     await tester.pumpAndSettle();
-    final row = tester.widget<OrialisListRow>(
-      find.widgetWithText(OrialisListRow, '周视图凹陷日程'),
+    final row = tester.widget<LuminaListRow>(
+      find.widgetWithText(LuminaListRow, '周视图凹陷日程'),
     );
     expect(row.depth, LuminaSurfaceDepth.recessed);
     expect(
       find.ancestor(
-        of: find.widgetWithText(OrialisListRow, '周视图凹陷日程'),
+        of: find.widgetWithText(LuminaListRow, '周视图凹陷日程'),
         matching: find.byType(LuminaTitledContentCard),
       ),
       findsOneWidget,
@@ -458,7 +458,7 @@ void main() {
     expect(find.text('当天截止'), findsOneWidget);
     expect(find.text('这一天没有截止事项。'), findsOneWidget);
     expect(find.text('附属事件'), findsNothing);
-    await tester.tap(find.widgetWithText(OrialisListRow, '周视图凹陷日程'));
+    await tester.tap(find.widgetWithText(LuminaListRow, '周视图凹陷日程'));
     await tester.pumpAndSettle();
     expect(find.text('附属事件'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -485,12 +485,12 @@ void main() {
     }
     await tester.pumpWidget(_app(db));
     await tester.pumpAndSettle();
-    final focus = tester.widget<OrialisSection>(
-      find.widgetWithText(OrialisSection, '现在关注'),
+    final focus = tester.widget<LuminaSection>(
+      find.widgetWithText(LuminaSection, '现在关注'),
     );
     expect(focus.raised, isTrue);
-    final task = tester.widget<OrialisListRow>(
-      find.widgetWithText(OrialisListRow, '重点事项 0'),
+    final task = tester.widget<LuminaListRow>(
+      find.widgetWithText(LuminaListRow, '重点事项 0'),
     );
     expect(task.depth, LuminaSurfaceDepth.recessed);
     final cardTitle = tester.widget<Text>(find.text('现在关注'));
