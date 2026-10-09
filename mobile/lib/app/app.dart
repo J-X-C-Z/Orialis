@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
@@ -21,6 +22,7 @@ import '../core/sync/sync_coordinator.dart';
 import '../core/sync/desktop_local_changes.dart';
 import '../features/system_integration/system_integration_controller.dart';
 import 'router/app_router.dart';
+import '../pages/profile/legacy_recovery.dart';
 
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
@@ -54,8 +56,23 @@ Future<void> reloadDesktopAccount(WidgetRef ref) async {
   ref.invalidate(syncCoordinatorProvider);
 }
 
+final databaseDirectoryProvider = Provider<Future<Directory> Function()>(
+  (ref) => AppDatabase.databaseDirectory,
+);
+
+Future<List<Override>> mobileStartupOverrides(AppConfig config) async {
+  final name = await config.desktopDatabaseName();
+  return [
+    appConfigProvider.overrideWithValue(config),
+    desktopDatabaseNameProvider.overrideWith((ref) => name),
+  ];
+}
+
 final databaseProvider = Provider<AppDatabase>((ref) {
-  final database = AppDatabase(name: ref.watch(desktopDatabaseNameProvider));
+  final database = AppDatabase(
+    name: ref.watch(desktopDatabaseNameProvider),
+    directoryProvider: ref.watch(databaseDirectoryProvider),
+  );
   ref.onDispose(database.close);
   return database;
 });
@@ -305,7 +322,15 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
               child: Material(
                 color: LuminaTheme.of(context).colors.paper,
                 textStyle: LuminaTheme.of(context).textTheme.bodyMedium,
-                child: child ?? const SizedBox.shrink(),
+                child: Column(
+                  children: [
+                    const SafeArea(
+                      bottom: false,
+                      child: LegacyRecoveryNotice(),
+                    ),
+                    Expanded(child: child ?? const SizedBox.shrink()),
+                  ],
+                ),
               ),
             ),
           ),

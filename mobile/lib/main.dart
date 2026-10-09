@@ -11,14 +11,6 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LuminaCardMemory.initialize();
   final config = AppConfig();
-  final databaseName = await config.desktopDatabaseName();
-  runApp(
-    ProviderScope(
-      overrides: [
-        appConfigProvider.overrideWithValue(config),
-        desktopDatabaseNameProvider.overrideWith((ref) => databaseName),
-      ],
-      child: const OrialisApp(),
-    ),
-  );
+  final overrides = await mobileStartupOverrides(config);
+  runApp(ProviderScope(overrides: overrides, child: const OrialisApp()));
 }
