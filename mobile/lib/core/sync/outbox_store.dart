@@ -230,6 +230,41 @@ class OutboxStore {
       database.outboxMutations,
     )..where((row) => row.status.equals(OutboxStatus.acknowledged))).get();
     for (final mutation in acknowledged) {
+      // Older Project/Milestone pushes persisted ACK before the entity write.
+      // Replay the original id to recover the accepted remote version rather
+      // than guessing it or inventing a second mutation.
+      if (mutation.entityType == 'project' ||
+          mutation.entityType == 'project_milestone') {
+        await database.transaction(() async {
+          int? revision;
+          String? status;
+          if (mutation.entityType == 'project') {
+            final row =
+                await (database.select(database.projects)
+                      ..where((row) => row.id.equals(mutation.entityId)))
+                    .getSingleOrNull();
+            revision = row?.localRevision;
+            status = row?.syncStatus;
+          } else {
+            final row =
+                await (database.select(database.projectMilestones)
+                      ..where((row) => row.id.equals(mutation.entityId)))
+                    .getSingleOrNull();
+            revision = row?.localRevision;
+            status = row?.syncStatus;
+          }
+          if (revision == mutation.entityRevision && status != 'synced') {
+            await (database.update(
+              database.outboxMutations,
+            )..where((row) => row.id.equals(mutation.id))).write(
+              const OutboxMutationsCompanion(
+                status: Value(OutboxStatus.pending),
+              ),
+            );
+          }
+        });
+      }
+
       if (mutation.entityType == 'task') {
         await database.transaction(() async {
           final task =

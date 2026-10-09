@@ -1,4 +1,5 @@
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:drift/drift.dart';
@@ -180,8 +181,11 @@ class OutboxMutations extends Table {
   ],
 )
 class AppDatabase extends _$AppDatabase {
-  AppDatabase({QueryExecutor? executor, String name = 'orialis'})
-    : super(executor ?? _openConnection(name));
+  AppDatabase({
+    QueryExecutor? executor,
+    String name = 'orialis',
+    Future<Directory> Function()? directoryProvider,
+  }) : super(executor ?? _openConnection(name, directoryProvider));
 
   @override
   int get schemaVersion => 10;
@@ -449,26 +453,28 @@ class AppDatabase extends _$AppDatabase {
         (rows) => rows.map((row) => conversations.map(row.data)).toList(),
       );
 
-  static QueryExecutor _openConnection(String name) {
-    return driftDatabase(
-      name: name,
-      native: DriftNativeOptions(
-        databaseDirectory: () async {
-          // Keep existing account databases and outboxes at their original path.
-          if (!kIsWeb && Platform.isMacOS) {
-            final home = Platform.environment['HOME'];
-            if (home != null) {
-              final legacy = Directory(
-                '$home/Library/Containers/top.jxcz.orialis/Data/Documents',
-              );
-              if (await legacy.exists()) return legacy;
-            }
-          }
-          return getApplicationDocumentsDirectory();
-        },
-      ),
-    );
+  static Future<Directory> databaseDirectory() async {
+    if (!kIsWeb && Platform.isMacOS) {
+      final home = Platform.environment['HOME'];
+      if (home != null) {
+        final legacy = Directory(
+          '$home/Library/Containers/top.jxcz.orialis/Data/Documents',
+        );
+        if (await legacy.exists()) return legacy;
+      }
+    }
+    return getApplicationDocumentsDirectory();
   }
+
+  static QueryExecutor _openConnection(
+    String name,
+    Future<Directory> Function()? directoryProvider,
+  ) => driftDatabase(
+    name: name,
+    native: DriftNativeOptions(
+      databaseDirectory: directoryProvider ?? databaseDirectory,
+    ),
+  );
 
   static QueryExecutor inMemoryExecutor() => NativeDatabase.memory();
 }

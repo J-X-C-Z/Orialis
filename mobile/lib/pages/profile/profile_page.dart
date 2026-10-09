@@ -4,9 +4,12 @@ import 'package:dio/dio.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app.dart';
+import 'legacy_recovery.dart';
+
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show OrialisPageScaffold;
+
 import '../shared/page_parts.dart';
 import '../../core/config/app_config.dart';
 import '../../core/network/orialis_api_client.dart';
@@ -188,6 +191,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           ContentStack(
             gap: 24,
             children: [
+              const LegacyRecoveryNotice(allowOpen: true),
               LuminaSurface(
                 child: ContentStack(
                   children: [
@@ -413,7 +417,7 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     } catch (_) {
       if (mounted) setState(() => _error = '操作失败，请稍后重试');
     } finally {
-      if (!authenticated && mounted && ref.read(desktopModeProvider)) {
+      if (!authenticated && mounted) {
         await reloadDesktopAccount(ref);
       }
       if (mounted) setState(() => _submitting = false);

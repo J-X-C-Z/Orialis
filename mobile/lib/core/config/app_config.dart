@@ -72,7 +72,7 @@ class AppConfig {
     final token = await sessionToken();
     final username = token == null ? null : await sessionUsername();
     final scope = jsonEncode([server, username]);
-    return 'orialis-desktop-${sha256.convert(utf8.encode(scope))}';
+    return 'orialis-${desktop ? 'desktop' : 'mobile'}-${sha256.convert(utf8.encode(scope))}';
   }
 
   static const defaultServerUrl = String.fromEnvironment(

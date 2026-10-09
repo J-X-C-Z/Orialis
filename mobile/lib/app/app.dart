@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
@@ -21,6 +22,7 @@ import '../core/sync/sync_coordinator.dart';
 import '../core/sync/desktop_local_changes.dart';
 import '../features/system_integration/system_integration_controller.dart';
 import 'router/app_router.dart';
+import '../pages/profile/legacy_recovery.dart';
 
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
@@ -41,13 +43,11 @@ final desktopModeProvider = Provider<bool>((ref) => false);
 final desktopDatabaseNameProvider = StateProvider<String>((ref) => 'orialis');
 
 Future<void> suspendDesktopSync(WidgetRef ref) async {
-  if (!ref.read(desktopModeProvider)) return;
   await ref.read(syncCoordinatorProvider).dispose();
   await ref.read(realtimeClientProvider).dispose();
 }
 
 Future<void> reloadDesktopAccount(WidgetRef ref) async {
-  if (!ref.read(desktopModeProvider)) return;
   final name = await ref.read(appConfigProvider).desktopDatabaseName();
   ref.read(desktopDatabaseNameProvider.notifier).state = name;
   // Recreate connection credentials even when logging back into the same scope.
@@ -56,11 +56,22 @@ Future<void> reloadDesktopAccount(WidgetRef ref) async {
   ref.invalidate(syncCoordinatorProvider);
 }
 
+final databaseDirectoryProvider = Provider<Future<Directory> Function()>(
+  (ref) => AppDatabase.databaseDirectory,
+);
+
+Future<List<Override>> mobileStartupOverrides(AppConfig config) async {
+  final name = await config.desktopDatabaseName();
+  return [
+    appConfigProvider.overrideWithValue(config),
+    desktopDatabaseNameProvider.overrideWith((ref) => name),
+  ];
+}
+
 final databaseProvider = Provider<AppDatabase>((ref) {
   final database = AppDatabase(
-    name: ref.watch(desktopModeProvider)
-        ? ref.watch(desktopDatabaseNameProvider)
-        : 'orialis',
+    name: ref.watch(desktopDatabaseNameProvider),
+    directoryProvider: ref.watch(databaseDirectoryProvider),
   );
   ref.onDispose(database.close);
   return database;
@@ -173,7 +184,7 @@ final syncEngineProvider = Provider<SyncEngine>((ref) {
     database: ref.watch(databaseProvider),
     config: ref.watch(appConfigProvider),
     includeChat: !ref.watch(desktopModeProvider),
-    requireSession: ref.watch(desktopModeProvider),
+    requireSession: true,
   );
 });
 
@@ -311,7 +322,15 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
               child: Material(
                 color: LuminaTheme.of(context).colors.paper,
                 textStyle: LuminaTheme.of(context).textTheme.bodyMedium,
-                child: child ?? const SizedBox.shrink(),
+                child: Column(
+                  children: [
+                    const SafeArea(
+                      bottom: false,
+                      child: LegacyRecoveryNotice(),
+                    ),
+                    Expanded(child: child ?? const SizedBox.shrink()),
+                  ],
+                ),
               ),
             ),
           ),
