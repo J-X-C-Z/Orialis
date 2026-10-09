@@ -4,7 +4,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
 };
 
-async fn pool() -> SqlitePool {
+async fn isolated_pool() -> SqlitePool {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -61,7 +61,7 @@ fn json(body: &[u8]) -> Value {
 
 #[tokio::test]
 async fn auth_http_contract_sessions_expiry_gate_and_agent_ownership() {
-    let pool = pool().await;
+    let pool = isolated_pool().await;
     let state = Arc::new(AppState {
         metadata: metadata(VERSION, "test", "http://localhost"),
         pool: pool.clone(),
@@ -126,6 +126,21 @@ async fn auth_http_contract_sessions_expiry_gate_and_agent_ownership() {
     .await;
     assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
     let token_a2 = json(&body)["accessToken"].as_str().unwrap().to_owned();
+    let login = json(&body);
+    assert_eq!(login["userId"], first["userId"]);
+    assert!(login["expiresAt"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+    let (status, body) = http(
+        address,
+        "GET",
+        "/api/v1/auth/session",
+        "",
+        &[("Authorization", &format!("Session {token_a2}"))],
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(json(&body)["username"], "auth_user_a");
     let (status, _) = http(
         address,
         "GET",
@@ -134,6 +149,7 @@ async fn auth_http_contract_sessions_expiry_gate_and_agent_ownership() {
         &[
             ("Authorization", "Session invalid-session"),
             ("Cookie", &format!("orialis_session={token_a}")),
+            ("X-Orialis-Device-Id", "device-a"),
         ],
     )
     .await;
@@ -186,8 +202,55 @@ async fn auth_http_contract_sessions_expiry_gate_and_agent_ownership() {
         .unwrap(),
         first["userId"].as_str().unwrap()
     );
-    let _ = token_b;
-
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT user_id FROM user_sessions WHERE token_hash=?")
+            .bind(hash_token(token_b))
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        second["userId"].as_str().unwrap()
+    );
+    let (status, body) = http(
+        address,
+        "GET",
+        "/api/v1/auth/session",
+        "",
+        &[("Authorization", &format!("Session {token_b}"))],
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(json(&body)["username"], "auth_user_b");
+    let nonexistent_owner = "user-does-not-exist";
+    assert!(matches!(
+        authenticated_user_or_agent(
+            &agent_headers,
+            &state_for_owner(&pool, Some(nonexistent_owner), "test-agent-token").await
+        )
+        .await,
+        Err(AppError::Unauthorized)
+    ));
+    let single_user_pool = isolated_pool().await;
+    let sole_user_id = "sole-agent-owner";
+    sqlx::query(
+        "INSERT INTO users (id,username,password_hash,created_at,updated_at) VALUES (?,?,?,?,?)",
+    )
+    .bind(sole_user_id)
+    .bind("sole_agent_owner")
+    .bind("unused-test-hash")
+    .bind(now())
+    .bind(now())
+    .execute(&single_user_pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        authenticated_user_or_agent(
+            &agent_headers,
+            &state_for_owner(&single_user_pool, None, "test-agent-token").await
+        )
+        .await
+        .unwrap(),
+        sole_user_id
+    );
     sqlx::query("UPDATE user_sessions SET expires_at='2000-01-01T00:00:00Z' WHERE token_hash=?")
         .bind(hash_token(&token_a2))
         .execute(&pool)

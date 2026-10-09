@@ -1006,10 +1006,7 @@ async fn notify_sync_change(state: &AppState, user_id: &str, entity: Option<&str
     }
 }
 
-pub(crate) async fn ensure_default_conversation(
-    pool: &SqlitePool,
-    user_id: &str,
-) -> Result<(), AppError> {
+async fn ensure_default_conversation(pool: &SqlitePool, user_id: &str) -> Result<(), AppError> {
     sqlx::query("INSERT INTO conversations (id,user_id,title,is_default,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(user_id,id) DO NOTHING")
         .bind(DEFAULT_CONVERSATION_ID).bind(user_id).bind("主会话").bind(true).bind(now()).bind(now())
         .execute(pool).await?;
