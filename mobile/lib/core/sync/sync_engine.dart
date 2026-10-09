@@ -225,7 +225,6 @@ class SyncEngine {
             'baseVersion': mutation.baseVersion,
           }, mutation.mutationId);
         }
-        await outbox.acknowledge(mutation.mutationId);
         final remoteVersion =
             (result['version'] as num?)?.toInt() ?? project.remoteVersion + 1;
         await database.transaction(() async {
@@ -252,6 +251,7 @@ class SyncEngine {
             entityId: project.id,
             baseVersion: remoteVersion,
           );
+          await outbox.acknowledge(mutation.mutationId);
         });
       } on DioException catch (error) {
         if (error.response?.statusCode == 409) {
@@ -305,8 +305,9 @@ class SyncEngine {
       try {
         final payload =
             jsonDecode(mutation.payloadJson) as Map<String, dynamic>;
+        Map<String, dynamic> result = {};
         if (mutation.operation == 'create') {
-          await api.createProjectMilestone(
+          result = await api.createProjectMilestone(
             milestone.projectId,
             payload,
             mutation.mutationId,
@@ -318,17 +319,41 @@ class SyncEngine {
             mutation.mutationId,
           );
         } else {
-          await api.updateProjectMilestone(milestone.projectId, milestone.id, {
-            ...payload,
-            'baseVersion': mutation.baseVersion,
-          }, mutation.mutationId);
+          result = await api.updateProjectMilestone(
+            milestone.projectId,
+            milestone.id,
+            {...payload, 'baseVersion': mutation.baseVersion},
+            mutation.mutationId,
+          );
         }
-        await outbox.acknowledge(mutation.mutationId);
-        await (database.update(
-          database.projectMilestones,
-        )..where((row) => row.id.equals(milestone.id))).write(
-          const ProjectMilestonesCompanion(syncStatus: Value('synced')),
-        );
+        final remoteVersion =
+            (result['version'] as num?)?.toInt() ?? milestone.remoteVersion + 1;
+        await database.transaction(() async {
+          final current = await (database.select(
+            database.projectMilestones,
+          )..where((row) => row.id.equals(milestone.id))).getSingle();
+          await (database.update(
+            database.projectMilestones,
+          )..where((row) => row.id.equals(milestone.id))).write(
+            ProjectMilestonesCompanion(
+              version: Value(remoteVersion),
+              remoteVersion: Value(remoteVersion),
+              syncStatus: Value(
+                current.localRevision == mutation.entityRevision
+                    ? 'synced'
+                    : current.syncStatus == 'pendingCreate'
+                    ? 'pendingUpdate'
+                    : current.syncStatus,
+              ),
+            ),
+          );
+          await outbox.rebasePendingForEntity(
+            entityType: 'project_milestone',
+            entityId: milestone.id,
+            baseVersion: remoteVersion,
+          );
+          await outbox.acknowledge(mutation.mutationId);
+        });
       } on DioException catch (error) {
         if (error.response?.statusCode == 409) {
           await outbox.markConflict(mutation.mutationId, error);

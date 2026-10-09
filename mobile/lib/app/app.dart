@@ -41,13 +41,11 @@ final desktopModeProvider = Provider<bool>((ref) => false);
 final desktopDatabaseNameProvider = StateProvider<String>((ref) => 'orialis');
 
 Future<void> suspendDesktopSync(WidgetRef ref) async {
-  if (!ref.read(desktopModeProvider)) return;
   await ref.read(syncCoordinatorProvider).dispose();
   await ref.read(realtimeClientProvider).dispose();
 }
 
 Future<void> reloadDesktopAccount(WidgetRef ref) async {
-  if (!ref.read(desktopModeProvider)) return;
   final name = await ref.read(appConfigProvider).desktopDatabaseName();
   ref.read(desktopDatabaseNameProvider.notifier).state = name;
   // Recreate connection credentials even when logging back into the same scope.
@@ -57,11 +55,7 @@ Future<void> reloadDesktopAccount(WidgetRef ref) async {
 }
 
 final databaseProvider = Provider<AppDatabase>((ref) {
-  final database = AppDatabase(
-    name: ref.watch(desktopModeProvider)
-        ? ref.watch(desktopDatabaseNameProvider)
-        : 'orialis',
-  );
+  final database = AppDatabase(name: ref.watch(desktopDatabaseNameProvider));
   ref.onDispose(database.close);
   return database;
 });
@@ -173,7 +167,7 @@ final syncEngineProvider = Provider<SyncEngine>((ref) {
     database: ref.watch(databaseProvider),
     config: ref.watch(appConfigProvider),
     includeChat: !ref.watch(desktopModeProvider),
-    requireSession: ref.watch(desktopModeProvider),
+    requireSession: true,
   );
 });
 

@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
@@ -80,33 +81,34 @@ class ProjectRepository {
             ]))
           .watch();
 
-  Future<Project> createProject({required String name, String? goal}) async {
-    final now = DateTime.now().toUtc().toIso8601String();
-    final id = const Uuid().v7();
-    await database
-        .into(database.projects)
-        .insert(
-          ProjectsCompanion.insert(
-            id: id,
-            name: name.trim(),
-            goal: Value(goal),
-            createdAt: now,
-            updatedAt: now,
-            syncStatus: const Value('pendingCreate'),
-          ),
-        );
-    final project = await (database.select(
-      database.projects,
-    )..where((row) => row.id.equals(id))).getSingle();
-    await _enqueueProject(project);
-    return project;
-  }
+  Future<Project> createProject({required String name, String? goal}) =>
+      database.transaction(() async {
+        final now = DateTime.now().toUtc().toIso8601String();
+        final id = const Uuid().v7();
+        await database
+            .into(database.projects)
+            .insert(
+              ProjectsCompanion.insert(
+                id: id,
+                name: name.trim(),
+                goal: Value(goal),
+                createdAt: now,
+                updatedAt: now,
+                syncStatus: const Value('pendingCreate'),
+              ),
+            );
+        final project = await (database.select(
+          database.projects,
+        )..where((row) => row.id.equals(id))).getSingle();
+        await _enqueueProject(project);
+        return project;
+      });
 
   Future<void> updateProject(
     Project project, {
     required String name,
     String? goal,
-  }) async {
+  }) => database.transaction(() async {
     await (database.update(
       database.projects,
     )..where((row) => row.id.equals(project.id))).write(
@@ -119,9 +121,9 @@ class ProjectRepository {
       ),
     );
     await _enqueueProject(await _project(project.id));
-  }
+  });
 
-  Future<void> deleteProject(Project project) async {
+  Future<void> deleteProject(Project project) => database.transaction(() async {
     await (database.update(
       database.projects,
     )..where((row) => row.id.equals(project.id))).write(
@@ -133,13 +135,13 @@ class ProjectRepository {
       ),
     );
     await _enqueueProject(await _project(project.id));
-  }
+  });
 
   Future<ProjectMilestone> createMilestone({
     required String projectId,
     required String title,
     String? due,
-  }) async {
+  }) => database.transaction(() async {
     final now = DateTime.now().toUtc().toIso8601String();
     final id = const Uuid().v7();
     await database
@@ -160,13 +162,13 @@ class ProjectRepository {
     )..where((row) => row.id.equals(id))).getSingle();
     await _enqueueMilestone(milestone);
     return milestone;
-  }
+  });
 
   Future<void> updateMilestone(
     ProjectMilestone milestone, {
     required String title,
     String? due,
-  }) async {
+  }) => database.transaction(() async {
     await (database.update(
       database.projectMilestones,
     )..where((row) => row.id.equals(milestone.id))).write(
@@ -179,41 +181,40 @@ class ProjectRepository {
       ),
     );
     await _enqueueMilestone(await _milestone(milestone.id));
-  }
+  });
 
-  Future<void> completeMilestone(
-    ProjectMilestone milestone,
-    bool completed,
-  ) async {
-    await (database.update(
-      database.projectMilestones,
-    )..where((row) => row.id.equals(milestone.id))).write(
-      ProjectMilestonesCompanion(
-        completed: Value(completed),
-        completedAt: Value(
-          completed ? DateTime.now().toUtc().toIso8601String() : null,
-        ),
-        updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
-        localRevision: Value(milestone.localRevision + 1),
-        syncStatus: const Value('pendingUpdate'),
-      ),
-    );
-    await _enqueueMilestone(await _milestone(milestone.id));
-  }
+  Future<void> completeMilestone(ProjectMilestone milestone, bool completed) =>
+      database.transaction(() async {
+        await (database.update(
+          database.projectMilestones,
+        )..where((row) => row.id.equals(milestone.id))).write(
+          ProjectMilestonesCompanion(
+            completed: Value(completed),
+            completedAt: Value(
+              completed ? DateTime.now().toUtc().toIso8601String() : null,
+            ),
+            updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
+            localRevision: Value(milestone.localRevision + 1),
+            syncStatus: const Value('pendingUpdate'),
+          ),
+        );
+        await _enqueueMilestone(await _milestone(milestone.id));
+      });
 
-  Future<void> deleteMilestone(ProjectMilestone milestone) async {
-    await (database.update(
-      database.projectMilestones,
-    )..where((row) => row.id.equals(milestone.id))).write(
-      ProjectMilestonesCompanion(
-        deletedAt: Value(DateTime.now().toUtc().toIso8601String()),
-        updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
-        localRevision: Value(milestone.localRevision + 1),
-        syncStatus: const Value('pendingDelete'),
-      ),
-    );
-    await _enqueueMilestone(await _milestone(milestone.id));
-  }
+  Future<void> deleteMilestone(ProjectMilestone milestone) =>
+      database.transaction(() async {
+        await (database.update(
+          database.projectMilestones,
+        )..where((row) => row.id.equals(milestone.id))).write(
+          ProjectMilestonesCompanion(
+            deletedAt: Value(DateTime.now().toUtc().toIso8601String()),
+            updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
+            localRevision: Value(milestone.localRevision + 1),
+            syncStatus: const Value('pendingDelete'),
+          ),
+        );
+        await _enqueueMilestone(await _milestone(milestone.id));
+      });
 
   Future<Project> _project(String id) => (database.select(
     database.projects,
@@ -222,35 +223,36 @@ class ProjectRepository {
     database.projectMilestones,
   )..where((row) => row.id.equals(id))).getSingle();
 
-  Future<void> _enqueueProject(Project project) => OutboxStore(database)
-      .enqueue(
-        entityType: 'project',
-        entityId: project.id,
-        operation: _operation(project.syncStatus),
-        payloadJson: jsonEncode({
-          'id': project.id,
-          'name': project.name,
-          'goal': project.goal,
-          'description': project.description,
-          'color': project.color,
-          'status': project.status,
-          'startDate': project.startDate,
-          'due': project.due,
-          'nextActionTaskId': project.nextActionTaskId,
-          'manualPosition': project.manualPosition,
-          'version': project.version,
-          'createdAt': project.createdAt,
-          'updatedAt': project.updatedAt,
-          'deletedAt': project.deletedAt,
-        }),
-        baseVersion:
-            project.syncStatus == 'pendingUpdate' ||
-                project.syncStatus == 'pendingDelete'
-            ? project.remoteVersion
-            : null,
-        entityRevision: project.localRevision,
-      )
-      .then((_) {});
+  Future<void> _enqueueProject(Project project) =>
+      OutboxStore(database)
+          .enqueue(
+            entityType: 'project',
+            entityId: project.id,
+            operation: _operation(project.syncStatus),
+            payloadJson: jsonEncode({
+              'id': project.id,
+              'name': project.name,
+              'goal': project.goal,
+              'description': project.description,
+              'color': project.color,
+              'status': project.status,
+              'startDate': project.startDate,
+              'due': project.due,
+              'nextActionTaskId': project.nextActionTaskId,
+              'manualPosition': project.manualPosition,
+              'version': project.version,
+              'createdAt': project.createdAt,
+              'updatedAt': project.updatedAt,
+              'deletedAt': project.deletedAt,
+            }),
+            baseVersion:
+                project.syncStatus == 'pendingUpdate' ||
+                    project.syncStatus == 'pendingDelete'
+                ? project.remoteVersion
+                : null,
+            entityRevision: project.localRevision,
+          )
+          .then((_) {});
 
   Future<void> _enqueueMilestone(ProjectMilestone milestone) =>
       OutboxStore(database)

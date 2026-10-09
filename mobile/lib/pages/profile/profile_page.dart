@@ -413,7 +413,7 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     } catch (_) {
       if (mounted) setState(() => _error = '操作失败，请稍后重试');
     } finally {
-      if (!authenticated && mounted && ref.read(desktopModeProvider)) {
+      if (!authenticated && mounted) {
         await reloadDesktopAccount(ref);
       }
       if (mounted) setState(() => _submitting = false);

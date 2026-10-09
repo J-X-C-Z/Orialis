@@ -123,6 +123,8 @@ class FakeApi extends OrialisApiClient {
   bool expireNextCursor = false;
   final calls = <String, Map<String, dynamic>>{};
   bool failProjectUpdate = false;
+  bool conflictProjectUpdate = false;
+  final projectUpdateMutationIds = <String>[];
   bool failMilestoneCreate = false;
   bool failMilestoneUpdate = false;
 
@@ -141,6 +143,7 @@ class FakeApi extends OrialisApiClient {
     Map<String, dynamic> payload,
     String mutationId,
   ) async {
+    projectUpdateMutationIds.add(mutationId);
     calls['project.update'] = {
       'id': id,
       'payload': payload,
@@ -150,6 +153,13 @@ class FakeApi extends OrialisApiClient {
       throw DioException(
         requestOptions: RequestOptions(path: '/projects/$id'),
         type: DioExceptionType.connectionError,
+      );
+    }
+    if (conflictProjectUpdate) {
+      final request = RequestOptions(path: '/projects/$id');
+      throw DioException(
+        requestOptions: request,
+        response: Response<void>(requestOptions: request, statusCode: 409),
       );
     }
     return payload;
@@ -354,9 +364,51 @@ void main() {
       )..where((row) => row.entityId.equals(local.id))).get()).last;
       expect(retained.mutationId, retry.mutationId);
       expect(retained.payloadJson, retry.payloadJson);
+      expect(api.projectUpdateMutationIds, [retry.mutationId]);
       expect(local.id, edited.id);
+      api.failProjectUpdate = false;
+      expect(await engine.syncOnce(), SyncState.idle);
+      expect(api.projectUpdateMutationIds, [retry.mutationId, retry.mutationId]);
+      expect(
+        (await (database.select(database.projects)
+              ..where((row) => row.id.equals(local.id)))
+            .getSingle()).syncStatus,
+        'synced',
+      );
     },
   );
+
+  test('HTTP 409 keeps the project edit and its outbox mutation', () async {
+    final repository = ProjectRepository(database);
+    final local = await repository.createProject(name: 'Local', goal: 'Goal');
+    expect(await engine.syncOnce(), SyncState.idle);
+    final synced = (await (database.select(
+      database.projects,
+    )..where((row) => row.id.equals(local.id))).getSingle());
+    await repository.updateProject(
+      synced,
+      name: 'Local edit',
+      goal: null,
+    );
+    final mutation = (await (database.select(database.outboxMutations)
+          ..where((row) => row.entityId.equals(local.id)))
+        .get()).last;
+    api.conflictProjectUpdate = true;
+
+    expect(await engine.syncOnce(), SyncState.conflict);
+
+    final retained = (await (database.select(database.outboxMutations)
+          ..where((row) => row.mutationId.equals(mutation.mutationId)))
+        .getSingle());
+    final stored = (await (database.select(
+      database.projects,
+    )..where((row) => row.id.equals(local.id))).getSingle());
+    expect(retained.status, OutboxStatus.conflict);
+    expect(retained.payloadJson, mutation.payloadJson);
+    expect(retained.mutationId, mutation.mutationId);
+    expect(stored.name, 'Local edit');
+    expect(stored.syncStatus, 'pendingUpdate');
+  });
 
   test(
     'existing v6 cursor still requires a Project/Milestone snapshot',
