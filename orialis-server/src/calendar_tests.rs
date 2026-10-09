@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::json;
+use sqlx::Row;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -63,6 +64,7 @@ impl TestServer {
                 "/api/v1/schedules/{id}",
                 patch(update_event).delete(delete_event),
             )
+            .route("/api/v1/sync/snapshot", get(sync_snapshot))
             .with_state(state);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -339,11 +341,10 @@ async fn calendar_keyset_range_and_cursor_validation() {
         )
         .await;
     }
-    // Preserve offset-aware validation and the existing SQLite lexical range constraint.
-    // A chronologically valid mixed-offset range currently reaches SQLite and fails (500).
+    // A valid mixed-offset range must be accepted using instant ordering.
     let mut valid = event("offset", "2026-10-09T09:00:00+08:00");
     valid["endAt"] = json!("2026-10-09T02:00:00Z");
-    s.expect("POST", "/api/v1/schedules", Some(valid), None, 500)
+    s.expect("POST", "/api/v1/schedules", Some(valid), None, 201)
         .await;
     let mut invalid = event("bad", "2026-10-09T09:00:00Z");
     invalid["endAt"] = json!("2026-10-09T09:30:00+08:00");
@@ -435,4 +436,225 @@ async fn calendar_delete_cascade_order_and_late_failure_rollback() {
     .await;
     let list = s.expect("GET", "/api/v1/schedules", None, None, 200).await;
     assert_eq!(list["items"], json!([]));
+}
+
+fn utc_range_cases() -> Vec<(String, String, String, bool)> {
+    serde_json::from_str(include_str!("../tests/fixtures/calendar_range_cases.json")).unwrap()
+}
+
+#[tokio::test]
+async fn calendar_utc_http_and_database_range_parity() {
+    let s = TestServer::new().await;
+    for (index, (label, start, end, accepted)) in utc_range_cases().into_iter().enumerate() {
+        let mut input = event(&format!("http-{index}"), &start);
+        input["endAt"] = json!(end);
+        let before = s.events().await.len();
+        let (status, response) = s
+            .request("owner", "POST", "/api/v1/schedules", Some(input), None)
+            .await;
+        assert_eq!(
+            status,
+            if accepted { 201 } else { 400 },
+            "{label}: {response}"
+        );
+        let direct = sqlx::query("INSERT INTO calendar_events(id,user_id,title,start_at,end_at) VALUES (?,'owner','direct',?,?)")
+            .bind(format!("sql-{index}")).bind(&start).bind(&end).execute(&s.pool).await;
+        assert_eq!(direct.is_ok(), accepted, "direct SQL {label}: {direct:?}");
+        if accepted {
+            assert_eq!(response["startAt"], start, "{label}");
+            assert_eq!(response["endAt"], end, "{label}");
+            assert_eq!(s.events().await.len(), before + 1, "{label}");
+        } else {
+            assert_eq!(
+                s.events().await.len(),
+                before,
+                "rejected create emitted event: {label}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn calendar_utc_patch_preserves_precision_and_rejects_without_side_effects() {
+    let s = TestServer::new().await;
+    s.expect(
+        "POST",
+        "/api/v1/schedules",
+        Some(event("patch-utc", "2026-10-09T09:00:00Z")),
+        None,
+        201,
+    )
+    .await;
+    let start = "2026-10-09T09:00:00.000000001+08:00";
+    let end = "2026-10-09T01:00:00.000000002Z";
+    let updated = s
+        .expect(
+            "PATCH",
+            "/api/v1/schedules/patch-utc",
+            Some(json!({"baseVersion":1,"startAt":start,"endAt":end})),
+            None,
+            200,
+        )
+        .await;
+    assert_eq!(updated["startAt"], start);
+    assert_eq!(updated["endAt"], end);
+    assert_eq!(updated["version"], 2);
+    let before = s.events().await;
+    let payload: Value =
+        serde_json::from_str(before.last().unwrap().6.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["startAt"], start);
+    assert_eq!(payload["endAt"], end);
+    let snapshot = s
+        .expect("GET", "/api/v1/sync/snapshot", None, None, 200)
+        .await;
+    assert_eq!(snapshot["calendarEvents"][0]["startAt"], start);
+    assert_eq!(snapshot["calendarEvents"][0]["endAt"], end);
+    for invalid in [
+        "2026-10-09T01:00:00.0000000009Z",
+        "2026-10-09T01:00:00−08:00",
+        "2026-10-09T01:00:00+0800",
+    ] {
+        s.expect(
+            "PATCH",
+            "/api/v1/schedules/patch-utc",
+            Some(json!({"baseVersion":2,"endAt":invalid})),
+            None,
+            400,
+        )
+        .await;
+    }
+    let direct = sqlx::query(
+        "UPDATE calendar_events SET end_at='2026-10-09T01:00:00.0000000009Z' WHERE id='patch-utc'",
+    )
+    .execute(&s.pool)
+    .await;
+    assert!(direct.is_err());
+    let row: (String, String, i64) =
+        sqlx::query_as("SELECT start_at,end_at,version FROM calendar_events WHERE id='patch-utc'")
+            .fetch_one(&s.pool)
+            .await
+            .unwrap();
+    assert_eq!(row, (start.into(), end.into(), 2));
+    assert_eq!(s.events().await, before);
+    s.expect(
+        "PATCH",
+        "/api/v1/schedules/patch-utc",
+        Some(json!({"baseVersion":1,"title":"stale"})),
+        None,
+        409,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn calendar_utc_upgrade_preserves_links_and_rolls_back_invalid_legacy_rows() {
+    for (start, end, accepted) in [
+        (
+            "2026-10-09T09:00:00+08:00",
+            "2026-10-09T10:00:00+08:00",
+            true,
+        ),
+        (
+            "2026-10-09T09:00:00+0800",
+            "2026-10-09T10:00:00+0800",
+            false,
+        ),
+        ("2026-10-09T09:00:00Z", "2026-10-09T09:30:00+08:00", false),
+    ] {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA foreign_keys=ON")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut legacy = sqlx::migrate!("./migrations");
+        legacy.migrations =
+            std::borrow::Cow::Owned(legacy.iter().filter(|m| m.version < 18).cloned().collect());
+        legacy.run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO users(id,username,password_hash) VALUES ('owner','owner','test')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO calendar_events(id,user_id,title,start_at,end_at,important) VALUES('event','owner','old',?,?,1)").bind(start).bind(end).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO tasks(id,user_id,title,schedule_id) VALUES('child','owner','child','event')").execute(&pool).await.unwrap();
+        let schema = "SELECT name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name";
+        let before: Vec<(String, String)> = sqlx::query_as(schema).fetch_all(&pool).await.unwrap();
+        let rows = "SELECT id,user_id,title,description,location,start_at,end_at,all_day,reminder_minutes,source,deleted_at,created_at,updated_at,version,important FROM calendar_events";
+        let before_row = sqlx::query(rows).fetch_one(&pool).await.unwrap();
+        let result = sqlx::migrate!("./migrations").run(&pool).await;
+        assert_eq!(result.is_ok(), accepted, "{start}: {result:?}");
+        let after: Vec<(String, String)> = sqlx::query_as(schema).fetch_all(&pool).await.unwrap();
+        if !accepted {
+            assert_eq!(before, after, "migration must roll back the entire schema");
+        }
+        for name in [
+            "tasks_validate_links_insert",
+            "tasks_validate_links_update",
+            "idx_calendar_events_user_start",
+            "idx_calendar_events_user_updated",
+        ] {
+            assert_eq!(
+                before.iter().find(|row| row.0 == name),
+                after.iter().find(|row| row.0 == name),
+                "{name}"
+            );
+        }
+        let after_row = sqlx::query(rows).fetch_one(&pool).await.unwrap();
+        for column in [
+            "id",
+            "user_id",
+            "title",
+            "description",
+            "location",
+            "start_at",
+            "end_at",
+            "source",
+            "deleted_at",
+            "created_at",
+            "updated_at",
+        ] {
+            assert_eq!(
+                before_row.get::<Option<String>, _>(column),
+                after_row.get::<Option<String>, _>(column),
+                "{column}"
+            );
+        }
+        for column in ["all_day", "reminder_minutes", "version", "important"] {
+            assert_eq!(
+                before_row.get::<Option<i64>, _>(column),
+                after_row.get::<Option<i64>, _>(column),
+                "{column}"
+            );
+        }
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, if accepted { 19 } else { 18 });
+        assert!(sqlx::query(
+            "INSERT INTO tasks(id,user_id,title,schedule_id) VALUES('bad','owner','bad','missing')"
+        )
+        .execute(&pool)
+        .await
+        .is_err());
+        assert!(
+            sqlx::query("UPDATE tasks SET schedule_id='missing' WHERE id='child'")
+                .execute(&pool)
+                .await
+                .is_err()
+        );
+        let fk: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(fk, 1);
+        assert!(sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .is_empty());
+    }
 }
