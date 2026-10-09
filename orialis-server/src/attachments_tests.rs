@@ -40,6 +40,10 @@ impl TestServer {
                 "/api/v1/attachments/{id}/download",
                 get(download_attachment),
             )
+            .route(
+                "/api/v1/conversations/{conversation_id}/messages",
+                post(create_message),
+            )
             .layer(DefaultBodyLimit::max(MAX_ATTACHMENT_REQUEST_BYTES))
             .with_state(state);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -136,6 +140,41 @@ async fn stored_file_count(path: &PathBuf) -> usize {
     count
 }
 
+async fn create_test_conversation(server: &TestServer, user_id: &str, id: &str) {
+    let timestamp = now();
+    sqlx::query(
+        "INSERT INTO conversations (id,user_id,title,created_at,updated_at) VALUES (?,?,?,?,?)",
+    )
+    .bind(id)
+    .bind(user_id)
+    .bind("Attachment test")
+    .bind(&timestamp)
+    .bind(&timestamp)
+    .execute(&server.pool)
+    .await
+    .unwrap();
+}
+
+async fn database_attachment_counts(server: &TestServer) -> (i64, i64) {
+    let attachments = sqlx::query_scalar("SELECT COUNT(*) FROM attachments")
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    let uploads = sqlx::query_scalar("SELECT COUNT(*) FROM attachment_uploads")
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    (attachments, uploads)
+}
+
+async fn message_count(server: &TestServer, user_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE user_id=?")
+        .bind(user_id)
+        .fetch_one(&server.pool)
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn multipart_upload_persists_file_and_idempotent_replay_creates_no_resources() {
     let server = TestServer::new().await;
@@ -191,6 +230,134 @@ async fn multipart_upload_persists_file_and_idempotent_replay_creates_no_resourc
         .unwrap();
     assert_eq!(before, after);
     assert_eq!(stored_file_count(&server.upload_dir).await, 1);
+}
+
+#[tokio::test]
+async fn message_attachment_http_enforces_user_and_conversation_ownership() {
+    let server = TestServer::new().await;
+    let (owner, owner_token) = server.register("attachment_message_owner").await;
+    let (stranger, stranger_token) = server.register("attachment_message_stranger").await;
+    create_test_conversation(&server, &owner, "owner_other").await;
+    create_test_conversation(&server, &stranger, "stranger_other").await;
+
+    let upload_body = multipart("message-attachment", &[("canonical.txt", b"hello")]);
+    let owner_auth = format!("Session {owner_token}");
+    let stranger_auth = format!("Session {stranger_token}");
+    let (status, bytes) = server
+        .request(
+            "POST",
+            "/api/v1/conversations/default/attachments",
+            &upload_body,
+            &[
+                (
+                    "Content-Type",
+                    "multipart/form-data; boundary=message-attachment",
+                ),
+                ("Authorization", &owner_auth),
+                ("Idempotency-Key", "shared-upload-key"),
+            ],
+        )
+        .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&bytes));
+    let upload: Value = serde_json::from_slice(&bytes).unwrap();
+    let uploaded = &upload["items"][0];
+    let attachment_id = uploaded["id"].as_str().unwrap();
+    let initial_counts = database_attachment_counts(&server).await;
+
+    let same_conversation_body = serde_json::json!({
+        "content": "Use the uploaded file",
+        "attachments": [{"id": attachment_id}]
+    });
+    let (status, bytes) = server
+        .request(
+            "POST",
+            "/api/v1/conversations/default/messages",
+            &serde_json::to_vec(&same_conversation_body).unwrap(),
+            &[
+                ("Content-Type", "application/json"),
+                ("Authorization", &owner_auth),
+            ],
+        )
+        .await;
+    assert_eq!(status, 201, "{}", String::from_utf8_lossy(&bytes));
+    let message: Value = serde_json::from_slice(&bytes).unwrap();
+    let canonical = &message["attachments"][0];
+    assert_eq!(canonical["id"], uploaded["id"]);
+    assert_eq!(canonical["name"], "canonical.txt");
+    assert_eq!(canonical["mimeType"], "text/plain");
+    assert_eq!(canonical["size"], 5);
+    assert_eq!(canonical["downloadUrl"], uploaded["downloadUrl"]);
+    let expected_message_count = message_count(&server, &owner).await;
+
+    for (conversation, auth, user) in [
+        ("owner_other", owner_auth.as_str(), owner.as_str()),
+        ("default", stranger_auth.as_str(), stranger.as_str()),
+    ] {
+        let before = message_count(&server, user).await;
+        let (status, bytes) = server
+            .request(
+                "POST",
+                &format!("/api/v1/conversations/{conversation}/messages"),
+                &serde_json::to_vec(&same_conversation_body).unwrap(),
+                &[
+                    ("Content-Type", "application/json"),
+                    ("Authorization", auth),
+                ],
+            )
+            .await;
+        assert_eq!(status, 400, "{}", String::from_utf8_lossy(&bytes));
+        let error: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(error["error"]["code"], "bad_request");
+        assert_eq!(message_count(&server, user).await, before);
+    }
+    assert_eq!(message_count(&server, &owner).await, expected_message_count);
+
+    // Idempotency keys are scoped to both owner and conversation: another
+    // conversation or account must create its own resource, never replay this one.
+    for (conversation, auth, user, boundary) in [
+        (
+            "owner_other",
+            owner_auth.as_str(),
+            owner.as_str(),
+            "same-user-other-conversation",
+        ),
+        (
+            "default",
+            stranger_auth.as_str(),
+            stranger.as_str(),
+            "other-user",
+        ),
+    ] {
+        let body = multipart(boundary, &[("separate.txt", b"other")]);
+        let content_type = format!("multipart/form-data; boundary={boundary}");
+        let (status, bytes) = server
+            .request(
+                "POST",
+                &format!("/api/v1/conversations/{conversation}/attachments"),
+                &body,
+                &[
+                    ("Content-Type", content_type.as_str()),
+                    ("Authorization", auth),
+                    ("Idempotency-Key", "shared-upload-key"),
+                ],
+            )
+            .await;
+        assert_eq!(status, 200, "{}", String::from_utf8_lossy(&bytes));
+        let created: Value = serde_json::from_slice(&bytes).unwrap();
+        let created_id = created["items"][0]["id"].as_str().unwrap();
+        assert_ne!(created_id, attachment_id);
+        let row: (String, String) =
+            sqlx::query_as("SELECT user_id,conversation_id FROM attachments WHERE id=?")
+                .bind(created_id)
+                .fetch_one(&server.pool)
+                .await
+                .unwrap();
+        assert_eq!(row, (user.to_owned(), conversation.to_owned()));
+    }
+    assert_eq!(
+        database_attachment_counts(&server).await,
+        (initial_counts.0 + 2, initial_counts.1 + 2)
+    );
 }
 
 #[tokio::test]
@@ -277,6 +444,7 @@ async fn attachment_http_enforces_owner_or_token_and_removes_failed_upload_files
         .await;
     assert_eq!(status, 400);
     assert_eq!(stored_file_count(&server.upload_dir).await, 1);
+    assert_eq!(database_attachment_counts(&server).await, (1, 0));
 
     let escaped = env::temp_dir().join(format!("orialis-escaped-{}", new_id()));
     tokio::fs::write(&escaped, b"outside").await.unwrap();
@@ -297,10 +465,14 @@ async fn attachment_http_enforces_owner_or_token_and_removes_failed_upload_files
     assert_eq!(status, 404);
     tokio::fs::remove_file(escaped).await.unwrap();
 
-    sqlx::query("CREATE TRIGGER reject_attachment BEFORE INSERT ON attachments BEGIN SELECT RAISE(ABORT, 'test transaction failure'); END")
+    sqlx::query("CREATE TRIGGER reject_named_attachment BEFORE INSERT ON attachments WHEN NEW.original_name='reject.txt' BEGIN SELECT RAISE(ABORT, 'test later attachment failure'); END")
         .execute(&server.pool).await.unwrap();
-    let failed = multipart("transaction-boundary", &[("failed.txt", b"failure")]);
-    let (status, _) = server
+    let failed = multipart(
+        "transaction-boundary",
+        &[("inserted-first.txt", b"first"), ("reject.txt", b"failure")],
+    );
+    let before_failure = database_attachment_counts(&server).await;
+    let (status, bytes) = server
         .request(
             "POST",
             "/api/v1/conversations/default/attachments",
@@ -311,10 +483,51 @@ async fn attachment_http_enforces_owner_or_token_and_removes_failed_upload_files
                     "multipart/form-data; boundary=transaction-boundary",
                 ),
                 ("Authorization", owner_authorization.as_str()),
+                ("Idempotency-Key", "partial-failure"),
             ],
         )
         .await;
-    assert_eq!(status, 500);
+    assert_eq!(status, 500, "{}", String::from_utf8_lossy(&bytes));
+    assert_eq!(database_attachment_counts(&server).await, before_failure);
+    assert_eq!(stored_file_count(&server.upload_dir).await, 1);
+
+    // A deferred foreign key fails at COMMIT, after attachment and upload rows
+    // have both been inserted into the transaction. Verify the handler removes
+    // the created file and SQLite rolls both rows back on a real commit error.
+    sqlx::query("DROP TRIGGER reject_named_attachment")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE attachment_commit_guard (user_id TEXT REFERENCES users(id) DEFERRABLE INITIALLY DEFERRED)")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TRIGGER reject_attachment_upload_at_commit AFTER INSERT ON attachment_uploads BEGIN INSERT INTO attachment_commit_guard(user_id) VALUES ('missing-user'); END")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    sqlx::query("PRAGMA defer_foreign_keys=ON")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    let commit_failure = multipart("commit-boundary", &[("commit-failed.txt", b"commit")]);
+    let (status, bytes) = server
+        .request(
+            "POST",
+            "/api/v1/conversations/default/attachments",
+            &commit_failure,
+            &[
+                (
+                    "Content-Type",
+                    "multipart/form-data; boundary=commit-boundary",
+                ),
+                ("Authorization", owner_authorization.as_str()),
+                ("Idempotency-Key", "commit-failure"),
+            ],
+        )
+        .await;
+    assert_eq!(status, 500, "{}", String::from_utf8_lossy(&bytes));
+    assert_eq!(database_attachment_counts(&server).await, before_failure);
     assert_eq!(stored_file_count(&server.upload_dir).await, 1);
 }
 
@@ -343,6 +556,7 @@ async fn multipart_limits_reject_single_file_total_bytes_and_file_count_without_
         .await;
     assert_eq!(status, 400);
     assert_eq!(stored_file_count(&server.upload_dir).await, 0);
+    assert_eq!(database_attachment_counts(&server).await, (0, 0));
 
     let small = vec![b'x'; 1];
     let count_fields = (0..=MAX_ATTACHMENT_COUNT)
@@ -363,6 +577,7 @@ async fn multipart_limits_reject_single_file_total_bytes_and_file_count_without_
         .await;
     assert_eq!(status, 400);
     assert_eq!(stored_file_count(&server.upload_dir).await, 0);
+    assert_eq!(database_attachment_counts(&server).await, (0, 0));
 
     let chunk = vec![b'y'; 16 * 1024 * 1024];
     let total_fields = vec![
@@ -382,4 +597,5 @@ async fn multipart_limits_reject_single_file_total_bytes_and_file_count_without_
         .await;
     assert_eq!(status, 400);
     assert_eq!(stored_file_count(&server.upload_dir).await, 0);
+    assert_eq!(database_attachment_counts(&server).await, (0, 0));
 }
