@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../app/app.dart';
-import '../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show OrialisPageScaffold;
 import '../../pages/shared/page_parts.dart';
 import 'web_service.dart';
 import 'web_service_browser.dart';
@@ -144,7 +146,7 @@ class _WebServicesPageState extends ConsumerState<WebServicesPage> {
                   child: ContentStack(
                     gap: 16,
                     children: [
-                      OrialisListRow(
+                      LuminaListRow(
                         title: service.name,
                         subtitle: service.description,
                         leading: LuminaIcon(switch (service.icon) {

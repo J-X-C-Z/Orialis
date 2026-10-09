@@ -4,7 +4,9 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../app/design/lumina_compat.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show DesktopLayoutScope, OrialisPageScaffold;
 import '../core/config/app_config.dart';
 import '../core/network/orialis_api_client.dart';
 import '../pages/shared/mobile_navigation.dart';
@@ -456,7 +458,7 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
                             .setMode(mode),
                       ),
                       const SizedBox(height: 12),
-                      OrialisListRow(
+                      LuminaListRow(
                         title: '高性能模式',
                         subtitle: '优先流畅滚动，关闭后使用更细腻的阴影效果',
                         trailing: LuminaSwitch(

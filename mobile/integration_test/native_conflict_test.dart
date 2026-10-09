@@ -4,7 +4,8 @@ import 'package:integration_test/integration_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import 'package:orialis_mobile/app/app.dart';
-import 'package:orialis_mobile/app/design/design_components.dart';
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show LuminaCardMemory;
 import 'package:orialis_mobile/core/config/app_config.dart';
 import 'package:orialis_mobile/core/database/app_database.dart';
 import 'package:orialis_mobile/features/devices/data/device_data_source.dart';

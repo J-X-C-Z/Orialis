@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart' show NavigationDestination;
-import '../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 /// Shared phone chrome for the schedule and news applications.
 class OrialisMobileNavigationOverlay extends StatelessWidget {
@@ -64,7 +64,7 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
                         depth: LuminaSurfaceDepth.raised,
                         glass: true,
                         backdrop: true,
-                        radius: AppControlSize.capsuleRadius,
+                        radius: LuminaControlSize.capsuleRadius,
                         padding: const EdgeInsets.all(6),
                         child: LuminaSlidingSelection(
                           index: selectedIndex,
@@ -80,7 +80,7 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
                                     selected: selectedIndex == i,
                                     label: destinations[i].label,
                                     child: LuminaSurface(
-                                      radius: AppControlSize.capsuleRadius,
+                                      radius: LuminaControlSize.capsuleRadius,
                                       color: const Color(0x00000000),
                                       padding: const EdgeInsets.symmetric(
                                         vertical: 10,

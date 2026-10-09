@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../app/design/lumina_compat.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show DesktopLayoutScope, LuminaCardMemory;
 import '../features/chat/presentation/safe_markdown.dart';
 import '../core/config/app_config.dart';
 import 'news_data.dart';

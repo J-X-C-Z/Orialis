@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orialis_mobile/app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/features/chat/data/recent_hermes_models.dart';
 import 'package:orialis_mobile/features/chat/domain/hermes_shortcuts.dart';
 import 'package:shared_preferences/shared_preferences.dart';

@@ -1,6 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orialis_mobile/app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 Widget harness(
   Widget child, {
@@ -162,13 +162,13 @@ void main() {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const OrialisTopBar(key: ValueKey('today'), title: '今日'),
-                const OrialisTopBar(
+                const LuminaTopBar(key: ValueKey('today'), title: '今日'),
+                const LuminaTopBar(
                   key: ValueKey('chat'),
                   title: '聊天',
                   subtitle: '想法在这里，慢慢成形。',
                 ),
-                OrialisTopBar(
+                LuminaTopBar(
                   key: const ValueKey('events'),
                   title: '事件',
                   actions: [
@@ -250,7 +250,7 @@ void main() {
     );
     expect(tester.getSize(find.byType(LuminaIconButton)), const Size(48, 48));
     final surface = tester.widget<LuminaSurface>(find.byType(LuminaSurface));
-    expect(surface.radius, AppControlSize.capsuleRadius);
+    expect(surface.radius, LuminaControlSize.capsuleRadius);
     final gesture = await tester.startGesture(
       tester.getCenter(find.byType(LuminaIconButton)),
     );
@@ -350,8 +350,8 @@ void main() {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const OrialisChatBubble(isUser: true, child: Text('短消息')),
-                OrialisChatBubble(
+                const LuminaChatBubble(isUser: true, child: Text('短消息')),
+                LuminaChatBubble(
                   isUser: false,
                   child: Text('这是一段很长的消息。' * 30),
                 ),
@@ -362,7 +362,7 @@ void main() {
       ),
     );
     final surfaces = find.descendant(
-      of: find.byType(OrialisChatBubble),
+      of: find.byType(LuminaChatBubble),
       matching: find.byType(LuminaSurface),
     );
     expect(tester.getSize(surfaces.first).width, lessThan(180));
@@ -647,7 +647,7 @@ void main() {
                     onPressed: () {},
                     child: const Text('继续安排今天的工作'),
                   ),
-                  const OrialisListRow(
+                  const LuminaListRow(
                     title: '一项需要关注的任务',
                     subtitle: '保存并同步到所有设备',
                   ),

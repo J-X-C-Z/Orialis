@@ -11,7 +11,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/app.dart';
-import '../../app/design/design_components.dart';
+import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+import 'package:orialis_mobile/app/design/lumina_compat.dart'
+    show LuminaConversationVisibility, OrialisPageScaffold;
 import '../../core/database/app_database.dart';
 import '../../core/attachments/attachment_bridge.dart';
 import '../../core/realtime/mobile_realtime_client.dart';
@@ -496,7 +498,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                     if (devices.isEmpty)
                       const Text('请在 Mac 或 Azure 服务器启动 Hermes 网关。'),
                     for (final device in devices)
-                      OrialisListRow(
+                      LuminaListRow(
                         title: device.label,
                         subtitle: '${device.online ? "在线" : "离线"} · Hermes',
                         trailing: LuminaIconButton(
@@ -631,7 +633,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
       stream: _conversationsStream,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return const OrialisEmptyState(text: '会话暂时无法加载，请稍后再试。');
+          return const LuminaEmptyState(text: '会话暂时无法加载，请稍后再试。');
         }
         if (!snapshot.hasData) return const Center(child: LuminaProgress());
         final conversations = snapshot.data!;
@@ -640,7 +642,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const OrialisEmptyState(
+                const LuminaEmptyState(
                   text: '从一个想法开始。\n新建会话，与 Orialis 一起整理。',
                   card: false,
                 ),
@@ -683,7 +685,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                 )
                 .value;
             final preview = latest?.content.replaceAll('\n', ' ').trim();
-            final row = OrialisListRow(
+            final row = LuminaListRow(
               title: conversation.pinned
                   ? '置顶 · ${conversation.title}'
                   : conversation.title,
@@ -748,25 +750,25 @@ class _ChatPageState extends ConsumerState<ChatPage>
       builder: (context) => LuminaStack(
         mainAxisSize: MainAxisSize.min,
         children: [
-          OrialisListRow(
+          LuminaListRow(
             title: conversation.pinned ? '取消置顶' : '置顶会话',
             subtitle: '置顶后可长按拖动排序',
             onTap: () => Navigator.of(context, rootNavigator: true).pop('pin'),
           ),
-          OrialisListRow(
+          LuminaListRow(
             title: '恢复默认顺序',
             subtitle: '置顶状态保留，按最近更新排序',
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('resetOrder'),
           ),
-          OrialisListRow(
+          LuminaListRow(
             title: '修改会话名称',
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('rename'),
           ),
           const SizedBox(height: 8),
           if (conversation.type != 'main' && conversation.id != 'default')
-            OrialisListRow(
+            LuminaListRow(
               title: '删除会话',
               subtitle: '仅删除此普通会话',
               onTap: () =>
@@ -1161,31 +1163,31 @@ class _ChatPageState extends ConsumerState<ChatPage>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          OrialisListRow(
+          LuminaListRow(
             title: '拍照',
             leading: const LuminaIcon(LuminaIcons.camera),
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('camera'),
           ),
-          OrialisListRow(
+          LuminaListRow(
             title: '选择照片',
             leading: const LuminaIcon(LuminaIcons.image),
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('photos'),
           ),
-          OrialisListRow(
+          LuminaListRow(
             title: '选择文件',
             leading: const LuminaIcon(LuminaIcons.attachment),
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('files'),
           ),
-          OrialisListRow(
+          LuminaListRow(
             title: '指令',
             leading: const LuminaIcon(LuminaIcons.terminal),
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('commands'),
           ),
-          OrialisListRow(
+          LuminaListRow(
             title: '快捷提问',
             leading: const LuminaIcon(LuminaIcons.sparkles),
             onTap: () =>
@@ -1214,19 +1216,19 @@ class _ChatPageState extends ConsumerState<ChatPage>
         children: [
           Text('常用指令', style: LuminaTheme.of(context).textTheme.titleMedium),
           for (var i = 0; i < hermesShortcuts.length; i++)
-            OrialisListRow(
+            LuminaListRow(
               title: hermesShortcuts[i].title,
               subtitle: hermesShortcuts[i].description,
               onTap: () =>
                   Navigator.of(context, rootNavigator: true).pop('command:$i'),
             ),
-          OrialisListRow(
+          LuminaListRow(
             title: '重置上下文',
             subtitle: '开始新的 Hermes 上下文，保留 App 历史',
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('reset'),
           ),
-          OrialisListRow(
+          LuminaListRow(
             title: '自定义命令',
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('custom'),
@@ -1266,18 +1268,18 @@ class _ChatPageState extends ConsumerState<ChatPage>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text('快捷提问', style: LuminaTheme.of(context).textTheme.titleMedium),
-          OrialisListRow(
+          LuminaListRow(
             title: '总结当前对话',
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('summary'),
           ),
-          OrialisListRow(
+          LuminaListRow(
             title: '提取待办',
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('tasks'),
           ),
           if (_replyMessage != null)
-            OrialisListRow(
+            LuminaListRow(
               title: '解释引用内容',
               onTap: () =>
                   Navigator.of(context, rootNavigator: true).pop('explain'),
@@ -1498,33 +1500,33 @@ class _ChatPageState extends ConsumerState<ChatPage>
       builder: (context) => LuminaStack(
         mainAxisSize: MainAxisSize.min,
         children: [
-          OrialisListRow(
+          LuminaListRow(
             title: '修改会话名称',
             leading: const LuminaIcon(LuminaIcons.settings),
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('rename'),
           ),
-          OrialisListRow(
+          LuminaListRow(
             title: '模型与思考强度',
             leading: const LuminaIcon(LuminaIcons.sparkles),
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('model'),
           ),
-          OrialisListRow(
+          LuminaListRow(
             title: 'Hermes 命令',
             leading: const LuminaIcon(LuminaIcons.terminal),
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('command'),
           ),
           const SizedBox(height: 8),
-          OrialisListRow(
+          LuminaListRow(
             title: '主动投递',
             leading: const LuminaIcon(LuminaIcons.notification),
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('delivery'),
           ),
           const SizedBox(height: 8),
-          OrialisListRow(
+          LuminaListRow(
             title: '会话控制',
             leading: const LuminaIcon(LuminaIcons.settings),
             onTap: () =>
@@ -1708,7 +1710,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                   Positioned.fill(
                     child: messages.when(
                       loading: () => const Center(child: LuminaProgress()),
-                      error: (error, _) => const OrialisEmptyState(
+                      error: (error, _) => const LuminaEmptyState(
                         text: '消息暂时无法加载，请稍后再试。',
                         card: false,
                       ),
@@ -1744,7 +1746,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                 ),
                                 children: [
                                   statusBanner,
-                                  const OrialisEmptyState(
+                                  const LuminaEmptyState(
                                     text: '从一句话开始。\n记录想法，或一起安排今天。',
                                     card: false,
                                   ),
@@ -1882,7 +1884,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                     left: 0,
                     right: 0,
                     height: headerHeight,
-                    child: OrialisTopBar(
+                    child: LuminaTopBar(
                       title: _chatDeviceId == null
                           ? _conversationTitle
                           : '$_conversationTitle · $_chatDeviceLabel',
@@ -2143,7 +2145,7 @@ class _MessageBubble extends StatelessWidget {
           color: highlighted ? colors.accentSoft : const Color(0x00000000),
           borderRadius: BorderRadius.circular(16),
         ),
-        child: OrialisChatBubble(
+        child: LuminaChatBubble(
           isUser: isUser,
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -2245,17 +2247,17 @@ class _AttachmentPreview extends StatelessWidget {
     final url = attachment['downloadUrl'] as String?;
     final isImage = mimeType.startsWith('image/') && url != null;
     return Container(
-      margin: const EdgeInsets.only(top: AppChatMetrics.attachmentTopGap),
+      margin: const EdgeInsets.only(top: LuminaChatMetrics.attachmentTopGap),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: LuminaTheme.of(context).colors.accentSoft,
-        borderRadius: BorderRadius.circular(AppRadius.attachment),
+        borderRadius: BorderRadius.circular(LuminaRadius.attachment),
       ),
       child: isImage
           ? Image.network(
               url,
-              width: AppChatMetrics.imageWidth,
-              height: AppChatMetrics.imageHeight,
+              width: LuminaChatMetrics.imageWidth,
+              height: LuminaChatMetrics.imageHeight,
               fit: BoxFit.cover,
               errorBuilder: (_, _, _) => _fileLabel(name, mimeType),
             )
@@ -2265,7 +2267,7 @@ class _AttachmentPreview extends StatelessWidget {
 
   Widget _fileLabel(String name, String mimeType) {
     return Padding(
-      padding: const EdgeInsets.all(AppSpacing.item),
+      padding: const EdgeInsets.all(LuminaSpacing.item),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -2274,7 +2276,7 @@ class _AttachmentPreview extends StatelessWidget {
                 ? LuminaIcons.image
                 : LuminaIcons.file,
           ),
-          const SizedBox(width: AppSpacing.controlGap),
+          const SizedBox(width: LuminaSpacing.controlGap),
           Flexible(child: Text(name, overflow: TextOverflow.ellipsis)),
         ],
       ),
@@ -2414,7 +2416,7 @@ class _ModelSettingsSheetState extends State<_ModelSettingsSheet> {
           const SizedBox(height: 18),
           Text('最近使用', style: theme.textTheme.titleMedium),
           for (final model in suggestions)
-            OrialisListRow(
+            LuminaListRow(
               title: model,
               subtitle: '点击切换',
               onTap: _busy ? null : () => _switchModel(model),
@@ -2515,7 +2517,7 @@ class _CommandComposerState extends State<_CommandComposer> {
             'Hermes 命令',
             style: TextStyle(fontWeight: FontWeight.w700),
           ),
-          const SizedBox(height: AppSpacing.controlGap),
+          const SizedBox(height: LuminaSpacing.controlGap),
           Row(
             children: [
               Expanded(
@@ -2527,7 +2529,7 @@ class _CommandComposerState extends State<_CommandComposer> {
                   hintText: '输入要交给 Hermes 的命令',
                 ),
               ),
-              const SizedBox(width: AppSpacing.controlGap),
+              const SizedBox(width: LuminaSpacing.controlGap),
               LuminaIconButton(
                 onPressed: _sending ? null : _send,
                 icon: _sending
@@ -2625,12 +2627,12 @@ class _SessionControlsState extends State<_SessionControls> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('会话控制', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: AppSpacing.controlGap),
+          const SizedBox(height: LuminaSpacing.controlGap),
           Text(
             '消息未处理或会话异常时，可先「重试」；仍不行再「重置」。',
             style: LuminaTheme.of(context).textTheme.bodySmall,
           ),
-          const SizedBox(height: AppSpacing.controlGap),
+          const SizedBox(height: LuminaSpacing.controlGap),
           Wrap(
             spacing: 12,
             runSpacing: 12,
@@ -2662,7 +2664,7 @@ class _SessionControlsState extends State<_SessionControls> {
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.controlGap),
+          const SizedBox(height: LuminaSpacing.controlGap),
           Row(
             children: [
               Expanded(
@@ -2672,7 +2674,7 @@ class _SessionControlsState extends State<_SessionControls> {
                   hintText: '设置会话标题',
                 ),
               ),
-              const SizedBox(width: AppSpacing.controlGap),
+              const SizedBox(width: LuminaSpacing.controlGap),
               LuminaIconButton(
                 onPressed: _sending ? null : _submitTitle,
                 icon: const LuminaIcon(LuminaIcons.check),
@@ -2680,7 +2682,7 @@ class _SessionControlsState extends State<_SessionControls> {
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.controlGap),
+          const SizedBox(height: LuminaSpacing.controlGap),
           if (_sending) const LuminaProgress(),
           if (_lastResult != null)
             Padding(
