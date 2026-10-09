@@ -144,6 +144,42 @@ impl TestServer {
         .await
         .unwrap()
     }
+
+    async fn task_state(
+        &self,
+        id: &str,
+    ) -> Option<(
+        String,
+        String,
+        i64,
+        i64,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> {
+        sqlx::query_as(
+            "SELECT user_id,title,completed,version,deleted_at,parent_task_id,schedule_id
+             FROM tasks WHERE id=?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .unwrap()
+    }
+
+    async fn event_state(
+        &self,
+        user_id: &str,
+    ) -> Vec<(i64, String, String, String, i64, i64, Option<String>)> {
+        sqlx::query_as(
+            "SELECT cursor,entity_type,entity_id,operation,entity_version,tombstone,mutation_id
+             FROM sync_events WHERE user_id=? ORDER BY cursor",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap()
+    }
 }
 
 impl Drop for TestServer {
@@ -169,6 +205,24 @@ async fn task_http_crud_preserves_patch_tristate_versions_and_mutation_events() 
     assert_eq!(created["version"], 1);
     let events_after_create = server.event_count(&user).await;
     assert_eq!(events_after_create, 1);
+    let first_mutation: (String, String, i64, Option<String>) = sqlx::query_as(
+        "SELECT user_id,entity_id,cursor,mutation_id FROM sync_events
+         WHERE user_id=? AND entity_type='task' AND mutation_id='create-once'",
+    )
+    .bind(&user)
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        first_mutation.0, user,
+        "mutation event must belong to the authenticated owner"
+    );
+    assert_eq!(first_mutation.1, "task-1");
+    assert!(
+        first_mutation.2 > 0,
+        "mutation event must have an assigned sync cursor"
+    );
+    assert_eq!(first_mutation.3.as_deref(), Some("create-once"));
 
     let (status, bytes) = server
         .create_task(
@@ -180,6 +234,28 @@ async fn task_http_crud_preserves_patch_tristate_versions_and_mutation_events() 
     assert_eq!(status, 409, "{}", String::from_utf8_lossy(&bytes));
     assert_eq!(json(&bytes)["error"]["code"], "conflict");
     assert_eq!(server.event_count(&user).await, events_after_create);
+
+    let events_before_new_id_replay = server.event_state(&user).await;
+    let (status, bytes) = server
+        .create_task(
+            &token,
+            r#"{"id":"different-task-id","title":"must not replay"}"#,
+            Some("create-once"),
+        )
+        .await;
+    assert_eq!(status, 409, "{}", String::from_utf8_lossy(&bytes));
+    assert_eq!(json(&bytes)["error"]["code"], "conflict");
+    let different_id_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE user_id=? AND id='different-task-id'")
+            .bind(&user)
+            .fetch_one(&server.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        different_id_rows, 0,
+        "mutation replay with a new task ID must not create a row"
+    );
+    assert_eq!(server.event_state(&user).await, events_before_new_id_replay);
 
     let auth = format!("Session {token}");
     let (status, bytes) = server
@@ -309,6 +385,8 @@ async fn task_http_isolates_accounts_and_rejects_cross_owner_project_parent_and_
         .iter()
         .all(|task| task["id"] != "private-task"));
     let other_auth = format!("Session {other_token}");
+    let private_before_cross_owner_patch = server.task_state("private-task").await;
+    let owner_events_before_cross_owner_patch = server.event_state(&owner).await;
     let (status, bytes) = server
         .request(
             "PATCH",
@@ -319,6 +397,14 @@ async fn task_http_isolates_accounts_and_rejects_cross_owner_project_parent_and_
         .await;
     assert_eq!(status, 404, "{}", String::from_utf8_lossy(&bytes));
     assert_eq!(json(&bytes)["error"]["code"], "not_found");
+    assert_eq!(
+        server.task_state("private-task").await,
+        private_before_cross_owner_patch
+    );
+    assert_eq!(
+        server.event_state(&owner).await,
+        owner_events_before_cross_owner_patch
+    );
     let (status, bytes) = server
         .request(
             "DELETE",
@@ -329,6 +415,14 @@ async fn task_http_isolates_accounts_and_rejects_cross_owner_project_parent_and_
         .await;
     assert_eq!(status, 404, "{}", String::from_utf8_lossy(&bytes));
     assert_eq!(json(&bytes)["error"]["code"], "not_found");
+    assert_eq!(
+        server.task_state("private-task").await,
+        private_before_cross_owner_patch
+    );
+    assert_eq!(
+        server.event_state(&owner).await,
+        owner_events_before_cross_owner_patch
+    );
     let (_, private_after) = server.get_task(&owner_token, "private-task").await;
     assert_eq!(json(&private_after)["title"], "private");
 
@@ -340,6 +434,8 @@ async fn task_http_isolates_accounts_and_rejects_cross_owner_project_parent_and_
         )
         .await;
     assert_eq!(status, 201, "{}", String::from_utf8_lossy(&scheduled));
+    let scheduled_state = server.task_state("scheduled-task").await;
+    let owner_events_before_foreign_schedule = server.event_state(&owner).await;
     let (status, bytes) = server
         .request(
             "PATCH",
@@ -358,6 +454,12 @@ async fn task_http_isolates_accounts_and_rejects_cross_owner_project_parent_and_
     assert_eq!(
         stored_schedule, "owner-schedule",
         "failed update must not detach or replace the valid relation"
+    );
+    assert_eq!(server.task_state("scheduled-task").await, scheduled_state);
+    assert_eq!(
+        server.event_state(&owner).await,
+        owner_events_before_foreign_schedule,
+        "foreign-schedule PATCH must not change versions or append events"
     );
 
     for (id, body) in [
@@ -383,19 +485,17 @@ async fn task_http_isolates_accounts_and_rejects_cross_owner_project_parent_and_
         ),
     ] {
         let before = server.event_count(&owner).await;
+        let owner_events_before = server.event_state(&owner).await;
         let (status, bytes) = server.create_task(&owner_token, body, None).await;
-        assert!(
-            status == 400 || status == 404 || status == 409,
-            "{id}: {status} {}",
-            String::from_utf8_lossy(&bytes)
-        );
         let value = json(&bytes);
-        assert!(
-            value["error"]["code"] == "bad_request"
-                || value["error"]["code"] == "not_found"
-                || value["error"]["code"] == "conflict",
-            "{id}: {value}"
-        );
+        let (expected_status, expected_code) = match id {
+            "cross-project" => (404, "not_found"),
+            "cross-parent" | "cross-schedule" | "both-links" => (400, "bad_request"),
+            "cross-id" => (409, "conflict"),
+            _ => unreachable!(),
+        };
+        assert_eq!(status, expected_status, "{id}: {value}");
+        assert_eq!(value["error"]["code"], expected_code, "{id}: {value}");
         let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE user_id=? AND id=?")
             .bind(&owner)
             .bind(id)
@@ -407,6 +507,11 @@ async fn task_http_isolates_accounts_and_rejects_cross_owner_project_parent_and_
             server.event_count(&owner).await,
             before,
             "failed request emitted a task event: {id}"
+        );
+        assert_eq!(
+            server.event_state(&owner).await,
+            owner_events_before,
+            "{id}: cursor/event state changed"
         );
     }
     let other_owned: String =
@@ -483,6 +588,126 @@ async fn task_parent_completion_and_tombstones_are_transactional_http_effects() 
     assert_eq!(
         tombstones,
         vec![("parent".into(), 4), ("child-a".into(), 3)]
+    );
+}
+
+#[tokio::test]
+async fn task_create_rolls_back_row_and_event_when_deferred_commit_fails() {
+    let server = TestServer::new().await;
+    let (user, token) = server.register("tasks_create_commit_failure").await;
+    let foreign_keys: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    assert_eq!(foreign_keys, 1, "deferred-FK commit failure must be active");
+    sqlx::query("CREATE TABLE task_test_commit_parent(id INTEGER PRIMARY KEY)")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE task_test_commit_child(parent_id INTEGER, FOREIGN KEY(parent_id) REFERENCES task_test_commit_parent(id) DEFERRABLE INITIALLY DEFERRED)")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TRIGGER task_test_fail_create_commit AFTER INSERT ON tasks WHEN NEW.id='commit-fail-create' BEGIN INSERT INTO task_test_commit_child(parent_id) VALUES(404); END")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    let before_events = server.event_state(&user).await;
+
+    let (status, bytes) = server
+        .create_task(
+            &token,
+            r#"{"id":"commit-fail-create","title":"must roll back"}"#,
+            Some("commit-failure-mutation"),
+        )
+        .await;
+    assert_eq!(status, 500, "{}", String::from_utf8_lossy(&bytes));
+    assert_eq!(json(&bytes)["error"]["code"], "database_error");
+    assert_eq!(server.task_state("commit-fail-create").await, None);
+    assert_eq!(server.event_state(&user).await, before_events);
+    let orphan_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_test_commit_child")
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+    assert_eq!(orphan_rows, 0);
+}
+
+#[tokio::test]
+async fn task_update_rolls_back_parent_reconciliation_and_events_after_child_write() {
+    let server = TestServer::new().await;
+    let (user, token) = server.register("tasks_update_transaction_failure").await;
+    for body in [
+        r#"{"id":"parent-reconcile","title":"parent","completed":true}"#,
+        r#"{"id":"child-a","title":"child a","completed":true,"parentTaskId":"parent-reconcile"}"#,
+        r#"{"id":"child-b","title":"child b","completed":true,"parentTaskId":"parent-reconcile"}"#,
+    ] {
+        let (status, bytes) = server.create_task(&token, body, None).await;
+        assert_eq!(status, 201, "{}", String::from_utf8_lossy(&bytes));
+    }
+    let before_parent = server.task_state("parent-reconcile").await;
+    let before_child = server.task_state("child-a").await;
+    let before_events = server.event_state(&user).await;
+    sqlx::query("CREATE TRIGGER task_test_fail_child_update_event BEFORE INSERT ON sync_events WHEN NEW.entity_type='task' AND NEW.entity_id='child-a' AND NEW.operation='upsert' BEGIN SELECT RAISE(ABORT,'forced task update event failure'); END")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+
+    let auth = format!("Session {token}");
+    let (status, bytes) = server
+        .request(
+            "PATCH",
+            "/api/v1/tasks/child-a",
+            r#"{"baseVersion":1,"completed":false}"#,
+            &[("Authorization", &auth)],
+        )
+        .await;
+    assert_eq!(status, 500, "{}", String::from_utf8_lossy(&bytes));
+    assert_eq!(json(&bytes)["error"]["code"], "database_error");
+    assert_eq!(server.task_state("parent-reconcile").await, before_parent);
+    assert_eq!(server.task_state("child-a").await, before_child);
+    assert_eq!(
+        server.event_state(&user).await,
+        before_events,
+        "parent upsert event and cursor must roll back with the child update"
+    );
+}
+
+#[tokio::test]
+async fn task_delete_rolls_back_parent_and_child_tombstones_after_partial_cascade() {
+    let server = TestServer::new().await;
+    let (user, token) = server.register("tasks_delete_transaction_failure").await;
+    for body in [
+        r#"{"id":"delete-parent","title":"parent"}"#,
+        r#"{"id":"delete-child","title":"child","parentTaskId":"delete-parent"}"#,
+    ] {
+        let (status, bytes) = server.create_task(&token, body, None).await;
+        assert_eq!(status, 201, "{}", String::from_utf8_lossy(&bytes));
+    }
+    let before_parent = server.task_state("delete-parent").await;
+    let before_child = server.task_state("delete-child").await;
+    let before_events = server.event_state(&user).await;
+    sqlx::query("CREATE TRIGGER task_test_fail_child_delete_event BEFORE INSERT ON sync_events WHEN NEW.entity_type='task' AND NEW.entity_id='delete-child' AND NEW.operation='delete' BEGIN SELECT RAISE(ABORT,'forced child tombstone failure'); END")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+
+    let auth = format!("Session {token}");
+    let (status, bytes) = server
+        .request(
+            "DELETE",
+            "/api/v1/tasks/delete-parent",
+            r#"{"baseVersion":1}"#,
+            &[("Authorization", &auth)],
+        )
+        .await;
+    assert_eq!(status, 500, "{}", String::from_utf8_lossy(&bytes));
+    assert_eq!(json(&bytes)["error"]["code"], "database_error");
+    assert_eq!(server.task_state("delete-parent").await, before_parent);
+    assert_eq!(server.task_state("delete-child").await, before_child);
+    assert_eq!(
+        server.event_state(&user).await,
+        before_events,
+        "root/child tombstone events and their cursors must roll back"
     );
 }
 
