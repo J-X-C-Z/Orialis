@@ -77,13 +77,31 @@ struct ScheduleCursor {
     id: String,
 }
 
+// Match the database's RFC 3339 shape, keeping the caller's original string.
+// Chrono accepts Unicode minus even in its RFC parser and truncates fractions
+// after nine digits, so validate ASCII and compare the original fractional digits.
+fn calendar_instant<'a>(value: &'a str, field: &str) -> Result<(i64, bool, &'a str), AppError> {
+    let invalid = || AppError::BadRequest(format!("{field} must be a valid RFC 3339 timestamp"));
+    if !value.is_ascii() {
+        return Err(invalid());
+    }
+    let parsed = DateTime::<FixedOffset>::parse_from_rfc3339(value).map_err(|_| invalid())?;
+    let timezone_len = if matches!(value.as_bytes().last(), Some(b'Z' | b'z')) {
+        1
+    } else {
+        6
+    };
+    let fraction = if value.as_bytes().get(19) == Some(&b'.') {
+        value[20..value.len() - timezone_len].trim_end_matches('0')
+    } else {
+        ""
+    };
+    Ok((parsed.timestamp(), &value[17..19] == "60", fraction))
+}
+
 fn validate_calendar_range(start: &str, end: &str) -> Result<(), AppError> {
-    let start = start
-        .parse::<DateTime<FixedOffset>>()
-        .map_err(|_| AppError::BadRequest("startAt must be a valid RFC 3339 timestamp".into()))?;
-    let end = end
-        .parse::<DateTime<FixedOffset>>()
-        .map_err(|_| AppError::BadRequest("endAt must be a valid RFC 3339 timestamp".into()))?;
+    let start = calendar_instant(start, "startAt")?;
+    let end = calendar_instant(end, "endAt")?;
     if end < start {
         return Err(AppError::BadRequest(
             "endAt must not precede startAt".into(),
@@ -100,9 +118,7 @@ pub(super) async fn list_events(
     let user_id = authenticated_user_or_agent(&headers, &state).await?;
     for (field, value) in [("from", query.from.as_deref()), ("to", query.to.as_deref())] {
         if let Some(value) = value {
-            value.parse::<DateTime<FixedOffset>>().map_err(|_| {
-                AppError::BadRequest(format!("{field} must be a valid RFC 3339 timestamp"))
-            })?;
+            calendar_instant(value, field)?;
         }
     }
     if let (Some(from), Some(to)) = (&query.from, &query.to) {
