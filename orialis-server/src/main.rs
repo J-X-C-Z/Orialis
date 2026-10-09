@@ -1,4 +1,6 @@
 mod agent_gateway;
+mod attachments;
+mod auth;
 mod config;
 mod health;
 mod mobile_realtime;
@@ -10,6 +12,17 @@ mod node_control;
 mod platform_paths;
 
 use agent_gateway::AgentRegistry;
+#[cfg(test)]
+pub(crate) use attachments::{
+    attachment_download_token, AttachmentUploadResponse, MAX_ATTACHMENT_BYTES,
+    MAX_TOTAL_ATTACHMENT_BYTES,
+};
+pub(crate) use attachments::{
+    canonical_attachment, download_attachment, upload_attachments, Attachment, AttachmentInput,
+    MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_REQUEST_BYTES,
+};
+pub(crate) use auth::{authenticated_user, hash_token};
+use auth::{authenticated_user_or_agent, current_session, login, logout, register};
 use axum::{
     body::Body,
     extract::{DefaultBodyLimit, Multipart, Path, Query, State},
@@ -19,24 +32,18 @@ use axum::{
     Json, Router,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use chrono::{DateTime, Duration, FixedOffset, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, Utc};
 use config::Config;
 use orialis_core::{metadata, ServiceMetadata, SERVICE_NAME};
-use scrypt::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Scrypt,
-};
 use serde::{de::DeserializeOwned, de::Error as DeError, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use std::{env, path::PathBuf, sync::Arc};
-use tokio::{io::AsyncWriteExt, sync::Semaphore};
+use tokio::io::AsyncWriteExt;
 use tracing::info;
 use uuid::Uuid;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-static AUTH_HASH_ADMISSION: Semaphore = Semaphore::const_new(4);
 
 #[derive(Clone)]
 struct AppState {
@@ -103,22 +110,6 @@ impl IntoResponse for AppError {
         )
             .into_response()
     }
-}
-
-#[derive(Deserialize)]
-struct Credentials {
-    username: String,
-    password: String,
-}
-
-#[derive(Serialize)]
-struct SessionResponse {
-    #[serde(rename = "userId")]
-    user_id: String,
-    #[serde(rename = "accessToken")]
-    access_token: String,
-    #[serde(rename = "expiresAt")]
-    expires_at: String,
 }
 
 #[derive(Serialize)]
@@ -379,22 +370,6 @@ struct ScheduleInput {
     reminder_minutes: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Attachment {
-    id: String,
-    name: String,
-    mime_type: String,
-    size: i64,
-    download_url: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AttachmentInput {
-    id: String,
-}
-
 #[derive(sqlx::FromRow)]
 struct MessageRow {
     reply_to_message_id: Option<String>,
@@ -509,22 +484,6 @@ struct ConversationPatch {
     title: String,
     base_version: i64,
 }
-
-#[derive(Deserialize)]
-struct DownloadQuery {
-    token: Option<String>,
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AttachmentUploadResponse {
-    items: Vec<Attachment>,
-}
-
-const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
-const MAX_ATTACHMENT_COUNT: usize = 10;
-const MAX_TOTAL_ATTACHMENT_BYTES: usize = 48 * 1024 * 1024;
-const MAX_ATTACHMENT_REQUEST_BYTES: usize = 50 * 1024 * 1024;
 
 #[derive(Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -836,10 +795,7 @@ async fn main() {
         .route("/api/v1/health", get(health::health))
         .route("/api/v1/meta", get(health::meta))
         .route("/api/v1/capabilities", get(health::capabilities))
-        .route("/api/v1/auth/register", post(register))
-        .route("/api/v1/auth/login", post(login))
-        .route("/api/v1/auth/logout", post(logout))
-        .route("/api/v1/auth/session", get(current_session))
+        .merge(auth_router())
         .route("/api/v1/tasks", get(list_tasks).post(create_task))
         .route("/api/v1/tasks/{id}", patch(update_task).delete(delete_task))
         .route("/api/v1/projects", get(list_projects).post(create_project))
@@ -922,16 +878,20 @@ async fn main() {
         .expect("Orialis server failed");
 }
 
+fn auth_router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/v1/auth/register", post(register))
+        .route("/api/v1/auth/login", post(login))
+        .route("/api/v1/auth/logout", post(logout))
+        .route("/api/v1/auth/session", get(current_session))
+}
+
 fn now() -> String {
     Utc::now().to_rfc3339()
 }
 
 fn new_id() -> String {
     Uuid::now_v7().to_string()
-}
-
-fn hash_token(token: &str) -> String {
-    format!("{:x}", Sha256::digest(token.as_bytes()))
 }
 
 fn mutation_id(headers: &HeaderMap) -> Option<String> {
@@ -966,196 +926,37 @@ async fn reject_replayed_mutation(
     Ok(())
 }
 
-fn validate_credentials(username: &str, password: &str) -> Result<(), AppError> {
-    if !(3..=32).contains(&username.chars().count()) {
-        return Err(AppError::BadRequest(
-            "username must be 3-32 characters".into(),
-        ));
-    }
-    if !(8..=128).contains(&password.chars().count()) {
-        return Err(AppError::BadRequest(
-            "password must be 8-128 characters".into(),
-        ));
-    }
-    Ok(())
-}
-
-fn password_hash(password: &str) -> Result<String, AppError> {
-    let salt = SaltString::generate(&mut OsRng);
-    Scrypt
-        .hash_password(password.as_bytes(), &salt)
-        .map(|hash| hash.to_string())
-        .map_err(|_| AppError::BadRequest("password could not be hashed".into()))
-}
-
-fn verify_password(password: &str, encoded: &str) -> bool {
-    PasswordHash::new(encoded)
-        .ok()
-        .map(|parsed| Scrypt.verify_password(password.as_bytes(), &parsed).is_ok())
-        .unwrap_or(false)
-}
-
-async fn password_hash_blocking(password: String) -> Result<String, AppError> {
-    let permit = AUTH_HASH_ADMISSION
-        .try_acquire()
-        .map_err(|_| AppError::ServiceUnavailable("authentication capacity is busy".into()))?;
-    tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        password_hash(&password)
-    })
-    .await
-    .map_err(|_| {
-        AppError::ServiceUnavailable("authentication work could not be completed".into())
-    })?
-}
-
-async fn verify_password_blocking(password: String, encoded: String) -> Result<bool, AppError> {
-    let permit = AUTH_HASH_ADMISSION
-        .try_acquire()
-        .map_err(|_| AppError::ServiceUnavailable("authentication capacity is busy".into()))?;
-    tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        verify_password(&password, &encoded)
-    })
-    .await
-    .map_err(|_| AppError::ServiceUnavailable("authentication work could not be completed".into()))
-}
-
-async fn authenticated_user(headers: &HeaderMap, pool: &SqlitePool) -> Result<String, AppError> {
-    let token = headers
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Session "))
-        .or_else(|| {
-            headers
-                .get("cookie")
-                .and_then(|value| value.to_str().ok())
-                .and_then(|cookie| {
-                    cookie
-                        .split(';')
-                        .find_map(|item| item.trim().strip_prefix("orialis_session="))
-                })
-        });
-    if let Some(token) = token {
-        return sqlx::query_scalar::<_, String>(
-            "SELECT user_id FROM user_sessions
-             WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?",
-        )
-        .bind(hash_token(token))
-        .bind(now())
-        .fetch_optional(pool)
-        .await?
-        .ok_or(AppError::Unauthorized);
-    }
-    if !config::development_device_auth_enabled() {
-        return Err(AppError::Unauthorized);
-    }
-    let device_id = headers
-        .get("x-orialis-device-id")
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or(AppError::Unauthorized)?;
-    let digest = format!("{:x}", Sha256::digest(device_id.as_bytes()));
-    let username = format!("device_{}", &digest[..24]);
-    if let Some(user_id) = sqlx::query_scalar::<_, String>("SELECT id FROM users WHERE username=?")
-        .bind(&username)
-        .fetch_optional(pool)
-        .await?
-    {
-        return Ok(user_id);
-    }
-    let user_id = new_id();
-    sqlx::query(
-        "INSERT OR IGNORE INTO users (id,username,password_hash,created_at,updated_at)
-         VALUES (?,?,?,?,?)",
-    )
-    .bind(&user_id)
-    .bind(&username)
-    .bind("device-auth-only")
-    .bind(now())
-    .bind(now())
-    .execute(pool)
-    .await?;
-    sqlx::query_scalar::<_, String>("SELECT id FROM users WHERE username=?")
-        .bind(username)
-        .fetch_one(pool)
-        .await
-        .map_err(AppError::from)
-}
-
-/// Accept the configured Agent token for HTTP attachment operations. The
-/// WebSocket uses the same token, but upload/download also need an owner so
-/// an Agent cannot access another user's files.
-async fn authenticated_user_or_agent(
-    headers: &HeaderMap,
-    state: &AppState,
-) -> Result<String, AppError> {
-    if let Ok(user_id) = authenticated_user(headers, &state.pool).await {
-        return Ok(user_id);
-    }
-    let valid_agent_token = headers
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split_once(' '))
-        .is_some_and(|(scheme, token)| {
-            scheme.eq_ignore_ascii_case("bearer")
-                && state.agent_device_token.as_deref() == Some(token)
-                && !token.is_empty()
-        });
-    if !valid_agent_token {
-        return Err(AppError::Unauthorized);
-    }
-    if let Some(user_id) = state.agent_user_id.as_deref() {
-        let exists = sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM users WHERE id=?)")
-            .bind(user_id)
-            .fetch_one(&state.pool)
-            .await?;
-        return (exists != 0)
-            .then(|| user_id.to_owned())
-            .ok_or(AppError::Unauthorized);
-    }
-    let users =
-        sqlx::query_scalar::<_, String>("SELECT id FROM users ORDER BY created_at,id LIMIT 2")
-            .fetch_all(&state.pool)
-            .await?;
-    if users.len() == 1 {
-        Ok(users[0].clone())
-    } else {
-        Err(AppError::Unauthorized)
-    }
-}
-
-async fn append_event<'e, E>(
-    executor: E,
-    user_id: &str,
-    entity_type: &str,
-    entity_id: &str,
-    operation: &str,
+struct AppendEvent<'a> {
+    user_id: &'a str,
+    entity_type: &'a str,
+    entity_id: &'a str,
+    operation: &'a str,
     entity_version: i64,
     payload_json: Option<String>,
     mutation_id: Option<String>,
-) -> Result<(), AppError>
+}
+
+async fn append_event<'e, E>(executor: E, event: AppendEvent<'_>) -> Result<(), AppError>
 where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
     let timestamp = now();
-    let tombstone = operation == "delete";
+    let tombstone = event.operation == "delete";
     sqlx::query(
         "INSERT INTO sync_events
          (id,user_id,cursor,entity_type,entity_id,operation,entity_version,tombstone,payload_json,mutation_id,deleted_at,created_at,updated_at,version)
          VALUES (?,?,(SELECT COALESCE(MAX(cursor),0)+1 FROM sync_events WHERE user_id=?),?,?,?,?,?,?,?,?,?,?,1)",
     )
     .bind(new_id())
-    .bind(user_id)
-    .bind(user_id)
-    .bind(entity_type)
-    .bind(entity_id)
-    .bind(operation)
-    .bind(entity_version)
+    .bind(event.user_id)
+    .bind(event.user_id)
+    .bind(event.entity_type)
+    .bind(event.entity_id)
+    .bind(event.operation)
+    .bind(event.entity_version)
     .bind(tombstone)
-    .bind(payload_json)
-    .bind(mutation_id)
+    .bind(event.payload_json)
+    .bind(event.mutation_id)
     .bind(if tombstone { Some(timestamp.clone()) } else { None::<String> })
     .bind(&timestamp)
     .bind(&timestamp)
@@ -1181,109 +982,6 @@ async fn notify_sync_change(state: &AppState, user_id: &str, entity: Option<&str
             tracing::warn!(%error, "could not read sync cursor for realtime notification")
         }
     }
-}
-
-async fn register(
-    State(state): State<Arc<AppState>>,
-    Json(input): Json<Credentials>,
-) -> Result<(StatusCode, Json<SessionResponse>), AppError> {
-    validate_credentials(&input.username, &input.password)?;
-    let id = new_id();
-    let timestamp = now();
-    let result = sqlx::query(
-        "INSERT INTO users (id,username,password_hash,created_at,updated_at)
-         VALUES (?,?,?,?,?)",
-    )
-    .bind(&id)
-    .bind(input.username.trim())
-    .bind(password_hash_blocking(input.password.clone()).await?)
-    .bind(&timestamp)
-    .bind(&timestamp)
-    .execute(&state.pool)
-    .await;
-    if let Err(sqlx::Error::Database(error)) = &result {
-        if error.is_unique_violation() {
-            return Err(AppError::Conflict("username already exists".into()));
-        }
-    }
-    result?;
-    Ok((
-        StatusCode::CREATED,
-        Json(create_session(&state.pool, &id).await?),
-    ))
-}
-
-async fn login(
-    State(state): State<Arc<AppState>>,
-    Json(input): Json<Credentials>,
-) -> Result<Json<SessionResponse>, AppError> {
-    let row = sqlx::query_as::<_, (String, String)>(
-        "SELECT id,password_hash FROM users WHERE username = ?",
-    )
-    .bind(input.username.trim())
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or(AppError::Unauthorized)?;
-    if !verify_password_blocking(input.password, row.1).await? {
-        return Err(AppError::Unauthorized);
-    }
-    Ok(Json(create_session(&state.pool, &row.0).await?))
-}
-
-async fn create_session(pool: &SqlitePool, user_id: &str) -> Result<SessionResponse, AppError> {
-    let token = format!("{}{}", Uuid::now_v7().simple(), Uuid::new_v4().simple());
-    let expires_at = (Utc::now() + Duration::days(30)).to_rfc3339();
-    sqlx::query(
-        "INSERT INTO user_sessions
-         (id,user_id,token_hash,expires_at,created_at,updated_at)
-         VALUES (?,?,?,?,?,?)",
-    )
-    .bind(new_id())
-    .bind(user_id)
-    .bind(hash_token(&token))
-    .bind(&expires_at)
-    .bind(now())
-    .bind(now())
-    .execute(pool)
-    .await?;
-    Ok(SessionResponse {
-        user_id: user_id.into(),
-        access_token: token,
-        expires_at,
-    })
-}
-
-async fn logout(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Result<StatusCode, AppError> {
-    let token = headers
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Session "))
-        .ok_or(AppError::Unauthorized)?;
-    sqlx::query("UPDATE user_sessions SET revoked_at=?,updated_at=? WHERE token_hash=?")
-        .bind(now())
-        .bind(now())
-        .bind(hash_token(token))
-        .execute(&state.pool)
-        .await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn current_session(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Result<Json<Value>, AppError> {
-    let user_id = authenticated_user_or_agent(&headers, &state).await?;
-    let row = sqlx::query_as::<_, (String, String)>("SELECT id,username FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_optional(&state.pool)
-        .await?
-        .ok_or(AppError::Unauthorized)?;
-    Ok(Json(
-        serde_json::json!({ "userId": row.0, "username": row.1 }),
-    ))
 }
 
 async fn ensure_default_conversation(pool: &SqlitePool, user_id: &str) -> Result<(), AppError> {
@@ -1881,257 +1579,6 @@ async fn create_message(
     Ok((StatusCode::CREATED, Json(message)))
 }
 
-async fn upload_attachments(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Path(conversation_id): Path<String>,
-    mut multipart: Multipart,
-) -> Result<Json<AttachmentUploadResponse>, AppError> {
-    let user_id = authenticated_user_or_agent(&headers, &state).await?;
-    ensure_conversation(&state.pool, &user_id, &conversation_id).await?;
-    if conversation_id.trim().is_empty() {
-        return Err(AppError::BadRequest("conversationId is required".into()));
-    }
-    let idempotency_key = mutation_id(&headers);
-    if let Some(key) = &idempotency_key {
-        if key.len() > 200 {
-            return Err(AppError::BadRequest("Idempotency-Key is too long".into()));
-        }
-        if let Some(response_json) = sqlx::query_scalar::<_, String>(
-            "SELECT response_json FROM attachment_uploads
-             WHERE user_id=? AND conversation_id=? AND idempotency_key=?",
-        )
-        .bind(&user_id)
-        .bind(&conversation_id)
-        .bind(key)
-        .fetch_optional(&state.pool)
-        .await?
-        {
-            return serde_json::from_str(&response_json)
-                .map(|response| Ok(Json(response)))
-                .map_err(|_| AppError::BadRequest("invalid stored upload response".into()))?;
-        }
-    }
-    tokio::fs::create_dir_all(&state.upload_dir)
-        .await
-        .map_err(|error| {
-            AppError::ServiceUnavailable(format!("attachment storage unavailable: {error}"))
-        })?;
-
-    let mut items = Vec::new();
-    let mut stored_paths = Vec::new();
-    let mut transaction = state.pool.begin().await?;
-    let result: Result<AttachmentUploadResponse, AppError> = async {
-    while let Some(mut field) = multipart
-        .next_field()
-        .await
-        .map_err(|_| AppError::BadRequest("invalid multipart upload".into()))?
-    {
-        if items.len() >= MAX_ATTACHMENT_COUNT {
-            return Err(AppError::BadRequest("too many attachments".into()));
-        }
-        let Some(file_name) = field.file_name() else {
-            continue;
-        };
-        // Multipart clients on Windows may send a backslash-separated path,
-        // while Unix Path::file_name only strips forward slashes. Normalize
-        // both separators at the HTTP boundary before persisting metadata.
-        let name = file_name
-            .rsplit(|character| character == '/' || character == '\\')
-            .next()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or("文件")
-            .chars()
-            .take(180)
-            .collect::<String>();
-        let mime_type = field
-            .content_type()
-            .unwrap_or("application/octet-stream")
-            .to_owned();
-        let id = new_id();
-        let access_token = Uuid::new_v4().simple().to_string();
-        let storage_path = state.upload_dir.join(format!("{id}.bin"));
-        let mut file = tokio::fs::File::create(&storage_path).await.map_err(|error| {
-            AppError::ServiceUnavailable(format!("could not store attachment: {error}"))
-        })?;
-        stored_paths.push(storage_path.clone());
-        let mut size = 0usize;
-        while let Some(chunk) = field.chunk().await.map_err(|_| AppError::BadRequest("could not read attachment".into()))? {
-            size = size.saturating_add(chunk.len());
-            let total = items.iter().map(|item: &Attachment| item.size as usize).sum::<usize>() + size;
-            if size > MAX_ATTACHMENT_BYTES {
-                return Err(AppError::BadRequest("attachment exceeds 20 MB".into()));
-            }
-            if total > MAX_TOTAL_ATTACHMENT_BYTES {
-                return Err(AppError::BadRequest("attachments exceed 48 MB total".into()));
-            }
-            file.write_all(&chunk).await.map_err(|error| AppError::ServiceUnavailable(format!("could not store attachment: {error}")))?;
-        }
-        if size == 0 {
-            return Err(AppError::BadRequest("attachment cannot be empty".into()));
-        }
-        file.flush().await.map_err(|error| AppError::ServiceUnavailable(format!("could not store attachment: {error}")))?;
-        sqlx::query(
-            "INSERT INTO attachments
-             (id,user_id,conversation_id,original_name,mime_type,size_bytes,storage_path,access_token_hash)
-             VALUES (?,?,?,?,?,?,?,?)",
-        )
-        .bind(&id)
-        .bind(&user_id)
-        .bind(&conversation_id)
-        .bind(&name)
-        .bind(&mime_type)
-        .bind(size as i64)
-        .bind(storage_path.to_string_lossy().as_ref())
-        .bind(hash_token(&access_token))
-        .execute(&mut *transaction)
-        .await?;
-
-        let download_url = format!(
-            "{}/api/v1/attachments/{id}/download",
-            state.public_url.trim_end_matches('/')
-        );
-        items.push(Attachment {
-            id,
-            name,
-            mime_type,
-            size: size as i64,
-            download_url,
-        });
-    }
-    if items.is_empty() {
-        return Err(AppError::BadRequest("no files uploaded".into()));
-    }
-    Ok(AttachmentUploadResponse { items })
-    }.await;
-    let response = match result {
-        Ok(response) => response,
-        Err(error) => {
-            for path in stored_paths {
-                let _ = tokio::fs::remove_file(path).await;
-            }
-            return Err(error);
-        }
-    };
-    if let Some(key) = idempotency_key {
-        if let Err(error) = sqlx::query(
-            "INSERT INTO attachment_uploads
-             (user_id,conversation_id,idempotency_key,response_json)
-             VALUES (?,?,?,?)",
-        )
-        .bind(&user_id)
-        .bind(&conversation_id)
-        .bind(key)
-        .bind(
-            serde_json::to_string(&response)
-                .map_err(|_| AppError::BadRequest("invalid upload response".into()))?,
-        )
-        .execute(&mut *transaction)
-        .await
-        {
-            for path in stored_paths {
-                let _ = tokio::fs::remove_file(path).await;
-            }
-            return Err(AppError::from(error));
-        }
-    }
-    if let Err(error) = transaction.commit().await {
-        for path in stored_paths {
-            let _ = tokio::fs::remove_file(path).await;
-        }
-        return Err(AppError::from(error));
-    }
-    Ok(Json(response))
-}
-
-async fn canonical_attachment(
-    state: &AppState,
-    user_id: &str,
-    conversation_id: &str,
-    attachment: &AttachmentInput,
-) -> Result<Attachment, AppError> {
-    let row = sqlx::query_as::<_, (String, String, i64, String)>(
-        "SELECT original_name,mime_type,size_bytes,conversation_id
-         FROM attachments WHERE id=? AND user_id=?",
-    )
-    .bind(&attachment.id)
-    .bind(user_id)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| AppError::BadRequest("attachment is not owned by this user".into()))?;
-    if row.3 != conversation_id {
-        return Err(AppError::BadRequest(
-            "attachment does not belong to this conversation".into(),
-        ));
-    }
-    Ok(Attachment {
-        id: attachment.id.clone(),
-        name: row.0,
-        mime_type: row.1,
-        size: row.2,
-        download_url: format!(
-            "{}/api/v1/attachments/{}/download",
-            state.public_url.trim_end_matches('/'),
-            attachment.id
-        ),
-    })
-}
-
-fn attachment_download_token<'a>(
-    public_url: &str,
-    id: &str,
-    download_url: &'a str,
-) -> Option<&'a str> {
-    let prefix = format!(
-        "{}/api/v1/attachments/{id}/download?token=",
-        public_url.trim_end_matches('/')
-    );
-    download_url
-        .strip_prefix(&prefix)
-        .filter(|token| !token.is_empty() && !token.contains('&'))
-}
-
-async fn download_attachment(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-    Query(query): Query<DownloadQuery>,
-) -> Result<Response, AppError> {
-    let row = sqlx::query_as::<_, (String, String, String, String)>(
-        "SELECT user_id,mime_type,storage_path,access_token_hash
-         FROM attachments WHERE id=?",
-    )
-    .bind(&id)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or(AppError::NotFound)?;
-    let session_user = authenticated_user_or_agent(&headers, &state).await.ok();
-    let token_valid = query
-        .token
-        .as_deref()
-        .is_some_and(|token| hash_token(token) == row.3);
-    if session_user.as_deref() != Some(row.0.as_str()) && !token_valid {
-        return Err(AppError::Unauthorized);
-    }
-    let root = tokio::fs::canonicalize(&state.upload_dir)
-        .await
-        .map_err(|_| AppError::NotFound)?;
-    let path = tokio::fs::canonicalize(&row.2)
-        .await
-        .map_err(|_| AppError::NotFound)?;
-    if !path.starts_with(&root) {
-        return Err(AppError::NotFound);
-    }
-    let bytes = tokio::fs::read(path)
-        .await
-        .map_err(|_| AppError::NotFound)?;
-    Ok((
-        [(axum::http::header::CONTENT_TYPE, row.1)],
-        Body::from(bytes),
-    )
-        .into_response())
-}
-
 async fn list_tasks(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -2355,13 +1802,15 @@ async fn update_child_completion(
             let child = fetch_task(&mut **tx, user_id, &child_id).await?;
             append_event(
                 &mut **tx,
-                user_id,
-                "task",
-                &child_id,
-                "upsert",
-                child.version,
-                Some(serde_json::to_string(&child).unwrap()),
-                None,
+                AppendEvent {
+                    user_id,
+                    entity_type: "task",
+                    entity_id: &child_id,
+                    operation: "upsert",
+                    entity_version: child.version,
+                    payload_json: Some(serde_json::to_string(&child).unwrap()),
+                    mutation_id: None,
+                },
             )
             .await?;
         }
@@ -2408,13 +1857,15 @@ async fn reconcile_parent_completion(
         let updated_parent = fetch_task(&mut **tx, user_id, parent_id).await?;
         append_event(
             &mut **tx,
-            user_id,
-            "task",
-            parent_id,
-            "upsert",
-            updated_parent.version,
-            Some(serde_json::to_string(&updated_parent).unwrap()),
-            None,
+            AppendEvent {
+                user_id,
+                entity_type: "task",
+                entity_id: parent_id,
+                operation: "upsert",
+                entity_version: updated_parent.version,
+                payload_json: Some(serde_json::to_string(&updated_parent).unwrap()),
+                mutation_id: None,
+            },
         )
         .await?;
     }
@@ -2451,13 +1902,15 @@ async fn soft_delete_children(
         .await?;
         append_event(
             &mut **tx,
-            user_id,
-            "task",
-            &child_id,
-            "delete",
-            version + 1,
-            None,
-            None,
+            AppendEvent {
+                user_id,
+                entity_type: "task",
+                entity_id: &child_id,
+                operation: "delete",
+                entity_version: version + 1,
+                payload_json: None,
+                mutation_id: None,
+            },
         )
         .await?;
     }
@@ -2552,13 +2005,15 @@ async fn create_task(
     update_child_completion(&mut tx, &user_id, &task, false).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "task",
-        &id,
-        "upsert",
-        task.version,
-        Some(serde_json::to_string(&task).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "task",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: task.version,
+            payload_json: Some(serde_json::to_string(&task).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -2675,13 +2130,15 @@ async fn update_task(
     update_child_completion(&mut tx, &user_id, &task, was_completed).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "task",
-        &id,
-        "upsert",
-        task.version,
-        Some(serde_json::to_string(&task).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "task",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: task.version,
+            payload_json: Some(serde_json::to_string(&task).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -2719,13 +2176,15 @@ async fn delete_task(
     }
     append_event(
         &mut *tx,
-        &user_id,
-        "task",
-        &id,
-        "delete",
-        task.version + 1,
-        None,
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "task",
+            entity_id: &id,
+            operation: "delete",
+            entity_version: task.version + 1,
+            payload_json: None,
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     if let Some(parent_id) = task.parent_task_id.as_deref() {
@@ -2868,13 +2327,15 @@ async fn create_project(
     let project = fetch_project(&mut *tx, &user_id, &id).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "project",
-        &id,
-        "upsert",
-        project.version,
-        Some(serde_json::to_string(&project).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "project",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: project.version,
+            payload_json: Some(serde_json::to_string(&project).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -2922,13 +2383,15 @@ async fn update_project(
     let project = fetch_project(&mut *tx, &user_id, &id).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "project",
-        &id,
-        "upsert",
-        project.version,
-        Some(serde_json::to_string(&project).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "project",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: project.version,
+            payload_json: Some(serde_json::to_string(&project).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3034,25 +2497,29 @@ async fn delete_project(
     for (milestone_id, version) in milestones {
         append_event(
             &mut *tx,
-            &user_id,
-            "project_milestone",
-            &milestone_id,
-            "delete",
-            version + 1,
-            None,
-            None,
+            AppendEvent {
+                user_id: &user_id,
+                entity_type: "project_milestone",
+                entity_id: &milestone_id,
+                operation: "delete",
+                entity_version: version + 1,
+                payload_json: None,
+                mutation_id: None,
+            },
         )
         .await?;
     }
     append_event(
         &mut *tx,
-        &user_id,
-        "project",
-        &id,
-        "delete",
-        project.version + 1,
-        None,
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "project",
+            entity_id: &id,
+            operation: "delete",
+            entity_version: project.version + 1,
+            payload_json: None,
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3412,13 +2879,15 @@ async fn create_milestone(
     let milestone = fetch_milestone(&mut *tx, &user_id, &project_id, &id).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "project_milestone",
-        &id,
-        "upsert",
-        milestone.version,
-        Some(serde_json::to_string(&milestone).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "project_milestone",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: milestone.version,
+            payload_json: Some(serde_json::to_string(&milestone).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3482,13 +2951,15 @@ async fn update_milestone(
     let milestone = fetch_milestone(&mut *tx, &user_id, &project_id, &id).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "project_milestone",
-        &id,
-        "upsert",
-        milestone.version,
-        Some(serde_json::to_string(&milestone).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "project_milestone",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: milestone.version,
+            payload_json: Some(serde_json::to_string(&milestone).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3522,13 +2993,15 @@ async fn delete_milestone(
     }
     append_event(
         &mut *tx,
-        &user_id,
-        "project_milestone",
-        &id,
-        "delete",
-        current.version + 1,
-        None,
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "project_milestone",
+            entity_id: &id,
+            operation: "delete",
+            entity_version: current.version + 1,
+            payload_json: None,
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3661,13 +3134,15 @@ async fn create_event(
     let event = fetch_event(&mut *tx, &user_id, &id).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "calendar_event",
-        &id,
-        "upsert",
-        event.version,
-        Some(serde_json::to_string(&event).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "calendar_event",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: event.version,
+            payload_json: Some(serde_json::to_string(&event).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3706,13 +3181,15 @@ async fn update_event(
     let event = fetch_event(&mut *tx, &user_id, &id).await?;
     append_event(
         &mut *tx,
-        &user_id,
-        "calendar_event",
-        &id,
-        "upsert",
-        event.version,
-        Some(serde_json::to_string(&event).unwrap()),
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "calendar_event",
+            entity_id: &id,
+            operation: "upsert",
+            entity_version: event.version,
+            payload_json: Some(serde_json::to_string(&event).unwrap()),
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     tx.commit().await?;
@@ -3741,13 +3218,15 @@ async fn delete_event(
     }
     append_event(
         &mut *tx,
-        &user_id,
-        "calendar_event",
-        &id,
-        "delete",
-        event.version + 1,
-        None,
-        mutation_id(&headers),
+        AppendEvent {
+            user_id: &user_id,
+            entity_type: "calendar_event",
+            entity_id: &id,
+            operation: "delete",
+            entity_version: event.version + 1,
+            payload_json: None,
+            mutation_id: mutation_id(&headers),
+        },
     )
     .await?;
     // Keep the schedule tombstone ahead of its child tombstones for clients
@@ -3921,8 +3400,8 @@ mod attachment_tests {
     #[test]
     fn attachment_limits_cover_single_total_and_count() {
         assert_eq!(MAX_ATTACHMENT_BYTES, 20 * 1024 * 1024);
-        assert!(MAX_TOTAL_ATTACHMENT_BYTES >= MAX_ATTACHMENT_BYTES);
-        assert!(MAX_ATTACHMENT_REQUEST_BYTES > MAX_TOTAL_ATTACHMENT_BYTES);
+        const { assert!(MAX_TOTAL_ATTACHMENT_BYTES >= MAX_ATTACHMENT_BYTES) };
+        const { assert!(MAX_ATTACHMENT_REQUEST_BYTES > MAX_TOTAL_ATTACHMENT_BYTES) };
         assert_eq!(MAX_ATTACHMENT_COUNT, 10);
     }
 
@@ -4347,13 +3826,15 @@ mod attachment_tests {
         .unwrap();
         append_event(
             &mut *tx,
-            "user-1",
-            "task",
-            "parent",
-            "delete",
-            parent.version + 1,
-            None,
-            None,
+            AppendEvent {
+                user_id: "user-1",
+                entity_type: "task",
+                entity_id: "parent",
+                operation: "delete",
+                entity_version: parent.version + 1,
+                payload_json: None,
+                mutation_id: None,
+            },
         )
         .await
         .unwrap();
@@ -4377,13 +3858,15 @@ mod attachment_tests {
         .unwrap();
         append_event(
             &mut *tx,
-            "user-1",
-            "calendar_event",
-            "schedule-1",
-            "delete",
-            schedule_version + 1,
-            None,
-            None,
+            AppendEvent {
+                user_id: "user-1",
+                entity_type: "calendar_event",
+                entity_id: "schedule-1",
+                operation: "delete",
+                entity_version: schedule_version + 1,
+                payload_json: None,
+                mutation_id: None,
+            },
         )
         .await
         .unwrap();
@@ -4470,3 +3953,9 @@ mod attachment_tests {
 
 #[cfg(test)]
 mod conversation_routing_tests;
+
+#[cfg(test)]
+mod auth_tests;
+
+#[cfg(test)]
+mod attachments_tests;

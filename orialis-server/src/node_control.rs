@@ -1147,10 +1147,8 @@ async fn expire_node_leases(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 json!({"status":"offline","observedAt":rfc3339(expired_at)}),
             )
             .await
-            .map_err(|error| match error {
-                NodeError { .. } => {
-                    sqlx::Error::Protocol("failed to persist node presence event".into())
-                }
+            .map_err(|NodeError { .. }| {
+                sqlx::Error::Protocol("failed to persist node presence event".into())
             })?;
         }
     }

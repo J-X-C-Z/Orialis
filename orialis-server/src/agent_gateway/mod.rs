@@ -56,7 +56,7 @@ pub(crate) fn server_hello_ack() -> protocol::GatewayMessage {
 
 #[derive(Debug)]
 pub(crate) enum AgentCommand {
-    Send(GatewayMessage),
+    Send(Box<GatewayMessage>),
     Close,
 }
 
@@ -267,7 +267,11 @@ impl AgentRegistry {
             );
             command_tx
         };
-        if command_tx.send(AgentCommand::Send(message)).await.is_err() {
+        if command_tx
+            .send(AgentCommand::Send(Box::new(message)))
+            .await
+            .is_err()
+        {
             self.pending_remove(&message_id).await;
             return Err(RegistryError::ConnectionClosed);
         }
@@ -463,9 +467,7 @@ impl AgentRegistry {
         device_id: &str,
         message: GatewayMessage,
     ) -> Option<GatewayMessage> {
-        if message.event_metadata().is_none() {
-            return None;
-        }
+        message.event_metadata()?;
         let mut state = self.state.lock().await;
         let events = state.events.entry(device_id.to_owned()).or_default();
         events.next_outbound_seq = events.next_outbound_seq.saturating_add(1).max(1);
@@ -521,7 +523,7 @@ impl AgentRegistry {
             (connection_command_tx, event)
         };
         command_tx
-            .send(AgentCommand::Send(event.clone()))
+            .send(AgentCommand::Send(Box::new(event.clone())))
             .await
             .map_err(|_| RegistryError::ConnectionClosed)?;
         Ok(event)

@@ -469,7 +469,7 @@ async fn run_session_command(
         &state.agent,
         user_id,
         device_id.as_deref(),
-        send(format!("{request_id}"), command.to_owned()),
+        send(request_id.to_owned(), command.to_owned()),
     )
     .await?;
     let content = match first {
@@ -600,12 +600,15 @@ mod session_control_tests {
                 .await
                 .unwrap()
                 .unwrap();
-            let AgentCommand::Send(GatewayMessage::MessageSend {
+            let AgentCommand::Send(message) = command else {
+                panic!("wrong command")
+            };
+            let GatewayMessage::MessageSend {
                 message_id,
                 conversation_id,
                 content: sent,
                 ..
-            }) = command
+            } = *message
             else {
                 panic!("wrong command")
             };
