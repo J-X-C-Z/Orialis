@@ -446,6 +446,7 @@ pub(super) async fn delete_project(
          WHERE project_id=? AND deleted_at IS NULL",
     )
     .bind(&timestamp)
+    .bind(&timestamp)
     .bind(&id)
     .execute(&mut *tx)
     .await?;

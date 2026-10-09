@@ -518,13 +518,12 @@ async fn project_delete_rolls_back_after_child_events_then_preserves_tombstone_o
     .fetch_all(&server.pool)
     .await
     .unwrap();
-    // Fire only at the parent's event INSERT, after the parent row update
-    // and both child events. A pre-write rejection cannot pass. The current
-    // child UPDATE has an unbound third parameter and changes no child rows;
-    // preserve that baseline behavior in this extraction rather than fixing it.
+    // Fire only at the parent's event INSERT, after the parent and both child
+    // row updates and both child events. A pre-write rejection cannot pass.
     sqlx::query("CREATE TRIGGER fail_parent_delete BEFORE INSERT ON sync_events
         WHEN NEW.entity_type='project' AND NEW.operation='delete'
         AND (SELECT COUNT(*) FROM projects WHERE id='cascade' AND deleted_at IS NOT NULL AND version=2)=1
+        AND (SELECT COUNT(*) FROM project_milestones WHERE project_id='cascade' AND deleted_at IS NOT NULL AND version=2)=2
         AND (SELECT COUNT(*) FROM sync_events WHERE entity_type='project_milestone' AND operation='delete')=2
         BEGIN SELECT RAISE(ABORT, 'injected after child writes'); END")
         .execute(&server.pool).await.unwrap();
@@ -566,6 +565,26 @@ async fn project_delete_rolls_back_after_child_events_then_preserves_tombstone_o
             204,
         )
         .await;
+    let parent: (i64, String, Option<String>) =
+        sqlx::query_as("SELECT version,updated_at,deleted_at FROM projects WHERE id='cascade'")
+            .fetch_one(&server.pool)
+            .await
+            .unwrap();
+    let children: Vec<(String, i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT id,version,updated_at,deleted_at FROM project_milestones ORDER BY id",
+    )
+    .fetch_all(&server.pool)
+    .await
+    .unwrap();
+    assert_eq!(parent.0, 2);
+    assert_eq!(parent.2.as_deref(), Some(parent.1.as_str()));
+    assert_eq!(children.len(), before_children.len());
+    for (child, before) in children.iter().zip(&before_children) {
+        assert_eq!(child.0, before.0);
+        assert_eq!(child.1, before.1 + 1);
+        assert_eq!(child.2, parent.1);
+        assert_eq!(child.3, parent.2);
+    }
     let events = server.events().await;
     let deleted = &events[before_events.len()..];
     assert_eq!(deleted.len(), 3);
