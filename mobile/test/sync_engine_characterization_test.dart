@@ -38,6 +38,8 @@ class CharacterizationApi extends OrialisApiClient {
   int snapshotCalls = 0;
   int eventCalls = 0;
   final calls = <String>[];
+  final conversationStarted = Completer<void>();
+  final scheduleStarted = Completer<void>();
   Completer<void>? conversationGate;
   Completer<void>? scheduleGate;
 
@@ -50,6 +52,7 @@ class CharacterizationApi extends OrialisApiClient {
     bool pinned = false,
   }) async {
     calls.add('conversation-start');
+    if (!conversationStarted.isCompleted) conversationStarted.complete();
     await conversationGate?.future;
     calls.add('conversation-finish');
     return {'version': 1};
@@ -61,6 +64,7 @@ class CharacterizationApi extends OrialisApiClient {
     String mutationId,
   ) async {
     calls.add('schedule-start');
+    if (!scheduleStarted.isCompleted) scheduleStarted.complete();
     await scheduleGate?.future;
     calls.add('schedule-finish');
     return {'version': 1};
@@ -158,7 +162,7 @@ void main() {
               title: 'Local',
               createdAt: now,
               updatedAt: now,
-              syncStatus: Value('pendingCreate'),
+              syncStatus: const Value('pendingCreate'),
             ),
           );
       await database
@@ -171,7 +175,7 @@ void main() {
               endAt: now,
               createdAt: now,
               updatedAt: now,
-              syncStatus: Value('pendingCreate'),
+              syncStatus: const Value('pendingCreate'),
             ),
           );
       final engine = SyncEngine(
@@ -181,7 +185,17 @@ void main() {
       );
 
       final run = engine.syncOnce();
-      await Future<void>.delayed(Duration.zero);
+      addTearDown(() async {
+        if (!api.conversationGate!.isCompleted) {
+          api.conversationGate!.complete();
+        }
+        if (!api.scheduleGate!.isCompleted) api.scheduleGate!.complete();
+        await run.timeout(const Duration(seconds: 10));
+      });
+      await Future.wait([
+        api.conversationStarted.future,
+        api.scheduleStarted.future,
+      ]).timeout(const Duration(seconds: 10));
       expect(api.calls.toSet(), {'conversation-start', 'schedule-start'});
       expect(api.snapshotCalls, 0);
       api.scheduleGate!.complete();
