@@ -301,9 +301,16 @@ class SyncEngine {
   /// A missing conversation is an expected outcome for stale local history.
   /// Other HTTP failures remain fatal so authentication and connectivity are
   /// still surfaced by the outer sync state handling.
+  bool isIgnorableMessageFetchStatus(int? statusCode) => statusCode == 404;
+
+  bool isIgnorableMessageCreateStatus(int? statusCode) => statusCode == 404;
 
   /// A 409 from createMessage is only an idempotent replay when the remote
   /// conversation actually contains this message id.
+  bool remoteContainsMessage(
+    Iterable<Map<String, dynamic>> remote,
+    String messageId,
+  ) => remote.any((value) => value['id'] == messageId);
 
   bool _isRetryableTransportError(DioException error) {
     if (error.response == null) return true;
@@ -324,6 +331,29 @@ class SyncEngine {
     }
     return true;
   }
+
+  Future<void> _requireCapabilities(Set<String> required) async {
+    if (required.isEmpty) return;
+    var capabilities = _serverCapabilities;
+    if (capabilities == null) {
+      capabilities = await (await _resolveApi()).capabilities();
+      _serverCapabilities = capabilities;
+    }
+    final missing = required
+        .where((item) => !capabilities!.contains(item))
+        .toSet();
+    if (missing.isNotEmpty) {
+      throw StateError(
+        'server does not support required capability: ${missing.join(', ')}',
+      );
+    }
+  }
+
+  String _operationFor(String status) => switch (status) {
+    'pendingCreate' => 'create',
+    'pendingDelete' => 'delete',
+    _ => 'update',
+  };
 
   Future<int> _readCursor() async {
     final row = await (database.select(

@@ -178,23 +178,6 @@ extension TaskScheduleSyncHandler on SyncEngine {
     await _requireCapabilities(required);
   }
 
-  Future<void> _requireCapabilities(Set<String> required) async {
-    if (required.isEmpty) return;
-    var capabilities = _serverCapabilities;
-    if (capabilities == null) {
-      capabilities = await (await _resolveApi()).capabilities();
-      _serverCapabilities = capabilities;
-    }
-    final missing = required
-        .where((item) => !capabilities!.contains(item))
-        .toSet();
-    if (missing.isNotEmpty) {
-      throw StateError(
-        'server does not support required capability: ${missing.join(', ')}',
-      );
-    }
-  }
-
   String? _associationFrom(
     Map<String, dynamic> value,
     String camelKey,
@@ -299,12 +282,6 @@ extension TaskScheduleSyncHandler on SyncEngine {
       );
     }
   }
-
-  String _operationFor(String status) => switch (status) {
-    'pendingCreate' => 'create',
-    'pendingDelete' => 'delete',
-    _ => 'update',
-  };
 
   Map<String, dynamic> _taskPayload(Task task) => {
     'id': task.id,

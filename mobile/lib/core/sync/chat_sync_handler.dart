@@ -325,13 +325,4 @@ extension ChatSyncHandler on SyncEngine {
       }
     }
   }
-
-  bool isIgnorableMessageFetchStatus(int? statusCode) => statusCode == 404;
-
-  bool isIgnorableMessageCreateStatus(int? statusCode) => statusCode == 404;
-
-  bool remoteContainsMessage(
-    Iterable<Map<String, dynamic>> remote,
-    String messageId,
-  ) => remote.any((value) => value['id'] == messageId);
 }
