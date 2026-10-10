@@ -523,4 +523,174 @@ extension TaskScheduleSyncHandler on SyncEngine {
     }
     return jsonEncode({'rule': value['rule'], 'until': value['until']});
   }
+
+  Future<void> _applyTaskScheduleEvent(
+    Map<String, dynamic> event,
+    String entityType,
+    String entityId,
+    int entityVersion,
+    String operation,
+    String? payload,
+  ) async {
+    if (operation == 'delete' && entityType == 'task') {
+      final existing = await (database.select(
+        database.tasks,
+      )..where((row) => row.id.equals(entityId))).getSingleOrNull();
+      if (!shouldApplyRemote(
+        existing?.syncStatus,
+        existing?.remoteVersion,
+        entityVersion,
+      )) {
+        return;
+      }
+      await _cascadeLocalChildren(
+        parentId: entityId,
+        deletedAt: event['createdAt'] as String,
+      );
+      await (database.update(
+        database.tasks,
+      )..where((row) => row.id.equals(entityId))).write(
+        TasksCompanion(
+          deletedAt: Value(event['createdAt'] as String),
+          updatedAt: Value(event['createdAt'] as String),
+          version: Value(entityVersion),
+          remoteVersion: Value(entityVersion),
+          syncStatus: const Value('synced'),
+        ),
+      );
+    } else if (operation == 'delete' && entityType == 'calendar_event') {
+      final existing = await (database.select(
+        database.calendarEvents,
+      )..where((row) => row.id.equals(entityId))).getSingleOrNull();
+      if (!shouldApplyRemote(
+        existing?.syncStatus,
+        existing?.remoteVersion,
+        entityVersion,
+      )) {
+        return;
+      }
+      await _cascadeLocalChildren(
+        scheduleId: entityId,
+        deletedAt: event['createdAt'] as String,
+      );
+      await (database.update(
+        database.calendarEvents,
+      )..where((row) => row.id.equals(entityId))).write(
+        CalendarEventsCompanion(
+          deletedAt: Value(event['createdAt'] as String),
+          updatedAt: Value(event['createdAt'] as String),
+          version: Value(entityVersion),
+          remoteVersion: Value(entityVersion),
+          syncStatus: const Value('synced'),
+        ),
+      );
+    } else if (entityType == 'task' &&
+        operation == 'upsert' &&
+        payload != null) {
+      final value = jsonDecode(payload) as Map<String, dynamic>;
+      final id = value['id'] as String;
+      final existing = await (database.select(
+        database.tasks,
+      )..where((row) => row.id.equals(id))).getSingleOrNull();
+      if (!shouldApplyRemote(
+        existing?.syncStatus,
+        existing?.remoteVersion,
+        entityVersion,
+      )) {
+        if (existing != null &&
+            await _reconcileDerivedCompletionEvent(
+              id,
+              entityVersion,
+              value,
+              existing,
+            )) {
+          return;
+        }
+        return;
+      }
+      await database
+          .into(database.tasks)
+          .insertOnConflictUpdate(
+            TasksCompanion.insert(
+              manualPosition: Value((value['manualPosition'] as num?)?.toInt()),
+              id: id,
+              title: value['title'] as String,
+              notes: Value(value['notes'] as String?),
+              due: Value(value['due'] as String?),
+              dueTime: Value(value['dueTime'] as String?),
+              completedAt: Value(value['completedAt'] as String?),
+              reminderMinutes: Value(
+                (value['reminderMinutes'] as num?)?.toInt(),
+              ),
+              projectId: Value(value['projectId'] as String?),
+              parentTaskId: Value(
+                _optionalAssociation(
+                  value,
+                  'parent_task_id',
+                  'parentTaskId',
+                  existing?.parentTaskId,
+                ),
+              ),
+              scheduleId: Value(
+                _optionalAssociation(
+                  value,
+                  'schedule_id',
+                  'scheduleId',
+                  existing?.scheduleId,
+                ),
+              ),
+              recurrence: Value(_recurrenceJson(value['recurrence'])),
+              important: Value(value['important'] as bool?),
+              urgent: Value(value['urgent'] as bool?),
+              completed: Value(value['completed'] as bool? ?? false),
+              version: Value((value['version'] as num?)?.toInt() ?? 1),
+              remoteVersion: Value((value['version'] as num?)?.toInt() ?? 1),
+              deletedAt: Value(value['deletedAt'] as String?),
+              createdAt: value['createdAt'] as String,
+              updatedAt: value['updatedAt'] as String,
+              syncStatus: const Value('synced'),
+            ),
+          );
+    } else if (entityType == 'calendar_event' &&
+        operation == 'upsert' &&
+        payload != null) {
+      final value = jsonDecode(payload) as Map<String, dynamic>;
+      final id = value['id'] as String;
+      final existing = await (database.select(
+        database.calendarEvents,
+      )..where((row) => row.id.equals(id))).getSingleOrNull();
+      if (!shouldApplyRemote(
+        existing?.syncStatus,
+        existing?.remoteVersion,
+        entityVersion,
+      )) {
+        return;
+      }
+      await database
+          .into(database.calendarEvents)
+          .insertOnConflictUpdate(
+            CalendarEventsCompanion.insert(
+              id: id,
+              title: value['title'] as String,
+              description: Value(value['description'] as String?),
+              location: Value(value['location'] as String?),
+              startAt: value['startAt'] as String,
+              endAt: value['endAt'] as String,
+              allDay: Value(value['allDay'] as bool? ?? false),
+              important: Value(
+                value['important'] as bool? ?? existing?.important ?? false,
+              ),
+              reminderMinutes: Value(
+                (value['reminderMinutes'] as num?)?.toInt(),
+              ),
+              version: Value((value['version'] as num?)?.toInt() ?? 1),
+              remoteVersion: Value((value['version'] as num?)?.toInt() ?? 1),
+              deletedAt: Value(value['deletedAt'] as String?),
+              createdAt: value['createdAt'] as String,
+              updatedAt: value['updatedAt'] as String,
+              syncStatus: const Value('synced'),
+            ),
+          );
+    }
+  }
 }
