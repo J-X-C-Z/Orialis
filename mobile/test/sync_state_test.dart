@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:orialis_mobile/core/presentation/sync_state_presentation.dart';
 import 'package:orialis_mobile/core/sync/sync_engine.dart';
 import 'package:orialis_mobile/core/config/app_config.dart';
 import 'package:orialis_mobile/core/database/app_database.dart';
@@ -7,12 +8,20 @@ import 'package:drift/native.dart';
 
 void main() {
   test('sync states expose clear user-facing copy', () {
-    expect(SyncState.idle.label, '已同步');
-    expect(SyncState.offline.message, contains('本地修改'));
-    expect(SyncState.conflict.label, '需要处理');
-    expect(SyncState.conflict.message, contains('已保留'));
-    expect(SyncState.authRequired.message, contains('重新登录'));
-    expect(SyncState.error.message, contains('重试'));
+    expect(
+      {
+        for (final state in SyncState.values)
+          state: [state.label, state.message],
+      },
+      {
+        SyncState.idle: ['已同步', '本地内容已与服务器保持一致。'],
+        SyncState.syncing: ['同步中', '正在上传本地修改并获取最新内容。'],
+        SyncState.offline: ['等待联网', '当前无法连接服务器，本地修改会继续保留。'],
+        SyncState.authRequired: ['需要登录', '登录状态已失效，请重新登录后再同步；本地修改仍然保留。'],
+        SyncState.conflict: ['需要处理', '发现版本冲突，本地修改已保留，不会被静默覆盖。'],
+        SyncState.error: ['同步失败', '同步没有完成，请稍后重试；本地修改仍然保留。'],
+      },
+    );
   });
 
   test('remote state never overwrites a queued local mutation', () {

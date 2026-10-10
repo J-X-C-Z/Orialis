@@ -1,4 +1,4 @@
-part of 'sync_engine.dart';
+import '../sync/sync_engine.dart';
 
 extension SyncStatePresentation on SyncState {
   String get label => switch (this) {

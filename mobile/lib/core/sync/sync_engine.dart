@@ -12,7 +12,6 @@ import 'outbox_store.dart';
 part 'project_sync_handler.dart';
 part 'chat_sync_handler.dart';
 part 'task_schedule_sync_handler.dart';
-part 'sync_state_presentation.dart';
 
 enum SyncState { idle, syncing, offline, authRequired, conflict, error }
 

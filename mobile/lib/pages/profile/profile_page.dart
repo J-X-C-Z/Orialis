@@ -13,6 +13,7 @@ import 'package:orialis_mobile/app/design/lumina_compat.dart'
 import '../shared/page_parts.dart';
 import '../../core/config/app_config.dart';
 import '../../core/network/orialis_api_client.dart';
+import '../../core/presentation/sync_state_presentation.dart';
 import '../../core/sync/sync_engine.dart';
 
 class ProfilePage extends ConsumerStatefulWidget {
