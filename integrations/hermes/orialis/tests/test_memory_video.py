@@ -8,6 +8,7 @@ import struct
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from PIL import Image
 
@@ -58,6 +59,86 @@ class FakeHTTP:
 
 
 class VideoEvidenceTests(unittest.TestCase):
+    def test_wbi_search_uses_public_nav_keys_and_sdk_compatible_signature(self):
+        def fetch(url, **kwargs):
+            if "/nav?" in url:
+                data = {"wbi_img": {"img_url": "https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png",
+                                    "sub_url": "https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png"}}
+            else:
+                query = parse_qs(urlsplit(url).query)
+                # Golden scalar-parameter signature checked against SDK 17.4.1.
+                self.assertEqual(query["w_rid"], ["8745916ae8b9bb9be5a888fdf02b7eb0"])
+                self.assertEqual(query["keyword"], ["人工智能 示例UP"])
+                data = {"result": []}
+            return json.dumps({"code": 0, "data": data}).encode(), url
+        with patch("integrations.hermes.orialis.memory_video.load_bili_credentials", return_value={}), \
+             patch("integrations.hermes.orialis.memory_video.time.time", return_value=1702204169):
+            http = PublicBiliHTTP()
+            http.fetch = fetch
+            self.assertEqual(http.data("/x/web-interface/wbi/search/type", {
+                "keyword": "人工智能 示例UP", "search_type": "video", "page": 1, "page_size": 20,
+            }), {"result": []})
+
+    def search_reader(self, results, *, owner="示例UP", title="人工智能模型演示视频"):
+        http = FakeHTTP()
+        original = http.data
+        def data(path, params):
+            if path.endswith("/search/type"):
+                http.calls.append((path, params))
+                return {"result": results}
+            value = original(path, params)
+            if path.endswith("/view"):
+                value.update(owner={"name": owner}, title=title)
+            return value
+        http.data = data
+        return http
+
+    def test_visible_title_and_uploader_resolve_a_verified_video_without_a_url(self):
+        http = self.search_reader([{"bvid": BVID, "author": "示例UP", "title": "<em class=\"keyword\">人工智能</em>模型演示视频"}])
+        result = collect_video([], search_title="人工智能模型演示视频", search_uploader="示例UP", http=http)
+        self.assertEqual(result.source_url, f"https://www.bilibili.com/video/{BVID}")
+        self.assertEqual(result.status, "analyzed")
+        self.assertTrue(result.captions)
+        self.assertEqual(result.metadata["matchedBy"], "visible_title_and_uploader")
+        params = next(params for path, params in http.calls if path.endswith("/search/type"))
+        self.assertEqual(params["search_type"], "video")
+        self.assertIn("示例UP", params["keyword"])
+
+    def test_ambiguous_or_wrong_uploader_results_never_fetch_video_content(self):
+        match = {"bvid": BVID, "author": "示例UP", "title": "人工智能模型演示视频"}
+        for rows in [[{**match, "author": "另一位UP"}],
+                     [match, {**match, "bvid": "BV1xx411c7mD"}],
+                     [{**match, "title": "另一个人工智能演示"}]]:
+            with self.subTest(rows=rows):
+                http = self.search_reader(rows)
+                result = collect_video([], search_title=match["title"], search_uploader=match["author"], http=http)
+                self.assertEqual(result.status, "unavailable")
+                self.assertIsNone(result.source_url)
+                self.assertFalse(any(path == "/x/web-interface/view" for path, _ in http.calls))
+
+    def test_search_match_is_checked_against_actual_video_owner(self):
+        http = self.search_reader([{"bvid": BVID, "author": "示例UP", "title": "人工智能模型演示视频"}], owner="另一位UP")
+        result = collect_video([], search_title="人工智能模型演示视频", search_uploader="示例UP", http=http)
+        self.assertEqual(result.status, "unavailable")
+        self.assertIn("不一致", result.error)
+        self.assertFalse(result.captions or result.frames)
+
+    def test_original_video_url_takes_precedence_over_search_hints(self):
+        http = FakeHTTP()
+        result = collect_video([URL], search_title="另一个视频的标题", search_uploader="另一个UP", http=http)
+        self.assertEqual(result.source_url, URL)
+        self.assertFalse(any(path.endswith("/search/type") for path, _ in http.calls))
+
+    def test_only_explicitly_truncated_long_titles_may_use_prefix_matching(self):
+        title = "这是一个足够长的人工智能模型演示视频完整版"
+        row = {"bvid": BVID, "author": "示例UP", "title": title}
+        for observed, expected in [("这是一个足够长的人工智能模型演示…", "analyzed"),
+                                   ("这是一个足够长的人工智能模型演示", "unavailable"),
+                                   ("模型…", "unavailable")]:
+            with self.subTest(observed=observed):
+                result = collect_video([], search_title=observed, search_uploader="示例UP", http=self.search_reader([row], title=title))
+                self.assertEqual(result.status, expected)
+
     def caption_track(self, body, duration=157):
         http = FakeHTTP()
         original_data, original_fetch = http.data, http.fetch

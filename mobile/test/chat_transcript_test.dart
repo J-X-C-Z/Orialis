@@ -23,6 +23,8 @@ void main() {
       '⏳ Working — 3 min',
       '⏳ Working — 3 min — terminal',
       '⏳ Working — 3 min — iteration 1/60, research_market',
+      '⏳ 正在处理——3 分钟',
+      '⏳ 正在处理——3 分钟 — 第 1/500 轮迭代, terminal',
     ]) {
       expect(classifyChatText(content), ChatTextKind.progress);
       expect(isVisibleChatMessage(_message(content)), isFalse);
@@ -37,6 +39,7 @@ void main() {
       'We can hide self-improvement review notices.',
       '💾 Self-improvement review: Memory updated',
       '⏳ Working — 3 min',
+      '⏳ 正在处理——3 分钟 — 第 1/500 轮迭代, terminal',
     ]) {
       expect(isVisibleChatMessage(_message(content, role: 'user')), isTrue);
     }
@@ -56,4 +59,19 @@ void main() {
       isTrue,
     );
   });
+  test(
+    'ordinary Chinese status mentions and actual result text stay visible',
+    () {
+      for (final content in [
+        '正在处理任务，不代表任务已经结束。',
+        '提示“⏳ 正在处理——3 分钟”只是状态。',
+        '⏳ 正在处理——3 分钟\n\n下面是实际分析结果。',
+      ]) {
+        expect(classifyChatText(content), ChatTextKind.message);
+        expect(isVisibleChatMessage(_message(content)), isTrue);
+        expect(chatWorkingLabel(content), isNull);
+      }
+      expect(chatWorkingLabel('⏳ 正在处理——15 分钟 — terminal'), '正在思考 · 15 分钟');
+    },
+  );
 }

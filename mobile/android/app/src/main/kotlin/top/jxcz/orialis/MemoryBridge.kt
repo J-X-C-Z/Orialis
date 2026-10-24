@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Build
+import android.provider.Settings
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executors
@@ -28,7 +29,13 @@ internal class MemoryBridge(private val activity: MainActivity, messenger: Binar
         channel.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
-                    "status" -> result.success(mapOf("supported" to (Build.VERSION.SDK_INT >= 21)))
+                    "status" -> result.success(mapOf("supported" to (Build.VERSION.SDK_INT >= 21),
+                        "silentCaptureSupported" to (Build.VERSION.SDK_INT >= 30),
+                        "silentCaptureEnabled" to MemoryAccessibilityService.available()))
+                    "openCaptureSettings" -> {
+                        activity.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        result.success(null)
+                    }
                     "requestAddTile" -> {
                         if (Build.VERSION.SDK_INT >= 33) activity.getSystemService(StatusBarManager::class.java)
                             .requestAddTileService(ComponentName(activity, MemoryTileService::class.java), "记住屏幕",
@@ -62,7 +69,8 @@ internal class MemoryBridge(private val activity: MainActivity, messenger: Binar
                                         "list" -> MemoryStore.list(activity).map(MemoryStore::asMap)
                                         "read" -> MemoryStore.read(activity, call.argument<String>("id") ?: "")?.let(MemoryStore::asMap)
                                         "update" -> MemoryStore.asMap(MemoryStore.update(activity, call.argument<String>("id") ?: "",
-                                            call.argument<Map<String, Any?>>("fields") ?: emptyMap<String, Any?>()))
+                                            call.argument<Map<String, Any?>>("fields") ?: emptyMap<String, Any?>(),
+                                            call.argument<String>("expectedAnalysisRequestId")))
                                         "prepareUpload" -> MemoryStore.prepareUpload(activity, call.argument<String>("id") ?: "")
                                         else -> MemoryStore.delete(activity, call.argument<String>("id") ?: "")
                                     }

@@ -23,17 +23,21 @@ class InitialResponseTests(unittest.IsolatedAsyncioTestCase):
             raw_message={"type": kind},
         )
 
-    async def test_initial_reply_precedes_processing_and_only_completion_ends_turn(self):
+    async def await_initial(self, event):
+        await self.adapter._turn_updates[event.message_id].initial_task
+
+    async def test_background_initial_reply_does_not_complete_processing(self):
         self.adapter._server_capabilities.add("agent_state")
         event = self.event()
         await self.adapter.on_processing_start(event)
+        await self.await_initial(event)
         initial = next(f for f in self.frames if f["type"] == "message.reply")
         self.assertEqual(initial["content"], "收到，我先处理一下。")
         self.assertEqual(initial["reply_to"], event.message_id)
         self.assertEqual(self.adapter._processing_status["orialis:chat"]["status"], "running")
         self.assertFalse(any(f["type"] == "agent.complete" for f in self.frames))
 
-        # Model work happens after the initial response receipt, with its anchor intact.
+        # Background initial delivery leaves the main processing anchor intact.
         self.assertEqual(self.adapter._reply_anchor("orialis:chat"), event.message_id)
         result = await self.adapter.send("orialis:chat", "分析完成，这是完整结果。")
         self.assertTrue(result.success)
@@ -49,8 +53,10 @@ class InitialResponseTests(unittest.IsolatedAsyncioTestCase):
     async def test_same_input_reuses_initial_id_but_distinct_inputs_do_not(self):
         ids = []
         for anchor in ["user-message", "user-message", "next-message"]:
-            await self.adapter.on_processing_start(self.event(anchor))
-            ids.append(self.frames[-1]["message_id"])
+            event = self.event(anchor)
+            await self.adapter.on_processing_start(event)
+            await self.await_initial(event)
+            ids.append([f for f in self.frames if f["type"] == "message.reply"][-1]["message_id"])
         self.assertEqual(ids[0], ids[1])
         self.assertNotEqual(ids[1], ids[2])
 
@@ -72,14 +78,18 @@ class InitialResponseTests(unittest.IsolatedAsyncioTestCase):
                 await original(frame)
 
         self.adapter._send_wire = drop_initial_receipt
-        await self.adapter.on_processing_start(self.event())
+        event = self.event()
+        await self.adapter.on_processing_start(event)
+        await self.await_initial(event)
         self.assertFalse(self.adapter._ack_waiters)
         self.assertEqual(self.adapter._processing_status["orialis:chat"]["status"], "running")
         self.assertTrue((await self.adapter.send("orialis:chat", "完整结果")).success)
 
     async def test_rejected_initial_reply_does_not_clear_active_turn(self):
         self.reply_status = "rejected"
-        await self.adapter.on_processing_start(self.event())
+        event = self.event()
+        await self.adapter.on_processing_start(event)
+        await self.await_initial(event)
         self.assertIn("user-message", self.adapter._active_turn_events)
         self.assertEqual(self.adapter._reply_anchor("orialis:chat"), "user-message")
         self.reply_status = "received"
@@ -100,7 +110,9 @@ class InitialResponseTests(unittest.IsolatedAsyncioTestCase):
                 await original(frame)
 
         self.adapter._send_wire = reject_once
-        await self.adapter.on_processing_start(self.event())
+        event = self.event()
+        await self.adapter.on_processing_start(event)
+        await self.await_initial(event)
         replies = [f for f in self.frames if f["type"] == "message.reply"]
         self.assertEqual(len(replies), 2)
         self.assertEqual(replies[0]["message_id"], replies[1]["message_id"])
@@ -110,6 +122,7 @@ class InitialResponseTests(unittest.IsolatedAsyncioTestCase):
         self.adapter._server_capabilities.add("agent_state")
         event = self.event()
         await self.adapter.on_processing_start(event)
+        await self.await_initial(event)
         consumer = GatewayStreamConsumer(self.adapter, "orialis:chat", initial_reply_to_id=event.message_id)
         await consumer._send_frame("", finalize=False)
         consumer._native_stream_opened = True

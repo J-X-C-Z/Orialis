@@ -14,7 +14,7 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 
-/** Account-isolated private inbox; no network calls or automatic uploads. */
+/** Account-isolated inbox for screens explicitly captured or shared by the user. */
 internal object MemoryStore {
     private fun prefs(context: Context) = context.getSharedPreferences("screen_memory_v1", 0)
     @Synchronized fun scope(context: Context): String? = prefs(context).getString("scope", null)
@@ -54,6 +54,7 @@ internal object MemoryStore {
         sharedText?.let { record.put("sharedText", it.take(64000)) }
         imagePath?.let { require(it == imageFile(context, scope, id).absolutePath); record.put("imagePath", it) }
         write(recordFile(context, scope, id), record)
+        MemoryAnalysisJobService.schedule(context)
         return record
     }
     @Synchronized fun read(context: Context, id: String): JSONObject? {
@@ -70,9 +71,11 @@ internal object MemoryStore {
         return directory(context, scope).listFiles().orEmpty().filter { it.extension == "json" }
             .mapNotNull { read(context, it.nameWithoutExtension) }.sortedByDescending { it.optString("createdAt") }
     }
-    @Synchronized fun update(context: Context, id: String, fields: Map<*, *>): JSONObject {
+    @Synchronized fun update(context: Context, id: String, fields: Map<*, *>, expectedAnalysisRequestId: String? = null): JSONObject {
         val scope = scope(context) ?: error("请先登录并打开记忆页面")
         val record = read(context, id) ?: error("记忆不存在")
+        val currentAnalysisId = if (record.isNull("analysisRequestId")) "" else record.optString("analysisRequestId")
+        check(expectedAnalysisRequestId == null || currentAnalysisId == expectedAnalysisRequestId) { "已有更新的记忆理解任务" }
         val allowed = setOf("title", "summary", "analysisStatus", "analysisConversationId", "analysisMessageId", "analysisError", "analysisRequestId", "category", "sourceUrl", "videoStatus", "videoSummary", "videoError", "note", "notes")
         for ((key, value) in fields) {
             require(key is String && key in allowed) { "Unsupported memory field" }

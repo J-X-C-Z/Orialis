@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/app.dart';
 import 'core/config/app_config.dart';
+import 'features/memory/application/memory_background.dart';
 
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
@@ -13,4 +14,10 @@ Future<void> main() async {
   final config = AppConfig();
   final overrides = await mobileStartupOverrides(config);
   runApp(ProviderScope(overrides: overrides, child: const OrialisApp()));
+}
+
+@pragma('vm:entry-point')
+Future<void> memoryBackgroundMain() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await runMemoryBackground();
 }

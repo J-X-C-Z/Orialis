@@ -23,6 +23,8 @@ class _MockUrlLauncher extends UrlLauncherPlatform {
 
 class FakeMemoryRepository extends MemoryRepository {
   bool fail = false;
+  MemoryStatus captureStatus = const MemoryStatus(supported: true);
+  int captureSettingsRequests = 0;
   final records = <MemoryRecord>[
     MemoryRecord(
       id: 'bili',
@@ -48,7 +50,9 @@ class FakeMemoryRepository extends MemoryRepository {
     ),
   ];
   @override
-  Future<MemoryStatus> status() async => const MemoryStatus(supported: true);
+  Future<MemoryStatus> status() async => captureStatus;
+  @override
+  Future<void> openCaptureSettings() async => captureSettingsRequests++;
   @override
   Future<List<MemoryRecord>> list() async {
     if (fail) throw StateError('read failed');
@@ -91,6 +95,48 @@ Future<void> showMemory(
 }
 
 void main() {
+  testWidgets(
+    'capture settings explains one-time access and opens only on request',
+    (tester) async {
+      final repository = FakeMemoryRepository()
+        ..captureStatus = const MemoryStatus(
+          supported: true,
+          silentCaptureSupported: true,
+        );
+      addTearDown(repository.dispose);
+      await showMemory(tester, repository);
+      expect(repository.captureSettingsRequests, 0);
+      await tester.tap(find.bySemanticsLabel('截屏设置'));
+      await tester.pumpAndSettle();
+      expect(find.text('免重复确认截屏'), findsOneWidget);
+      expect(find.textContaining('保存后停留在原应用'), findsOneWidget);
+      expect(repository.captureSettingsRequests, 0);
+      await tester.tap(find.text('打开系统设置'));
+      await tester.pumpAndSettle();
+      expect(repository.captureSettingsRequests, 1);
+    },
+  );
+
+  testWidgets('enabled auxiliary capture offers authorization management', (
+    tester,
+  ) async {
+    final repository = FakeMemoryRepository()
+      ..captureStatus = const MemoryStatus(
+        supported: true,
+        silentCaptureSupported: true,
+        silentCaptureEnabled: true,
+      );
+    addTearDown(repository.dispose);
+    await showMemory(tester, repository);
+    await tester.tap(find.bySemanticsLabel('截屏设置'));
+    await tester.pumpAndSettle();
+    expect(find.text('辅助截屏已启用'), findsOneWidget);
+    expect(find.text('管理授权'), findsOneWidget);
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
+    expect(repository.captureSettingsRequests, 0);
+  });
+
   testWidgets(
     'organized first-paragraph preview omits repeated title and stays at two lines',
     (tester) async {

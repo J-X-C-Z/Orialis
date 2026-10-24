@@ -40,6 +40,8 @@ from .conversation import chat_id_for_conversation, conversation_id_for_chat_id
 from . import protocol
 from .response_ui import PLATFORM_HINT
 from .initial_response import generate_initial_response
+from .turn_updates import TurnUpdates
+from .progress_response import generate_progress_response
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +247,7 @@ class OrialisAdapter(BasePlatformAdapter):
         self._active_streams: Dict[str, Dict[str, Any]] = {}
         self._active_tools: Dict[str, Dict[str, Any]] = {}
         self._active_turn_events: Dict[str, MessageEvent] = {}
+        self._turn_updates: Dict[str, TurnUpdates] = {}
         self._processing_status: "OrderedDict[str, Dict[str, str]]" = OrderedDict()
         self._inbound_turn_sources: "OrderedDict[str, Any]" = OrderedDict()
         self._stop_receipts: Dict[str, MessageEvent] = {}
@@ -320,7 +323,13 @@ class OrialisAdapter(BasePlatformAdapter):
                 await self._close_socket()
                 return False
 
+    def _clear_turn_updates(self) -> None:
+        for updates in self._turn_updates.values():
+            updates.close()
+        self._turn_updates.clear()
+
     async def disconnect(self) -> None:
+        self._clear_turn_updates()
         await self._workspace.close()
         self._manual_disconnect = True
         self._connection_state = "stopped"
@@ -481,6 +490,7 @@ class OrialisAdapter(BasePlatformAdapter):
         except Exception:
             logger.exception("[%s] Orialis Agent receive loop failed", self.name)
         finally:
+            self._clear_turn_updates()
             await self._workspace.close()
             self._mark_disconnected()
             await self._close_socket()
@@ -1028,6 +1038,12 @@ class OrialisAdapter(BasePlatformAdapter):
                 )
         if not reply_to:
             return SendResult(success=False, error="Orialis reply is missing reply_to message id")
+        updates = self._turn_updates.get(reply_to)
+        is_setup_notice = str(content).startswith("📬 No home channel is set for Orialis.")
+        if updates and not metadata.get("non_conversational") and not is_setup_notice and content.strip() != "✅":
+            updates.public_output(content if metadata.get("_interim_send") else None)
+            if metadata.get("notify") and not metadata.get("_interim_send"):
+                updates.close()
         conversation_id = conversation_id_for_chat_id(chat_id)
         attachments = metadata.get("attachments")
         message_id = (self._stream_reply_ids.get((chat_id, reply_to, content))
@@ -1161,6 +1177,13 @@ class OrialisAdapter(BasePlatformAdapter):
         """Hermes supplies cumulative snapshots; only persisted final replies count as delivered."""
         if not self.supports_native_streaming(chat_id=chat_id):
             return False
+        updates = self._turn_updates.get(reply_to or self._reply_anchor(chat_id))
+        # Native frames also carry tool chrome; it must not mute long-tool updates.
+        if (updates and content and content != "✅"
+                and (finalize or updates.phase[0] != "tool")):
+            updates.public_output()
+            if finalize:
+                updates.close()
         turn_id = turn_id or uuid.uuid4().hex
         context = self._active_streams.get(turn_id)
         # Decline Hermes' ambiguous empty-stream sentinel. Real literal checkmark
@@ -1296,6 +1319,7 @@ class OrialisAdapter(BasePlatformAdapter):
 
     def set_status_text(self, chat_id: str, text: Optional[str]) -> None:
         """Mirror the host's real tool phase, never its argument-bearing preview."""
+        self._observe_turn_update(chat_id, "tool" if text else "returned")
         public = "正在执行工具" if text else "正在处理请求"
         super().set_status_text(chat_id, public if text else None)
         snapshot = self._processing_status.get(chat_id)
@@ -1314,10 +1338,12 @@ class OrialisAdapter(BasePlatformAdapter):
         if not isinstance(event, ToolCallChunk) or event.tool_name == "_thinking":
             return None
         tool_name = re.sub(r"[^\w.:-]", "", str(event.tool_name))[:80] or "tool"
-        context = self._stream_context
         scope = self._reply_scope.get()
-        if not context and scope:
-            context = {"chat_id": scope[0], "conversation_id": conversation_id_for_chat_id(scope[0]), "turn_id": scope[1]}
+        # Worker scope belongs to this turn; the last global stream may belong to another chat.
+        context = ({"chat_id": scope[0], "conversation_id": conversation_id_for_chat_id(scope[0]), "turn_id": scope[1]}
+                   if scope else self._stream_context)
+        if context:
+            self._observe_turn_update(context["chat_id"], "tool", tool_name)
         if context and self.supports_feature("tool_state"):
             index = getattr(event, "index", 0)
             tool_id = f"{context['turn_id']}:{index}"
@@ -1571,6 +1597,11 @@ class OrialisAdapter(BasePlatformAdapter):
         chat_id = getattr(getattr(event, "source", None), "chat_id", None)
         if chat_id:
             if getattr(event, "text", "") != "/stop" or chat_id not in self._processing_status:
+                previous = self._processing_status.get(chat_id, {}).get("run_id")
+                if previous and previous != getattr(event, "message_id", None):
+                    updates = self._turn_updates.pop(previous, None)
+                    if updates:
+                        updates.close()
                 self._processing_status[chat_id] = {
                     "status": "running", "message": "正在处理请求", "run_id": getattr(event, "message_id", "") or "",
                 }
@@ -1585,28 +1616,75 @@ class OrialisAdapter(BasePlatformAdapter):
             if (getattr(event, "message_id", None)
                     and (getattr(event, "raw_message", None) or {}).get("type") == "message.send"
                     and not event.is_command() and self.supports_feature("reply_followups")):
-                conversation_id = conversation_id_for_chat_id(chat_id)
-                # The same accepted input keeps one initial reply across reconnects.
-                initial_id = "initial_" + hashlib.sha256(
-                    f"{conversation_id}\0{event.message_id}".encode()
-                ).hexdigest()[:24]
-                directory = self._attachment_cache.acquire(conversation_id, event.message_id)
-                scope = getattr(self.gateway_runner, "_media_delivery_scope_for_source", None)
-                with scope(event.source) if callable(scope) else nullcontext():
-                    content = await generate_initial_response(event, directory / "initial-response.json")
-                initial = protocol.reply(
-                    message_id=initial_id, reply_to=event.message_id,
-                    conversation_id=conversation_id, content=content,
-                )
-                for attempt in range(2):
-                    if attempt:
-                        await asyncio.sleep(0.05)
-                    result = await self._send_feature_request(initial, initial_id)
-                    if result.success or not str(result.error).startswith("Orialis request rejected:"):
-                        break
-                if not result.success:
-                    logger.warning("[%s] initial response not confirmed for %s: %s",
-                                   self.name, event.message_id, result.error)
+                if event.message_id not in self._turn_updates:
+                    self._loop = asyncio.get_running_loop()
+                    self._turn_updates[event.message_id] = TurnUpdates(
+                        lambda: self._send_initial_update(event),
+                        lambda text, sequence: self._send_progress_update(event, text, sequence),
+                        lambda facts: self._summarize_progress(event, facts),
+                    )
+
+    def _observe_turn_update(self, chat_id: str, phase: str, tool: str = "") -> None:
+        snapshot = self._processing_status.get(chat_id)
+        anchor = snapshot.get("run_id") if snapshot else None
+        scope = self._reply_scope.get()
+        if scope and scope[0] == chat_id and scope[1] != anchor:
+            return
+        updates = self._turn_updates.get(anchor)
+        loop = self._loop
+        if updates and loop and not loop.is_closed():
+            loop.call_soon_threadsafe(updates.observe, phase, tool)
+
+    async def _send_initial_update(self, event: MessageEvent) -> None:
+        conversation_id = conversation_id_for_chat_id(event.source.chat_id)
+        initial_id = "initial_" + hashlib.sha256(
+            f"{conversation_id}\0{event.message_id}".encode()
+        ).hexdigest()[:24]
+        directory = self._attachment_cache.acquire(conversation_id, event.message_id)
+        scope = getattr(self.gateway_runner, "_media_delivery_scope_for_source", None)
+        with scope(event.source) if callable(scope) else nullcontext():
+            content = await generate_initial_response(event, directory / "initial-response.json")
+        updates = self._turn_updates.get(event.message_id)
+        if not updates or updates.closed or updates.paused:
+            return
+        initial = protocol.reply(message_id=initial_id, reply_to=event.message_id,
+                                 conversation_id=conversation_id, content=content)
+        for attempt in range(2):
+            if attempt:
+                await asyncio.sleep(0.05)
+            if updates.closed or updates.paused:
+                return
+            result = await self._send_feature_request(initial, initial_id)
+            if result.success or not str(result.error).startswith("Orialis request rejected:"):
+                break
+        if result.success:
+            updates.initial_sent()
+        else:
+            logger.warning("[%s] initial response not confirmed for %s: %s",
+                           self.name, event.message_id, result.error)
+
+    async def _summarize_progress(self, event: MessageEvent, facts: dict) -> str | None:
+        directory = self._attachment_cache.acquire(
+            conversation_id_for_chat_id(event.source.chat_id), event.message_id,
+        )
+        scope = getattr(self.gateway_runner, "_media_delivery_scope_for_source", None)
+        with scope(event.source) if callable(scope) else nullcontext():
+            return await generate_progress_response(event, facts, directory)
+
+    async def _send_progress_update(self, event: MessageEvent, text: str, sequence: int) -> None:
+        updates = self._turn_updates.get(event.message_id)
+        snapshot = self._processing_status.get(event.source.chat_id)
+        if (not updates or updates.closed or updates.paused or not snapshot
+                or snapshot.get("run_id") != event.message_id or snapshot.get("status") != "running"):
+            return
+        message_id = "progress_" + hashlib.sha256(
+            f"{event.source.chat_id}\0{event.message_id}\0{text}".encode()
+        ).hexdigest()[:24]
+        # Receipt waits live only in this side task, never in the main delivery path.
+        await self._send_feature_request(protocol.reply(
+            message_id=message_id, reply_to=event.message_id,
+            conversation_id=conversation_id_for_chat_id(event.source.chat_id), content=text,
+        ), message_id)
 
     async def on_processing_complete(self, event: MessageEvent, outcome: Any) -> None:
         # Hermes returns None when startup parks this event; replay still owns completion.
@@ -1616,6 +1694,9 @@ class OrialisAdapter(BasePlatformAdapter):
         await self._finish_processing(event, getattr(outcome, "value", str(outcome)).lower())
 
     async def _finish_processing(self, event: MessageEvent, state: str) -> None:
+        updates = self._turn_updates.pop(getattr(event, "message_id", None), None)
+        if updates:
+            updates.close()
         if getattr(event, "message_id", None):
             self._release_inbound_attachments(event.message_id)
         chat_id = getattr(getattr(event, "source", None), "chat_id", None)

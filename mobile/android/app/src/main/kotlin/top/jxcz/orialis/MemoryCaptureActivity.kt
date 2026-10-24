@@ -11,7 +11,7 @@ import android.os.Looper
 import android.os.ResultReceiver
 import android.widget.Toast
 
-/** Each tap requests a fresh Android screen-capture session. */
+/** Uses explicitly enabled auxiliary capture, or a fresh Android consent session. */
 class MemoryCaptureActivity : Activity() {
     private var requestedScope: String? = null
     private var waitingForCapture = false
@@ -28,8 +28,6 @@ class MemoryCaptureActivity : Activity() {
             handler.removeCallbacks(captureTimeout)
             if (isFinishing || isDestroyed) return
             if (resultCode == RESULT_OK && requestedScope == MemoryStore.scope(this@MemoryCaptureActivity)) {
-                startActivity(Intent(this@MemoryCaptureActivity, MainActivity::class.java).putExtra(MemoryBridge.ROUTE_EXTRA, true)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
                 Toast.makeText(this@MemoryCaptureActivity, "已存入 Orialis 记忆", Toast.LENGTH_SHORT).show()
             } else Toast.makeText(this@MemoryCaptureActivity, resultData?.getString("error") ?: "本次截屏未完成", Toast.LENGTH_LONG).show()
             finish()
@@ -43,15 +41,18 @@ class MemoryCaptureActivity : Activity() {
             finish()
             return
         }
-        if (MemoryProjectionService.capturing) {
+        if (MemoryProjectionService.capturing || MemoryAccessibilityService.capturing) {
             Toast.makeText(this, "正在记录，请稍候", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
         requestedScope = savedInstanceState?.getString("scope") ?: MemoryStore.scope(this)
         if (requestedScope == null) {
-            startActivity(Intent(this, MainActivity::class.java).putExtra(MemoryBridge.ROUTE_EXTRA, true)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            Toast.makeText(this, "请先登录 Orialis 并打开一次记忆页面", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+        if (savedInstanceState == null && MemoryAccessibilityService.capture(requestedScope!!)) {
             finish()
             return
         }
@@ -81,7 +82,7 @@ class MemoryCaptureActivity : Activity() {
                     .putExtra("resultData", data).putExtra("scope", requestedScope).putExtra("resultReceiver", captureResult)
                 waitingForCapture = true
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(service) else startService(service)
-                // Keep this window transparent and foreground so MIUI lets it open the memory page afterwards.
+                // Keep the consent owner alive until this one-shot projection finishes.
                 handler.postDelayed(captureTimeout, 12000)
                 return
             } catch (_: Exception) { waitingForCapture = false; Toast.makeText(this, "无法启动本次截屏，请重新尝试", Toast.LENGTH_LONG).show() }

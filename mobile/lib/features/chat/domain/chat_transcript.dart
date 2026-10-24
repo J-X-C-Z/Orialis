@@ -5,7 +5,7 @@ enum ChatTextKind { message, progress, internalNotice }
 // Legacy Hermes messages have no visibility metadata after server persistence.
 // Match its notification envelopes, never ordinary mentions of these phrases.
 final _workingNotice = RegExp(
-  r'^⏳\s*Working\s*[—–-]\s*(\d+)\s*min\b[^\r\n]*$',
+  r'^⏳\s*(?:Working\s*[—–-]|正在处理\s*——)\s*(\d+)\s*(?:min\b|分钟)[^\r\n]*$',
   caseSensitive: false,
 );
 final _reviewNotice = RegExp(

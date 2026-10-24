@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass, field
+import hashlib
+import html
 import http.client
 from http.client import HTTPException
 import io
@@ -22,6 +24,7 @@ import socket
 import stat
 import struct
 import time
+import unicodedata
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 
 BVID = re.compile(r"(?<![0-9A-Za-z])BV[0-9A-Za-z]{10}(?![0-9A-Za-z])")
@@ -30,6 +33,8 @@ _API_HOSTS = frozenset({"api.bilibili.com"})
 _CDN_SUFFIXES = (".hdslb.com", ".bilivideo.com")
 _OTHER_VIDEO_DOMAINS = ("youtube.com", "youtu.be", "douyin.com", "iesdouyin.com", "kuaishou.com", "tiktok.com", "ixigua.com", "xiaohongshu.com", "xhslink.com")
 BILI_CREDENTIAL_KEYS = frozenset({"SESSDATA", "bili_jct", "buvid3", "buvid4", "DedeUserID"})
+_WBI_ORDER = (46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
+              27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13)
 
 
 class VideoUnavailable(ValueError):
@@ -176,6 +181,18 @@ class PublicBiliHTTP:
         return self.fetch(url, limit=512 * 1024, resolve_only=True)[1]
 
     def data(self, path, params):
+        if path.startswith("/x/web-interface/wbi/"):
+            nav = self.data("/x/web-interface/nav", {})
+            images = nav.get("wbi_img", {})
+            parts = [urlsplit(str(images.get(name) or "")).path.rsplit("/", 1)[-1].split(".")[0]
+                     for name in ("img_url", "sub_url")]
+            if any(not re.fullmatch(r"[0-9a-fA-F]{32}", part) for part in parts):
+                raise VideoUnavailable("平台未提供有效的搜索签名，请稍后重试")
+            material = "".join(parts)
+            key = "".join(material[index] for index in _WBI_ORDER)
+            params = {**params, "web_location": 1550101, "wts": int(time.time())}
+            query = urlencode(sorted(params.items()))
+            params["w_rid"] = hashlib.md5((query + key).encode(), usedforsecurity=False).hexdigest()
         raw, _ = self.fetch("https://api.bilibili.com" + path + "?" + urlencode(params))
         payload = json.loads(raw)
         if payload.get("code") != 0 or not isinstance(payload.get("data"), dict):
@@ -185,6 +202,47 @@ class PublicBiliHTTP:
                 raise VideoUnavailable("B站仍限制当前服务器访问；专用登录授权不保证解除限制，请稍后重试")
             raise VideoUnavailable("视频信息暂不可用，可能需要平台登录")
         return payload["data"]
+
+
+def _visible_title(value):
+    if not isinstance(value, str):
+        return ""
+    return html.unescape(re.sub(r"</?em(?:\s[^>]*)?>", "", value, flags=re.IGNORECASE)).strip()
+
+
+def _identity(value, *, title=False):
+    text = unicodedata.normalize("NFKC", _visible_title(value)).casefold()
+    if title:
+        return "".join(char for char in text if char.isalnum())
+    return "".join(text.split()).lstrip("@")
+
+
+def _title_matches(observed, actual):
+    visible, candidate = _identity(observed, title=True), _identity(actual, title=True)
+    if len(visible) < 4:
+        return False
+    if visible == candidate:
+        return True
+    # A visibly truncated title may match a prefix; short or fuzzy titles cannot.
+    return len(visible) >= 12 and observed.rstrip().endswith(("…", "...")) and candidate.startswith(visible)
+
+
+def _search_bvid(http, title, uploader):
+    if not isinstance(title, str) or not isinstance(uploader, str) or not 4 <= len(title.strip()) <= 300 or not 1 <= len(uploader.strip()) <= 100:
+        raise VideoUnavailable("未看清完整的视频标题和UP主，请分享原视频链接后重试")
+    query = title.strip().rstrip(".… ") + " " + uploader.strip()
+    data = http.data("/x/web-interface/wbi/search/type", {
+        "keyword": query, "search_type": "video", "page": 1, "page_size": 20,
+    })
+    matches = {item["bvid"] for item in (data.get("result") or [])[:20]
+               if isinstance(item, dict) and BVID.fullmatch(str(item.get("bvid") or ""))
+               and _identity(item.get("author")) == _identity(uploader)
+               and _title_matches(title, item.get("title"))}
+    if not matches:
+        raise VideoUnavailable("未找到标题与UP主同时匹配的视频；已保留截图，可分享原链接后重试")
+    if len(matches) != 1:
+        raise VideoUnavailable("有多个标题与UP主相符的视频，暂无法确定原视频；请分享原链接")
+    return matches.pop()
 
 
 @dataclass
@@ -271,16 +329,19 @@ def _frames(http, bvid, cid, duration):
             image.close()
 
 
-def collect_video(source_urls, *, detected_bvid=None, http=None):
-    """Use observed URLs/exact BV only; metadata alone never counts as media evidence."""
+def collect_video(source_urls, *, detected_bvid=None, search_title=None, search_uploader=None, http=None):
+    """Verify an observed ID or a unique title/uploader match before reading media."""
     source = next((url for url in source_urls if is_bilibili_url(url)), None)
     result = VideoEvidence(source_url=source or next(iter(source_urls), None))
+    search = source is None and not (detected_bvid and BVID.fullmatch(detected_bvid)) and search_title and search_uploader
     if source is None and not (detected_bvid and BVID.fullmatch(detected_bvid)):
         if any(web_url(url) and any(urlsplit(url).hostname.lower() == domain or urlsplit(url).hostname.lower().endswith("." + domain)
                                    for domain in _OTHER_VIDEO_DOMAINS) for url in source_urls):
             result.status = "unavailable"
             result.error = "当前仅支持哔哩哔哩视频内容理解；此平台的原始链接和截图摘要已保留"
-        return result
+            return result
+        if not search:
+            return result
     result.status = "unavailable"
     try:
         http = http or PublicBiliHTTP()
@@ -298,7 +359,7 @@ def collect_video(source_urls, *, detected_bvid=None, http=None):
             identifier = match.group(1)
             page = int(parse_qs(parsed.query).get("p", [1])[0])
         else:
-            identifier = detected_bvid
+            identifier = _search_bvid(http, search_title, search_uploader) if search else detected_bvid
         params = {"bvid": identifier} if identifier.startswith("BV") else {"aid": identifier[2:]}
         info = http.data("/x/web-interface/view", params)
         bvid = str(info.get("bvid") or "")
@@ -306,6 +367,9 @@ def collect_video(source_urls, *, detected_bvid=None, http=None):
             raise VideoUnavailable("视频编号未通过平台核验")
         if identifier.startswith("av") and str(info.get("aid")) != identifier[2:]:
             raise VideoUnavailable("视频编号未通过平台核验")
+        if search and (not _title_matches(search_title, info.get("title")) or
+                       _identity(search_uploader) != _identity((info.get("owner") or {}).get("name"))):
+            raise VideoUnavailable("搜索结果与原视频的标题或UP主不一致，未采用该视频")
         pages = info.get("pages") or [{"cid": info.get("cid"), "duration": info.get("duration")}]
         if not 1 <= page <= len(pages):
             raise VideoUnavailable("原始链接指定的视频分段不存在")
@@ -317,6 +381,8 @@ def collect_video(source_urls, *, detected_bvid=None, http=None):
         result.source_url = source or f"https://www.bilibili.com/video/{bvid}"
         result.metadata = {"bvid": bvid, "title": str(info.get("title") or "")[:300],
                            "part": page, "parts": len(pages), "durationSeconds": duration}
+        if search:
+            result.metadata.update(matchedBy="visible_title_and_uploader", uploader=info["owner"]["name"])
         caption_error = None
         try:
             player = http.data("/x/player/v2", {"bvid": bvid, "cid": cid})

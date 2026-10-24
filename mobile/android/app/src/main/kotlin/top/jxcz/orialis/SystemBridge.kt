@@ -166,6 +166,7 @@ internal class SystemBridge(private val activity: MainActivity, messenger: Binar
         if (payload["scope"] != scope) return false
         val conversationId = (payload["conversationId"] as? String)?.takeIf { it.isNotBlank() && it.length <= 512 } ?: return false
         val messageId = (payload["messageId"] as? String ?: payload["id"] as? String)?.takeIf { it.isNotBlank() && it.length <= 512 } ?: return false
+        if (Regex("^progress_[a-f0-9]{24}$").matches(messageId)) return false
         val prefs = activity.getSharedPreferences("chat_notice_dedup_v1", 0)
         val seen = prefs.getStringSet("ids", emptySet())?.toMutableSet() ?: mutableSetOf()
         val notificationId = (payload["notificationId"] as? String)?.takeIf { it.isNotBlank() && it.length <= 512 } ?: messageId

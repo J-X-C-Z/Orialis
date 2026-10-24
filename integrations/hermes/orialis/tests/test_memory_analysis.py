@@ -108,6 +108,27 @@ class MemoryCompletionTests(unittest.TestCase):
         self.assertEqual(collect.call_args.kwargs["detected_bvid"], "BV1d8pU6xEZX")
         self.assertEqual(result["video_status"], "analyzed")
 
+    def test_screenshot_visible_title_and_uploader_are_passed_to_platform_verification(self):
+        first = {"summary": "# 截图\n\nDSH视频。", "category": "ai", "video_detected": True,
+                 "video_platform": "bilibili", "video_title": "人工智能模型演示视频", "video_uploader": "示例UP"}
+        completion = AsyncMock(side_effect=[first, {"summary": "# 视频\n\n画面摘要。", "category": "ai", "video_summary": "实际视频画面。"}])
+        video = VideoEvidence(status="analyzed", frames=[(20, "JPEG")], source_url="https://www.bilibili.com/video/BV1d8pU6xEZX")
+        with patch("integrations.hermes.orialis.memory_analysis.collect_video", return_value=video) as collect, \
+             patch("integrations.hermes.orialis.memory_analysis._complete", completion):
+            result = asyncio.run(analyze_memory("截图可见标题和UP", "SCREEN"))
+        self.assertEqual(collect.call_args.kwargs["search_title"], first["video_title"])
+        self.assertEqual(collect.call_args.kwargs["search_uploader"], first["video_uploader"])
+        self.assertEqual(result["source_url"], video.source_url)
+
+    def test_other_platform_or_missing_uploader_cannot_start_bilibili_title_search(self):
+        for platform, uploader in [("douyin", "示例UP"), ("bilibili", None)]:
+            completion = AsyncMock(return_value={"summary": "# 截图\n\n视频画面。", "category": "other",
+                "video_detected": True, "video_platform": platform, "video_title": "视频标题内容", "video_uploader": uploader})
+            with self.subTest(platform=platform), patch("integrations.hermes.orialis.memory_analysis.collect_video", return_value=VideoEvidence()) as collect, \
+                 patch("integrations.hermes.orialis.memory_analysis._complete", completion):
+                asyncio.run(analyze_memory("截图", "SCREEN"))
+            self.assertIsNone(collect.call_args.kwargs["search_title"])
+
     def test_second_model_failure_preserves_initial_screenshot_summary(self):
         completion = AsyncMock(side_effect=[
             {"summary": "# 截图\n\n截图摘要。", "category": "other", "detected_bvid": "BV1d8pU6xEZX"},

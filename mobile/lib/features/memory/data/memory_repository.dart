@@ -4,8 +4,14 @@ import 'package:flutter/foundation.dart';
 import '../domain/memory_record.dart';
 
 class MemoryStatus {
-  const MemoryStatus({required this.supported});
+  const MemoryStatus({
+    required this.supported,
+    this.silentCaptureSupported = false,
+    this.silentCaptureEnabled = false,
+  });
   final bool supported;
+  final bool silentCaptureSupported;
+  final bool silentCaptureEnabled;
 }
 
 class MemoryRepository extends ChangeNotifier {
@@ -19,7 +25,11 @@ class MemoryRepository extends ChangeNotifier {
   Future<MemoryStatus> status() async {
     try {
       final result = await channel.invokeMapMethod<Object?, Object?>('status');
-      return MemoryStatus(supported: result?['supported'] == true);
+      return MemoryStatus(
+        supported: result?['supported'] == true,
+        silentCaptureSupported: result?['silentCaptureSupported'] == true,
+        silentCaptureEnabled: result?['silentCaptureEnabled'] == true,
+      );
     } on MissingPluginException {
       return const MemoryStatus(supported: false);
     }
@@ -30,6 +40,8 @@ class MemoryRepository extends ChangeNotifier {
   Future<bool> requestAddTile() async =>
       await channel.invokeMethod<bool>('requestAddTile') ?? false;
   Future<void> capture() => channel.invokeMethod<void>('capture');
+  Future<void> openCaptureSettings() =>
+      channel.invokeMethod<void>('openCaptureSettings');
 
   Future<String> prepareUpload(String id) async {
     final path = await channel.invokeMethod<String>('prepareUpload', {
@@ -54,11 +66,17 @@ class MemoryRepository extends ChangeNotifier {
     await channel.invokeMapMethod<Object?, Object?>('read', {'id': id}),
   );
 
-  Future<MemoryRecord> update(String id, Map<String, Object?> fields) async {
+  Future<MemoryRecord> update(
+    String id,
+    Map<String, Object?> fields, {
+    String? expectedAnalysisRequestId,
+  }) async {
+    // An empty expected ID requires an unclaimed record; null leaves it unchecked.
     final result = _record(
       await channel.invokeMapMethod<Object?, Object?>('update', {
         'id': id,
         'fields': fields,
+        'expectedAnalysisRequestId': ?expectedAnalysisRequestId,
       }),
     );
     notifyListeners();

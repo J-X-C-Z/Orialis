@@ -3,6 +3,8 @@
     <string name="memory_tile_label">记住屏幕</string>
     <string name="memory_share_label">Orialis 记忆</string>
     <string name="chat_share_label">Orialis 聊天</string>
+    <string name="memory_accessibility_label">Orialis 辅助截屏</string>
+    <string name="memory_accessibility_description">仅在你点击「记住屏幕」快捷键时，截取当前屏幕并读取可见文字，用于保存记忆和识别原视频。不会持续记录屏幕，保存后停留在原应用。你可随时关闭此服务。</string>
     <style name="MemoryCaptureTheme" parent="android:style/Theme.Translucent.NoTitleBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>

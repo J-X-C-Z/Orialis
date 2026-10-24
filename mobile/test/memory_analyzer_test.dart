@@ -26,10 +26,25 @@ class _Repository extends MemoryRepository {
     'analysisStatus': 'pending',
   };
   final updates = <Map<String, Object?>>[];
+  void Function()? beforeClaimCommit, beforeResultCommit;
   @override
   Future<MemoryRecord> read(String id) async => MemoryRecord.fromMap(record);
   @override
-  Future<MemoryRecord> update(String id, Map<String, Object?> fields) async {
+  Future<MemoryRecord> update(
+    String id,
+    Map<String, Object?> fields, {
+    String? expectedAnalysisRequestId,
+  }) async {
+    if (fields.containsKey('analysisRequestId')) {
+      beforeClaimCommit?.call();
+    } else if (expectedAnalysisRequestId != null) {
+      beforeResultCommit?.call();
+    }
+    if (expectedAnalysisRequestId != null) {
+      if ((record['analysisRequestId'] ?? '') != expectedAnalysisRequestId) {
+        throw StateError('已有更新任务');
+      }
+    }
     updates.add(fields);
     record.addAll(fields);
     return MemoryRecord.fromMap(record);
@@ -129,12 +144,15 @@ class _Agents extends AgentChatService {
   final _Api api;
   (String, String) scope = ('https://server.invalid', 'first-session');
   int clients = 0, deviceQueries = 0;
+  Completer<void>? clientGate, clientEntered;
   bool azureOnline = true;
   @override
   Future<(String, String)> identity() async => scope;
   @override
   Future<OrialisApiClient> client() async {
     clients++;
+    if (clientEntered?.isCompleted == false) clientEntered!.complete();
+    await clientGate?.future;
     return api;
   }
 
@@ -387,6 +405,139 @@ void main() {
     api.submitGate!.complete();
     await first;
     expect(api.submitted, hasLength(1));
+  });
+
+  for (final initialId in ['missing', null, '', 'memory-v2-capture-1']) {
+    test(
+      'a delayed initial claim preserves a newer foreground result: $initialId',
+      () async {
+        repository.record.addAll({
+          'analysisStatus': 'analyzing',
+          'videoStatus': 'unavailable',
+        });
+        if (initialId == 'missing') {
+          repository.record.remove('analysisRequestId');
+        } else {
+          repository.record['analysisRequestId'] = initialId;
+        }
+        final gate = agents.clientGate = Completer<void>();
+        final entered = agents.clientEntered = Completer<void>();
+        final oldWork = analyzer.analyze(await record());
+        final retryApi = _Api()..replyContent = '# 新视频结果\n\n本次重试取得的新内容。';
+        final retryAgents = _Agents(retryApi);
+        try {
+          await entered.future.timeout(const Duration(seconds: 1));
+          final foreground = MemoryAnalyzer(
+            repository: repository,
+            agents: retryAgents,
+            pollInterval: const Duration(milliseconds: 1),
+            timeout: const Duration(seconds: 2),
+          );
+          await foreground.analyze(await record(), retry: true);
+          final newResult = Map<Object?, Object?>.from(repository.record);
+          expect(newResult['analysisStatus'], 'completed');
+          expect(newResult['summary'], contains('本次重试取得的新内容'));
+          gate.complete();
+          await oldWork;
+          expect(repository.record, newResult);
+          expect(api.polls, 0);
+          expect(api.submitted, isEmpty);
+        } finally {
+          if (!gate.isCompleted) gate.complete();
+          await oldWork;
+          retryAgents.dispose();
+        }
+      },
+    );
+  }
+
+  for (final initialId in [null, 'memory-v2-capture-1']) {
+    test(
+      'the native claim guard preserves a retry after the Dart check: $initialId',
+      () async {
+        repository.record['analysisRequestId'] = initialId;
+        repository.beforeClaimCommit = () {
+          repository.record.addAll({
+            'analysisRequestId': 'foreground-new-task',
+            'analysisStatus': 'completed',
+            'summary': '前台的新结果',
+            'analysisError': null,
+          });
+        };
+        await analyzer.analyze(await record());
+        expect(repository.record['analysisRequestId'], 'foreground-new-task');
+        expect(repository.record['analysisStatus'], 'completed');
+        expect(repository.record['summary'], '前台的新结果');
+        expect(repository.record['analysisError'], isNull);
+        expect(repository.updates, isEmpty);
+        expect(api.polls, 0);
+        expect(api.submitted, isEmpty);
+      },
+    );
+  }
+
+  for (final oldRequestFails in [false, true]) {
+    test(
+      'a late ${oldRequestFails ? 'failed' : 'completed'} background request cannot overwrite a newer foreground retry',
+      () async {
+        repository.record.addAll({
+          'analysisStatus': 'analyzing',
+          'analysisRequestId': 'memory-v2-capture-1',
+          'videoStatus': 'unavailable',
+        });
+        api.submitGate = Completer<void>();
+        api.failSubmitOnce = oldRequestFails;
+        final oldWork = analyzer.analyze(await record());
+        while (api.submitted.isEmpty) {
+          await Future<void>.delayed(const Duration(milliseconds: 1));
+        }
+        final retryApi = _Api()..replyContent = '# 新视频结果\n\n本次重试取得的新内容。';
+        final retryAgents = _Agents(retryApi);
+        try {
+          final foreground = MemoryAnalyzer(
+            repository: repository,
+            agents: retryAgents,
+            pollInterval: const Duration(milliseconds: 1),
+            timeout: const Duration(seconds: 2),
+          );
+          await foreground.analyze(await record(), retry: true);
+          final retryId = repository.record['analysisRequestId'];
+          expect(retryId, isNot('memory-v2-capture-1'));
+          expect(repository.record['analysisStatus'], 'completed');
+          final newResult = Map<Object?, Object?>.from(repository.record);
+          if (!oldRequestFails) {
+            api.job = {
+              'id': 'memory-v2-capture-1',
+              'status': 'completed',
+              'content': '# 旧后台结果\n\n已经过时的内容。',
+            };
+          }
+          api.submitGate!.complete();
+          await oldWork;
+          expect(repository.record, newResult);
+          expect(repository.record['analysisRequestId'], retryId);
+          expect(repository.record['summary'], contains('本次重试取得的新内容'));
+          expect(retryApi.chatCalls, 0);
+        } finally {
+          retryAgents.dispose();
+        }
+      },
+    );
+  }
+
+  test('the native commit guard rejects a retry started after the final Dart ownership read', () async {
+    repository.beforeResultCommit = () {
+      repository.record.addAll({
+        'analysisRequestId': 'foreground-new-task',
+        'analysisStatus': 'analyzing',
+        'summary': '较新的结果',
+      });
+    };
+    await analyzer.analyze(await record());
+    expect(repository.record['analysisRequestId'], 'foreground-new-task');
+    expect(repository.record['analysisStatus'], 'analyzing');
+    expect(repository.record['summary'], '较新的结果');
+    expect(repository.record['analysisError'], isNull);
   });
 
   for (final invalid in ['', '/missing/derivative.jpg']) {

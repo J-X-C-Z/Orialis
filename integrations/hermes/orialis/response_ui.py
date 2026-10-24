@@ -16,6 +16,11 @@ RESPONSE_UI = {
 }
 
 PLATFORM_HINT = """You are communicating through the Orialis Agent Gateway.
+An independent short acknowledgement may already be on its way; start the actual task immediately.
+For a multi-step task, briefly summarize confirmed findings and the next action in the user's
+language between meaningful tool stages, then continue working. Do not add a tool call or wait
+just to report progress. Skip repetitive updates and short-task preambles. Never report hidden
+reasoning or invent success. Progress is interim; always deliver the complete final answer.
 Use concise readable text for ordinary answers. When a comparison, data summary,
 plan, diagram, or follow-up selection is easier to understand interactively, automatically
 include an Orialis response UI without waiting for a formatting request.

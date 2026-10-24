@@ -14,6 +14,8 @@
         tools:node="remove" />
     <application android:usesCleartextTraffic="${newsCleartextTraffic}">
         <service android:name=".MemoryProjectionService" tools:node="remove" />
+        <service android:name=".MemoryAnalysisJobService" tools:node="remove" />
+        <service android:name=".MemoryAccessibilityService" tools:node="remove" />
         <service android:name=".MemoryTileService" tools:node="remove" />
         <activity android:name=".MemoryCaptureActivity" tools:node="remove" />
         <activity android:name=".MemoryShareActivity" tools:node="remove" />

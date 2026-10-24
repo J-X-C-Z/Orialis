@@ -24,6 +24,17 @@ class NativeTransportTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value='收到，我先处理一下。'))
         initial_response.start()
         self.addCleanup(initial_response.stop)
+        async def contextual_progress(event, facts, directory):
+            activity = facts.get('activity')
+            if facts['phase'] == 'tool':
+                return f"针对{event.text[:24]}，当前正在{activity or '执行任务步骤'}，调用尚未返回。"
+            if facts['phase'] == 'returned':
+                return f"{event.text[:24]}的工具调用已返回，正在整理可确认的信息。"
+            return f"{event.text[:24]}仍在处理中，还没有新增可确认结果。"
+        progress_response = patch.object(adapter_module, 'generate_progress_response',
+            new=AsyncMock(side_effect=contextual_progress))
+        progress_response.start()
+        self.addCleanup(progress_response.stop)
         self.home = tempfile.TemporaryDirectory()
         self.env = patch.dict(os.environ, {'HERMES_HOME': self.home.name})
         self.env.start()
@@ -53,6 +64,12 @@ class NativeTransportTests(unittest.IsolatedAsyncioTestCase):
         self.adapter._send_wire = transport
 
     async def asyncTearDown(self):
+        pending_updates = list(self.adapter._turn_updates.values())
+        for updates in pending_updates:
+            updates.close()
+        if pending_updates:
+            await asyncio.gather(*(task for updates in pending_updates
+                                   for task in (updates.initial_task, updates.task)), return_exceptions=True)
         try:
             # Real connect/disconnect queues native status writes into this temporary home.
             self.assertTrue(await flush_runtime_status_async(), 'Native status writer did not finish before cleanup')

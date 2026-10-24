@@ -92,6 +92,40 @@ class _MemoryPageState extends State<MemoryPage> with WidgetsBindingObserver {
     if (mounted) await _load();
   }
 
+  Future<void> _captureSettings() async {
+    try {
+      final current = await repository.status();
+      if (!mounted) return;
+      final openSettings = await showLuminaDialog<bool>(
+        context: context,
+        builder: (context) => LuminaDialog(
+          title: current.silentCaptureEnabled ? '辅助截屏已启用' : '免重复确认截屏',
+          content: Text(
+            current.silentCaptureSupported
+                ? '${current.silentCaptureEnabled ? '快捷键将直接保存屏幕。' : '在系统中启用一次「Orialis 辅助截屏」后，快捷键无需逐次确认截屏。'}'
+                      '\n\n仅在你点击快捷键时读取屏幕与可见文字，保存后停留在原应用。未启用时继续使用系统截屏确认。'
+                : '这台手机使用系统截屏方式，每次截屏仍需系统确认。保存后会停留在原应用。',
+          ),
+          actions: [
+            LuminaButton(
+              primary: false,
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('关闭'),
+            ),
+            if (current.silentCaptureSupported)
+              LuminaButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(current.silentCaptureEnabled ? '管理授权' : '打开系统设置'),
+              ),
+          ],
+        ),
+      );
+      if (openSettings == true) await repository.openCaptureSettings();
+    } catch (_) {
+      if (mounted) showLuminaMessage(context, '截屏设置暂时无法打开，请稍后重试');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = records
@@ -107,6 +141,12 @@ class _MemoryPageState extends State<MemoryPage> with WidgetsBindingObserver {
         onPressed: () => Navigator.of(context).maybePop(),
       ),
       actions: [
+        if (status?.supported == true)
+          LuminaIconButton(
+            tooltip: '截屏设置',
+            icon: const Icon(Icons.tune),
+            onPressed: _captureSettings,
+          ),
         LuminaIconButton(
           tooltip: '刷新记忆',
           icon: const LuminaIcon(LuminaIcons.sync),

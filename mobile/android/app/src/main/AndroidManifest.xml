@@ -37,6 +37,14 @@
         <meta-data android:name="com.xiaomi.xms.APP_ID" android:value="${xiaomiAppId}" />
         <service android:name=".MemoryProjectionService" android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+        <service android:name=".MemoryAnalysisJobService" android:exported="true"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <service android:name=".MemoryAccessibilityService" android:exported="true"
+            android:label="@string/memory_accessibility_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/memory_accessibility_service" />
+        </service>
         <service android:name=".MemoryTileService" android:exported="true"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:icon="@drawable/ic_memory" android:label="@string/memory_tile_label">

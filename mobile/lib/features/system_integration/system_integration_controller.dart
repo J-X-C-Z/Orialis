@@ -314,6 +314,14 @@ class SystemIntegrationController {
     if (role is! String || role.trim().toLowerCase() != 'assistant') {
       return false;
     }
+    final messageId = switch (payload['messageId']) {
+      final String id => id,
+      _ => payload['id'],
+    };
+    if (messageId is String &&
+        RegExp(r'^progress_[a-f0-9]{24}$').hasMatch(messageId)) {
+      return false;
+    }
     if (_disposed ||
         !supported ||
         !enabled ||

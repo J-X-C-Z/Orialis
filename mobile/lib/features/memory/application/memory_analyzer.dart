@@ -27,11 +27,19 @@ class MemoryAnalyzer {
   }) async {
     if (!_running.add(record.id)) return;
     (String, String)? identity;
+    String? observedAnalysisId;
+    String? ownedAnalysisId;
     final elapsed = Stopwatch()..start();
 
     Future<void> check() async {
       if (isCurrent?.call() == false) throw const _Cancelled();
       if (identity != null && await agents.identity() != identity) {
+        throw const _Cancelled();
+      }
+      final expectedAnalysisId = ownedAnalysisId ?? observedAnalysisId;
+      if (expectedAnalysisId != null &&
+          ((await repository.read(record.id)).analysisRequestId ?? '') !=
+              expectedAnalysisId) {
         throw const _Cancelled();
       }
       if (isCurrent?.call() == false) throw const _Cancelled();
@@ -48,6 +56,7 @@ class MemoryAnalyzer {
       if (isCurrent?.call() == false) return;
       identity = await agents.identity();
       var current = await call(() => repository.read(record.id));
+      observedAnalysisId = current.analysisRequestId ?? '';
       if (!retry &&
           current.analysisStatus == 'completed' &&
           current.category != null) {
@@ -72,8 +81,9 @@ class MemoryAnalyzer {
           'analysisRequestId': analysisId,
           if (retry && current.videoStatus == 'unavailable')
             'videoStatus': null,
-        }),
+        }, expectedAnalysisRequestId: observedAnalysisId),
       );
+      ownedAnalysisId = analysisId;
       var analysis = await call(() => api.memoryAnalysis(analysisId));
       if (analysis == null || (retry && analysis['status'] == 'failed')) {
         final devices = await call(agents.devices);
@@ -138,7 +148,7 @@ class MemoryAnalyzer {
               'videoError': analysis?['videoError'],
               'analysisStatus': 'completed',
               'analysisError': null,
-            }),
+            }, expectedAnalysisRequestId: ownedAnalysisId),
           );
           return;
         }
@@ -146,11 +156,11 @@ class MemoryAnalyzer {
         analysis = await call(() => api.memoryAnalysis(analysisId));
       }
     } on _Cancelled {
-      // The caller's account/generation owns the record and its in-flight work.
+      // A newer retry or account/generation owns the record and its in-flight work.
     } catch (error) {
       try {
         await check();
-        if (identity == null) return;
+        if (identity == null || observedAnalysisId == null) return;
         await repository.update(record.id, {
           'analysisStatus': 'failed',
           'analysisError': error is _Unavailable
@@ -158,7 +168,7 @@ class MemoryAnalyzer {
               : error is TimeoutException
               ? 'Azure Hermes 理解超时，截图和链接已保留，可稍后重试'
               : 'Azure Hermes 暂未完成理解，截图和链接已保留，可稍后重试',
-        });
+        }, expectedAnalysisRequestId: ownedAnalysisId ?? observedAnalysisId);
       } catch (_) {
         // Deletion/account changes must not recreate or overwrite a record.
       }

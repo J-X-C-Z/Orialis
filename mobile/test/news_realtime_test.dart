@@ -179,12 +179,17 @@ void main() {
         _Config(),
         dio: Dio()..httpClientAdapter = adapter,
       );
+      final refreshed = Completer<void>();
       final subscription = repo
           .watch([
             'github/weekly',
           ], refreshInterval: const Duration(milliseconds: 30))
-          .listen((_) {});
-      await _until(() => adapter.snapshots >= 2);
+          .listen((_) {
+            if (adapter.snapshots >= 2 && !refreshed.isCompleted) {
+              refreshed.complete();
+            }
+          });
+      await refreshed.future.timeout(const Duration(seconds: 5));
       await subscription.cancel();
       final count = adapter.snapshots;
       await Future<void>.delayed(const Duration(milliseconds: 100));
