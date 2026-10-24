@@ -195,9 +195,8 @@ class AppDatabase extends _$AppDatabase {
     onCreate: (m) => m.createAll(),
     onUpgrade: (m, from, to) async {
       Future<bool> hasColumn(String tableName, String columnName) async {
-        final columns = await customSelect(
-          'PRAGMA table_info("$tableName")',
-        ).get();
+        final columns = await customSelect('PRAGMA table_info("$tableName")')
+            .get();
         return columns.any((row) => row.data['name'] == columnName);
       }
 
@@ -273,9 +272,8 @@ class AppDatabase extends _$AppDatabase {
             sync_status TEXT NOT NULL DEFAULT 'synced'
           )
         ''');
-        final oldTaskColumns = await customSelect(
-          'PRAGMA table_info(tasks_v5)',
-        ).get();
+        final oldTaskColumns = await customSelect('PRAGMA table_info(tasks_v5)')
+            .get();
         final hasOldRecurrence = oldTaskColumns.any(
           (row) => row.data['name'] == 'recurrence',
         );
@@ -439,11 +437,14 @@ class AppDatabase extends _$AppDatabase {
         .watch();
   }
 
-  Stream<List<Conversation>> watchActiveConversations() =>
+  Stream<List<Conversation>> watchActiveConversations({
+    bool excludeBackground = false,
+  }) =>
       customSelect(
         '''
     SELECT c.* FROM conversations c
     WHERE c.deleted_at IS NULL
+      ${excludeBackground ? "AND c.id NOT GLOB 'memory-*' AND c.id NOT GLOB 'event-*'" : ''}
     ORDER BY c.pinned DESC, c.manual_position IS NULL, c.manual_position,
       COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id), c.updated_at) DESC,
       c.id

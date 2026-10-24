@@ -58,6 +58,10 @@ class AgentChatService {
       'ORIALIS_WINDOWS_CHAT_DEVICE_ID',
       defaultValue: 'JXCZ_PC_Hermes',
     ),
+    this.hakariDeviceId = const String.fromEnvironment(
+      'ORIALIS_HAKARI_CHAT_DEVICE_ID',
+      defaultValue: 'JXCZ_HAKARI_DSH',
+    ),
   }) {
     config.addIdentityListener(_resetDeviceNames);
   }
@@ -88,12 +92,20 @@ class AgentChatService {
   final String macDeviceId;
   final String azureDeviceId;
   final String windowsDeviceId;
+  final String hakariDeviceId;
 
   bool isAllowedTarget(String? id) =>
       id != null &&
       id.isNotEmpty &&
-      id.toLowerCase().endsWith('_hermes') &&
-      (id == macDeviceId || id == azureDeviceId || id == windowsDeviceId);
+      ((id == hakariDeviceId && id.toLowerCase().endsWith('_dsh')) ||
+          (id.toLowerCase().endsWith('_hermes') &&
+              (id == macDeviceId ||
+                  id == azureDeviceId ||
+                  id == windowsDeviceId)));
+
+  bool isDshTarget(String? id) => id == hakariDeviceId && isAllowedTarget(id);
+
+  String agentLabel(String? id) => isDshTarget(id) ? 'DSH' : 'Hermes';
 
   final _deviceNames = <String, String>{};
 
@@ -104,6 +116,8 @@ class AgentChatService {
                 ? 'Mac 电脑'
                 : id == windowsDeviceId
                 ? 'Windows 电脑'
+                : id == hakariDeviceId
+                ? 'Hakari 服务器'
                 : 'Azure 服务器');
 
   String _deviceNameKey(
@@ -122,7 +136,12 @@ class AgentChatService {
     final preferences = await SharedPreferences.getInstance();
     _deviceNames.clear();
     if (await identity() != scope) return;
-    for (final id in [macDeviceId, azureDeviceId, windowsDeviceId]) {
+    for (final id in [
+      macDeviceId,
+      azureDeviceId,
+      windowsDeviceId,
+      hakariDeviceId,
+    ]) {
       final name = preferences.getString(_deviceNameKey(scope, id, username));
       if (name != null && name.isNotEmpty) _deviceNames[id] = name;
     }
@@ -197,10 +216,11 @@ class AgentChatService {
     }
 
     // Use exact deployment identities; never infer a target from platform or
-    // fall back to a test/Codex gateway when Hermes is unavailable.
+    // fall back to a test/Codex gateway when a configured agent is unavailable.
     return [
       slot(macDeviceId, 'macos', 'Mac 电脑'),
       slot(windowsDeviceId, 'windows', 'Windows 电脑'),
+      slot(hakariDeviceId, 'linux', 'Hakari 服务器'),
       slot(azureDeviceId, 'linux', 'Azure 服务器'),
     ];
   }
@@ -348,7 +368,7 @@ class AgentChatService {
     ChatAgentDevice device,
   ) async {
     if (!isAllowedTarget(device.id)) {
-      throw StateError('仅支持已配置的 Mac 和 Azure Hermes 设备');
+      throw StateError('仅支持已配置的聊天设备');
     }
     if (!device.online) throw StateError('设备离线，请等待连接恢复');
     final scope = await identity();

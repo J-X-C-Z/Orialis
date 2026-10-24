@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show listEquals, mapEquals;
 import 'package:flutter/material.dart' show MaterialPageRoute;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/semantics.dart';
@@ -206,19 +207,29 @@ class _ChatPageState extends ConsumerState<ChatPage>
   StreamSubscription<(String, String?)>? _targetSubscription;
   List<Conversation> _localConversations = [];
   final Map<String, String?> _visibleTargets = {};
+  List<Conversation>? _emittedConversations;
+  Map<String, String?> _emittedTargets = {};
   int _listGeneration = 0;
 
   void _emitConversations() {
     if (!mounted) return;
-    _conversationListController.add(
-      _localConversations
-          .where(
-            (row) => ref
-                .read(agentChatServiceProvider)
-                .isAllowedTarget(_visibleTargets[row.id]),
-          )
-          .toList(),
-    );
+    final conversations = _localConversations
+        .where(
+          (row) => ref
+              .read(agentChatServiceProvider)
+              .isAllowedTarget(_visibleTargets[row.id]),
+        )
+        .toList();
+    final targets = {
+      for (final row in conversations) row.id: _visibleTargets[row.id],
+    };
+    if (listEquals(conversations, _emittedConversations) &&
+        mapEquals(targets, _emittedTargets)) {
+      return;
+    }
+    _emittedConversations = conversations;
+    _emittedTargets = targets;
+    _conversationListController.add(conversations);
   }
 
   Future<void> _updateConversations(List<Conversation> rows) async {
@@ -321,6 +332,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   void _onScroll() {
+    if (!_showingConversation) return;
     // While the finger is down, leaving the bottom must cancel follow right
     // away — otherwise a queued jump yanks the list back mid-drag.
     if (_userDragging) {
@@ -388,6 +400,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   void _contentArrived() {
+    if (!_showingConversation) return;
     if (_followLatest && !_userDragging) {
       _queueLatest();
     } else {
@@ -401,6 +414,11 @@ class _ChatPageState extends ConsumerState<ChatPage>
 
   void _enqueueAgentEvent(MobileEnvelope event) {
     if (!_chatIdentityActive) return;
+    if (ChatRepository.isBackgroundChatConversationId(
+      resolveAgentEnvelope(event).conversationId ?? '',
+    )) {
+      return;
+    }
     _pendingAgentEvents.add(event);
     if (_agentFlushScheduled) return;
     _agentFlushScheduled = true;
@@ -532,7 +550,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
           }
         });
     _conversationListSubscription = widget.repository
-        .watchConversations()
+        .watchChatConversations()
         .listen(
           _updateConversations,
           onError: (Object error, StackTrace stack) =>
@@ -740,12 +758,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
                   children: [
                     const Text('与设备对话'),
                     const SizedBox(height: 12),
-                    if (devices.isEmpty)
-                      const Text('请在 Mac 或 Azure 服务器启动 Hermes 网关。'),
+                    if (devices.isEmpty) const Text('请先连接已配置的设备。'),
                     for (final device in devices)
                       LuminaListRow(
                         title: device.label,
-                        subtitle: '${device.online ? "在线" : "离线"} · Hermes',
+                        subtitle:
+                            '${device.online ? "在线" : "离线"} · ${service.agentLabel(device.id)}',
                         trailing: LuminaIconButton(
                           tooltip: '修改设备名称',
                           icon: const LuminaIcon(LuminaIcons.settings),
@@ -797,23 +815,26 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
   }
 
-  bool get _hasHermesTarget =>
+  bool get _hasChatTarget =>
       ref.read(agentChatServiceProvider).isAllowedTarget(_chatDeviceId);
 
-  Future<bool> _requireHermesTarget() async {
+  bool get _isDshTarget =>
+      ref.read(agentChatServiceProvider).isDshTarget(_chatDeviceId);
+
+  Future<bool> _requireChatTarget() async {
     final conversationId = _conversationId;
     try {
       final service = ref.read(agentChatServiceProvider);
       final target = await service.target(conversationId, requireOnline: true);
       if (!mounted || _conversationId != conversationId) return false;
       setState(() => _chatDeviceId = target);
-      if (_hasHermesTarget) return true;
+      if (_hasChatTarget) return true;
     } catch (_) {
       if (!mounted) return false;
-      showLuminaToast(context, '暂时无法确认 Hermes 设备，请联网后重试。');
+      showLuminaToast(context, '暂时无法确认聊天设备，请联网后重试。');
       return false;
     }
-    showLuminaToast(context, '请通过设备入口新建 Mac 或 Azure 的 Hermes 对话。');
+    showLuminaToast(context, '请通过设备入口选择在线的聊天设备。');
     return false;
   }
 
@@ -975,6 +996,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
     ],
     body: StreamBuilder<List<Conversation>>(
       stream: _conversationsStream,
+      initialData: _emittedConversations,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return const LuminaEmptyState(text: '会话暂时无法加载，请稍后再试。');
@@ -1097,123 +1119,174 @@ class _ChatPageState extends ConsumerState<ChatPage>
                       },
                       itemBuilder: (context, index) {
                         final conversation = conversations[index];
-                        final latest = ref
-                            .watch(
-                              chatLatestMessageProvider((
-                                repository: widget.repository,
-                                conversationId: conversation.id,
-                              )),
-                            )
-                            .value;
-                        final preview = latest == null
-                            ? null
-                            : _readableMessage(latest)
-                                  .replaceAll('\n', ' ')
-                                  .trim();
-                        final deviceLabel =
-                            devices[_visibleTargets[conversation.id]] ?? '本地历史';
-                        final status = summaries[conversation.id]!.label;
-                        final theme = LuminaTheme.of(context);
-                        final row = LuminaSurface(
-                          key: ValueKey('conversation-row-${conversation.id}'),
-                          radius: 18,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          onTap: _importingShare
-                              ? null
-                              : () => _openConversation(
-                                  conversation,
-                                  receiveShare: _shareId != null,
-                                ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Row(
+                        return Consumer(
+                          key: ValueKey(conversation.id),
+                          builder: (context, ref, _) {
+                            final latest = ref
+                                .watch(
+                                  chatLatestMessageProvider((
+                                    repository: widget.repository,
+                                    conversationId: conversation.id,
+                                  )),
+                                )
+                                .value;
+                            final preview = latest == null
+                                ? null
+                                : _readableMessage(latest)
+                                      .replaceAll('\n', ' ')
+                                      .trim();
+                            final deviceLabel =
+                                devices[_visibleTargets[conversation.id]] ??
+                                '本地历史';
+                            final status = summaries[conversation.id]!.label;
+                            final theme = LuminaTheme.of(context);
+                            final dark = theme.colors.dark;
+                            final deviceId = _visibleTargets[conversation.id];
+                            final deviceColor =
+                                deviceId == service.azureDeviceId
+                                ? (dark
+                                      ? const Color(0xFF8AB4F8)
+                                      : const Color(0xFF245EAB))
+                                : deviceId == service.macDeviceId
+                                ? (dark
+                                      ? const Color(0xFFC4A7F0)
+                                      : const Color(0xFF7950A6))
+                                : deviceId == service.windowsDeviceId
+                                ? (dark
+                                      ? const Color(0xFF7CD5C4)
+                                      : const Color(0xFF167568))
+                                : deviceId == service.hakariDeviceId
+                                ? (dark
+                                      ? const Color(0xFFF6BE77)
+                                      : const Color(0xFF995A16))
+                                : theme.colors.muted;
+                            final row = LuminaSurface(
+                              key: ValueKey(
+                                'conversation-row-${conversation.id}',
+                              ),
+                              radius: 18,
+                              color: Color.alphaBlend(
+                                deviceColor.withValues(alpha: .07),
+                                theme.colors.surface,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              onTap: _importingShare
+                                  ? null
+                                  : () => _openConversation(
+                                      conversation,
+                                      receiveShare: _shareId != null,
+                                    ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    key: ValueKey(
+                                      'conversation-device-marker-${conversation.id}',
+                                    ),
+                                    width: 3,
+                                    height: 36,
+                                    margin: const EdgeInsets.only(right: 10),
+                                    decoration: BoxDecoration(
+                                      color: deviceColor,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Expanded(
-                                          child: Text(
-                                            conversation.pinned
-                                                ? '置顶 · ${conversation.title}'
-                                                : conversation.title,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.titleSmall
-                                                .copyWith(
-                                                  fontSize: 15,
-                                                  height: 1.3,
-                                                ),
-                                          ),
-                                        ),
-                                        if (latest != null) ...[
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            _formatMessageTime(
-                                              latest.createdAt,
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                conversation.pinned
+                                                    ? '置顶 · ${conversation.title}'
+                                                    : conversation.title,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: theme
+                                                    .textTheme
+                                                    .titleSmall
+                                                    .copyWith(
+                                                      fontSize: 15,
+                                                      height: 1.3,
+                                                    ),
+                                              ),
                                             ),
-                                            style: theme.textTheme.labelSmall
-                                                .copyWith(
-                                                  fontSize: 11,
-                                                  height: 1.3,
+                                            if (latest != null) ...[
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                _formatMessageTime(
+                                                  latest.createdAt,
                                                 ),
-                                          ),
-                                        ],
+                                                style: theme
+                                                    .textTheme
+                                                    .labelSmall
+                                                    .copyWith(
+                                                      fontSize: 11,
+                                                      height: 1.3,
+                                                    ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          summaries[conversation.id]!.state ==
+                                                  ChatSessionState.ready
+                                              ? deviceLabel
+                                              : '$deviceLabel · $status',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.bodySmall
+                                              .copyWith(
+                                                color: deviceColor,
+                                                fontSize: 11,
+                                                height: 1.3,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          preview != null && preview.isNotEmpty
+                                              ? preview
+                                              : conversation.type == 'main'
+                                              ? '主会话 · 随时开始新的想法'
+                                              : '轻触继续对话',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.bodySmall
+                                              .copyWith(
+                                                fontSize: 13,
+                                                height: 1.35,
+                                              ),
+                                        ),
                                       ],
                                     ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      summaries[conversation.id]!.state ==
-                                              ChatSessionState.ready
-                                          ? deviceLabel
-                                          : '$deviceLabel · $status',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.bodySmall.copyWith(
-                                        fontSize: 11,
-                                        height: 1.3,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      preview != null && preview.isNotEmpty
-                                          ? preview
-                                          : conversation.type == 'main'
-                                          ? '主会话 · 随时开始新的想法'
-                                          : '轻触继续对话',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.bodySmall.copyWith(
-                                        fontSize: 13,
-                                        height: 1.35,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  LuminaIconButton(
+                                    tooltip: '会话选项',
+                                    icon: const LuminaIcon(LuminaIcons.more),
+                                    onPressed: () =>
+                                        _conversationOptions(conversation),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 4),
-                              LuminaIconButton(
-                                tooltip: '会话选项',
-                                icon: const LuminaIcon(LuminaIcons.more),
-                                onPressed: () =>
-                                    _conversationOptions(conversation),
-                              ),
-                            ],
-                          ),
-                        );
-                        return Padding(
-                          key: ValueKey(conversation.id),
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: conversation.pinned && !filtering
-                              ? ReorderableDelayedDragStartListener(
-                                  index: index,
-                                  child: row,
-                                )
-                              : row,
+                            );
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: conversation.pinned && !filtering
+                                  ? ReorderableDelayedDragStartListener(
+                                      index: index,
+                                      child: row,
+                                    )
+                                  : row,
+                            );
+                          },
                         );
                       },
                     ),
@@ -1347,11 +1420,14 @@ class _ChatPageState extends ConsumerState<ChatPage>
   ) async {
     final conversationId = _conversationId;
     final store = _agentEvents;
-    if (!await _requireHermesTarget() || _conversationId != conversationId) {
+    if (!await _requireChatTarget() || _conversationId != conversationId) {
       store.actions.release(requestId);
-      throw StateError('未绑定 Hermes 设备');
+      throw StateError('未绑定聊天设备');
     }
     try {
+      if (_isDshTarget && type != 'session.status') {
+        throw StateError('Hakari DSH 暂不支持此操作');
+      }
       await ref
           .read(realtimeClientProvider)
           .sendEvent(
@@ -1730,12 +1806,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('files'),
           ),
-          LuminaListRow(
-            title: '指令',
-            leading: const LuminaIcon(LuminaIcons.terminal),
-            onTap: () =>
-                Navigator.of(context, rootNavigator: true).pop('commands'),
-          ),
+          if (!_isDshTarget)
+            LuminaListRow(
+              title: '指令',
+              leading: const LuminaIcon(LuminaIcons.terminal),
+              onTap: () =>
+                  Navigator.of(context, rootNavigator: true).pop('commands'),
+            ),
           LuminaListRow(
             title: '快捷提问',
             leading: const LuminaIcon(LuminaIcons.sparkles),
@@ -1930,7 +2007,11 @@ class _ChatPageState extends ConsumerState<ChatPage>
   Future<void> _sendComposer() async {
     if (_importingShare) return;
     final text = _controller.text;
-    if (!text.trimLeft().startsWith('/')) {
+    if (text.trimLeft().startsWith('/') && _chatDeviceId == null) {
+      if (!await _requireChatTarget()) return;
+    }
+    if (!mounted) return;
+    if (_isDshTarget || !text.trimLeft().startsWith('/')) {
       return _send();
     }
     if (_sending) return;
@@ -1971,11 +2052,16 @@ class _ChatPageState extends ConsumerState<ChatPage>
       return;
     }
     setState(() => _sending = true);
-    if (!await _requireHermesTarget()) {
+    if (!await _requireChatTarget()) {
       if (mounted) setState(() => _sending = false);
       return;
     }
     if (!mounted) return;
+    if (_isDshTarget && _attachments.isNotEmpty) {
+      setState(() => _sending = false);
+      showLuminaToast(context, 'Hakari DSH 当前只支持文字，附件和草稿已保留。');
+      return;
+    }
     final content = _controller.text;
     final draftStore = _drafts;
     final sentConversationId = _conversationId;
@@ -2047,7 +2133,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
   Future<void> _retryMessage(String messageId) async {
     if (_sending) return;
     setState(() => _sending = true);
-    if (!await _requireHermesTarget()) {
+    if (!await _requireChatTarget()) {
       if (mounted) setState(() => _sending = false);
       return;
     }
@@ -2094,12 +2180,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('device'),
           ),
-          LuminaListRow(
-            title: '工作区文件与终端',
-            leading: const LuminaIcon(LuminaIcons.folder),
-            onTap: () =>
-                Navigator.of(context, rootNavigator: true).pop('workspace'),
-          ),
+          if (!_isDshTarget)
+            LuminaListRow(
+              title: '工作区文件与终端',
+              leading: const LuminaIcon(LuminaIcons.folder),
+              onTap: () =>
+                  Navigator.of(context, rootNavigator: true).pop('workspace'),
+            ),
           LuminaListRow(
             title: '复制会话记录',
             leading: const LuminaIcon(LuminaIcons.file),
@@ -2112,38 +2199,42 @@ class _ChatPageState extends ConsumerState<ChatPage>
             onTap: () =>
                 Navigator.of(context, rootNavigator: true).pop('rename'),
           ),
-          LuminaListRow(
-            title: '模型与思考强度',
-            leading: const LuminaIcon(LuminaIcons.sparkles),
-            onTap: () =>
-                Navigator.of(context, rootNavigator: true).pop('model'),
-          ),
-          LuminaListRow(
-            title: 'Hermes 命令',
-            leading: const LuminaIcon(LuminaIcons.terminal),
-            onTap: () =>
-                Navigator.of(context, rootNavigator: true).pop('command'),
-          ),
+          if (!_isDshTarget)
+            LuminaListRow(
+              title: '模型与思考强度',
+              leading: const LuminaIcon(LuminaIcons.sparkles),
+              onTap: () =>
+                  Navigator.of(context, rootNavigator: true).pop('model'),
+            ),
+          if (!_isDshTarget)
+            LuminaListRow(
+              title: 'Hermes 命令',
+              leading: const LuminaIcon(LuminaIcons.terminal),
+              onTap: () =>
+                  Navigator.of(context, rootNavigator: true).pop('command'),
+            ),
           const SizedBox(height: 8),
-          LuminaListRow(
-            title: '主动投递',
-            leading: const LuminaIcon(LuminaIcons.notification),
-            onTap: () =>
-                Navigator.of(context, rootNavigator: true).pop('delivery'),
-          ),
+          if (!_isDshTarget)
+            LuminaListRow(
+              title: '主动投递',
+              leading: const LuminaIcon(LuminaIcons.notification),
+              onTap: () =>
+                  Navigator.of(context, rootNavigator: true).pop('delivery'),
+            ),
           const SizedBox(height: 8),
-          LuminaListRow(
-            title: '会话控制',
-            leading: const LuminaIcon(LuminaIcons.settings),
-            onTap: () =>
-                Navigator.of(context, rootNavigator: true).pop('session'),
-          ),
+          if (!_isDshTarget)
+            LuminaListRow(
+              title: '会话控制',
+              leading: const LuminaIcon(LuminaIcons.settings),
+              onTap: () =>
+                  Navigator.of(context, rootNavigator: true).pop('session'),
+            ),
         ],
       ),
     );
     if (!mounted) return;
     if (action == 'workspace') {
-      if (!await _requireHermesTarget() || !mounted) return;
+      if (!await _requireChatTarget() || !mounted) return;
       final client = WorkspaceClient(
         realtime: ref.read(realtimeClientProvider),
         config: ref.read(appConfigProvider),
@@ -2160,7 +2251,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
       final text = messages
           .map(
             (message) =>
-                '${message.role == 'user' ? '我' : 'Hermes'} · ${message.createdAt}\n${_readableMessage(message)}',
+                '${message.role == 'user' ? '我' : ref.read(agentChatServiceProvider).agentLabel(_chatDeviceId)} · ${message.createdAt}\n${_readableMessage(message)}',
           )
           .join('\n\n');
       await Clipboard.setData(ClipboardData(text: text));
@@ -2237,7 +2328,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
               children: [
                 _conversationList(),
                 _hasOpenedConversation
-                    ? _conversationDetail(context)
+                    ? Consumer(
+                        builder: (context, ref, _) =>
+                            _conversationDetail(context, ref),
+                      )
                     : const SizedBox.shrink(),
               ],
             ),
@@ -2293,7 +2387,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
     );
   }
 
-  Widget _conversationDetail(BuildContext context) {
+  Widget _conversationDetail(BuildContext context, WidgetRef ref) {
     final colors = LuminaTheme.of(context).colors;
     final messages = ref.watch(
       chatMessageWindowProvider((
@@ -2564,7 +2658,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
                           onRefresh: _chatDeviceId == null
                               ? null
                               : _refreshAgentStatus,
-                          onSessionAction: _runSessionAction,
+                          onSessionAction: _isDshTarget
+                              ? null
+                              : _runSessionAction,
                         ),
                         LuminaIconButton(
                           onPressed: _showChatOptions,
@@ -2610,7 +2706,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: LuminaQuotePreview(
-                          title: reply.role == 'user' ? '回复自己' : '回复 Hermes',
+                          title: reply.role == 'user'
+                              ? '回复自己'
+                              : '回复 ${ref.read(agentChatServiceProvider).agentLabel(_chatDeviceId)}',
                           text: _quoteText(reply),
                           onDismiss: () => setState(() => _replyMessage = null),
                         ),
@@ -2648,7 +2746,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                       ),
                     SlashCommandSuggestions(
                       controller: _controller,
-                      enabled: !_sending,
+                      enabled: !_sending && !_isDshTarget,
                       onSelected: (shortcut) {
                         _controller.value = TextEditingValue(
                           text: shortcut.command,

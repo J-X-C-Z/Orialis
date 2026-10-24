@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
@@ -95,6 +96,13 @@ class ChatRepository {
 
   Stream<List<Conversation>> watchConversations() =>
       database.watchActiveConversations();
+
+  Stream<List<Conversation>> watchChatConversations() => database
+      .watchActiveConversations(excludeBackground: true)
+      .distinct(listEquals);
+
+  static bool isBackgroundChatConversationId(String id) =>
+      id.startsWith('memory-') || id.startsWith('event-');
 
   /// Import a conversation only after the server has confirmed its device binding.
   Future<Conversation> importDeviceConversation(
