@@ -35,8 +35,6 @@ class WearSnapshotProducer {
   WearSnapshotProducer(this.database, this.config);
   final AppDatabase database;
   final AppConfig config;
-  static const candidateLimit = 64;
-
   Future<WearSnapshotPreview> read() async {
     // The manager captures its generation before calling this asynchronous
     // method. Only the non-secret profile observations enter the projection.
@@ -58,7 +56,7 @@ class WearSnapshotProducer {
     if (account != null) {
       for (final entry in account.collections.entries) {
         total[entry.key] = entry.value.length;
-        candidates[entry.key] = entry.value.take(candidateLimit).toList();
+        candidates[entry.key] = entry.value;
       }
     } else {
       await database.transaction(() async {
@@ -98,13 +96,13 @@ class WearSnapshotProducer {
                     (r) => OrderingTerm(expression: r.manualPosition),
                     (r) => OrderingTerm(expression: r.due),
                     (r) => OrderingTerm(expression: r.id),
-                  ])
-                  ..limit(candidateLimit))
+                  ]))
                 .get();
         candidates['tasks'] = tasks
             .map(
               (r) => <String, Object?>{
                 'id': r.id,
+                'version': r.remoteVersion,
                 'title': r.title,
                 'notes': r.notes,
                 'due': r.due,
@@ -127,8 +125,7 @@ class WearSnapshotProducer {
                   ..orderBy([
                     (r) => OrderingTerm(expression: r.startAt),
                     (r) => OrderingTerm(expression: r.id),
-                  ])
-                  ..limit(candidateLimit))
+                  ]))
                 .get();
         candidates['schedules'] = schedules
             .map(
@@ -153,8 +150,7 @@ class WearSnapshotProducer {
                     (r) => OrderingTerm(expression: r.manualPosition),
                     (r) => OrderingTerm(expression: r.createdAt),
                     (r) => OrderingTerm(expression: r.id),
-                  ])
-                  ..limit(candidateLimit))
+                  ]))
                 .get();
         candidates['projects'] = projects
             .map(
@@ -177,8 +173,7 @@ class WearSnapshotProducer {
                     (r) => OrderingTerm(expression: r.projectId),
                     (r) => OrderingTerm(expression: r.position),
                     (r) => OrderingTerm(expression: r.id),
-                  ])
-                  ..limit(candidateLimit))
+                  ]))
                 .get();
         candidates['milestones'] = milestones
             .map(
@@ -240,7 +235,11 @@ class WearSnapshotProducer {
     }
     // Round-robin leaves room for each phone domain. Oversized records are
     // omitted whole, never silently shortened or converted to another domain.
-    for (var index = 0; index < candidateLimit; index++) {
+    final candidateCount = candidates.values.fold<int>(
+      0,
+      (count, rows) => rows.length > count ? rows.length : count,
+    );
+    for (var index = 0; index < candidateCount; index++) {
       for (final key in total.keys) {
         final rows = candidates[key]!;
         if (index >= rows.length) continue;

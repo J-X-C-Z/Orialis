@@ -21,7 +21,8 @@ const transport = {
     conn: null,
     receiver: null,
     sequence: 0,
-    pendingPings: null
+    pendingPings: null,
+    pendingTaskMutations: null
   },
   onInit() {
     if (this.started) return
@@ -31,6 +32,7 @@ const transport = {
     this.writing = false
     this.receiver = protocol.createReceiver(() => Date.now())
     this.pendingPings = Object.create(null)
+    this.pendingTaskMutations = Object.create(null)
     store.registerCacheInvalidation((guard) => this.invalidateCache(guard))
     this.loadSavedSnapshot()
     if (!interconnect || typeof interconnect.instance !== 'function') {
@@ -95,6 +97,19 @@ const transport = {
       }
     })
   },
+  completeTask(task, completed, callback) {
+    if (!task || typeof task.id !== 'string' || !Number.isInteger(task.version) || !this.conn || typeof this.conn.send !== 'function') { callback('rejected'); return }
+    if (Object.keys(this.pendingTaskMutations).some((id) => this.pendingTaskMutations[id].taskId === task.id)) { callback('busy'); return }
+    this.sequence += 1
+    const mutationId = 'task-' + Date.now() + '-' + this.sequence
+    const timeout = setTimeout(() => { delete this.pendingTaskMutations[mutationId]; callback('pending') }, 15000)
+    this.pendingTaskMutations[mutationId] = { taskId: task.id, completed: completed, callback: callback, timeout: timeout }
+    this.conn.send({
+      data: { ns: 'orialis.wear.v1', type: 'task.complete.request', payload: { mutationId: mutationId, taskId: task.id, completed: completed, baseVersion: task.version } },
+      success: () => {},
+      fail: () => { clearTimeout(timeout); delete this.pendingTaskMutations[mutationId]; callback('rejected') }
+    })
+  },
   receive(raw) {
     let frame
     try { frame = protocol.decodeFrame(raw) } catch (error) { this.lastResult = '消息拒收：' + stringifyError(error); return }
@@ -111,6 +126,14 @@ const transport = {
       clearTimeout(pending)
       delete this.pendingPings[frame.payload.pingId]
       this.lastResult = '收到 Pong：' + frame.payload.pingId
+      return
+    }
+    if (frame.type === 'task.complete.result' && frame.payload && typeof frame.payload.mutationId === 'string') {
+      const pending = this.pendingTaskMutations[frame.payload.mutationId]
+      if (!pending || pending.taskId !== frame.payload.taskId || pending.completed !== frame.payload.completed) return
+      clearTimeout(pending.timeout)
+      delete this.pendingTaskMutations[frame.payload.mutationId]
+      pending.callback(['completed', 'pending', 'conflict'].indexOf(frame.payload.status) >= 0 ? frame.payload.status : 'rejected')
       return
     }
     if (frame.type !== 'snapshot.part') { this.lastResult = '未知消息类型：' + frame.type; return }
@@ -214,6 +237,8 @@ const transport = {
     if (!this.pendingPings) return
     Object.keys(this.pendingPings).forEach((pingId) => clearTimeout(this.pendingPings[pingId]))
     this.pendingPings = Object.create(null)
+    Object.keys(this.pendingTaskMutations || {}).forEach((id) => { const pending = this.pendingTaskMutations[id]; clearTimeout(pending.timeout); pending.callback('pending') })
+    this.pendingTaskMutations = Object.create(null)
   }
 }
 

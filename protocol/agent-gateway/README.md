@@ -4,6 +4,14 @@
 它冻结 v1 基线及 v0.3–v0.12 / v1.x 的结构化事件、能力协商和 fallback 语义；
 Voice 明确排除。
 
+### 原生 Hermes 流与多回复确认
+
+`reply_followups` 能力表示服务端支持同一用户消息锚点的分段文本和多个 MEDIA 回复。每条 `message.reply` 必须属于原用户、会话与已绑定设备，附件沿用账号/会话校验；消息与投递队列事务提交后才返回 `message.ack`。重试相同消息 ID 只能提交相同内容和附件，不同内容会被拒绝。
+
+结构化事件使用 `agent.ack`，按 `event_id` 与 `seq` 关联；`received/duplicate` 才表示成功，不能用旧的 `message.ack` 代替。`seq` 是设备级事件序号，工具与 typing 会占用序号，并非流文字的连续下标。原生 Hermes 传入累计快照，插件仅发送新增后缀；改写后的最终全文通过 `agent.complete.content` 校正，`message_id` 指向已提交的正式回复，手机在该正式消息到达后移除临时流卡片。每个输出片段有独立 `run_id`。
+
+实时事件本身不代替正式回复持久化。等待首条回复的空闲期限为 60 秒，有效会话/设备的实时活动可续期，总期限为 15 分钟；超时沿用投递队列重试。
+
 ## 实现状态
 
 当前 Rust Agent Gateway parser、Hermes 插件和移动端事件状态层共同支持 v1 基线帧、

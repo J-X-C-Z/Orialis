@@ -23,6 +23,12 @@ request/delivery ID 并按能力协商执行。调度触发仍由 Hermes Cron �
 
 ## 配置
 
+手机工作区（目录、文本预览、上传下载、Git diff、可选交互终端）的配置与线协议见
+[`workspace-v1.md`](../../../protocol/agent-gateway/workspace-v1.md)。默认不共享任何目录。
+通过 `ORIALIS_WORKSPACES` 或平台 `extra.workspaces` 显式配置允许目录；终端还需
+逐目录设置 `terminal:true`。终端具有 Hermes 进程用户的系统权限，所选目录仅是
+初始工作目录，不构成终端命令的文件系统沙箱。
+
 在 Hermes 的 Orialis 平台配置中设置以下环境变量（或对应的 platform `extra` 配置）。要从聊天创建日程，必须配置 Agent token：
 
 | 变量 | 必需 | 说明 |

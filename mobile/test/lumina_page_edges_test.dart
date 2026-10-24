@@ -220,9 +220,10 @@ void main() {
     final row = find
         .ancestor(of: title, matching: find.byType(LuminaCompletionList))
         .first;
-    await tester.tap(
-      find.descendant(of: row, matching: find.byType(LuminaCheck)),
-    );
+    final check = find.descendant(of: row, matching: find.byType(LuminaCheck));
+    await Scrollable.ensureVisible(tester.element(check), alignment: 0.2);
+    await tester.pumpAndSettle();
+    await tester.tap(check);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 160));
     expect(title, findsOneWidget);

@@ -41,7 +41,7 @@ void main() {
         repository: repository,
         flush: () async {},
       );
-      await restored.retry(saved.id);
+      await restored.retry(saved.id, conversationId: 'aozora-chat');
       expect(await repository.watchMessages('aozora-chat').first, hasLength(1));
       expect(restored.lastMessageId, saved.id);
     },
@@ -87,7 +87,7 @@ void main() {
     expect(controller.state, ChatSendState.failed);
     expect(controller.lastError, isA<StateError>());
     final messageId = controller.lastMessageId!;
-    await controller.retry(messageId);
+    await controller.retry(messageId, conversationId: 'default');
     expect(controller.state, ChatSendState.idle);
     expect(controller.lastMessageId, messageId);
     expect((await repository.watchMessages('default').first), hasLength(1));

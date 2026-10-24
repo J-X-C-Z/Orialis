@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib
+import json
 import mimetypes
 import logging
 import os
@@ -12,7 +14,10 @@ import platform as host_platform
 import time
 import uuid
 from collections import OrderedDict
+from contextvars import ContextVar
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, Mapping, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -32,10 +37,35 @@ from .config import OrialisConfig, env_enablement, validate
 from .attachment_cache import AttachmentCache
 from .conversation import chat_id_for_conversation, conversation_id_for_chat_id
 from . import protocol
+from .response_ui import PLATFORM_HINT
 
 logger = logging.getLogger(__name__)
 
 PLUGIN_VERSION = "1.0.0"
+
+
+def _native_receipts_available() -> bool:
+    """Older Hermes hosts may have no admission store; unrelated import failures remain errors."""
+    required = {
+        "gateway.session_authorities": ("authority_for_home",),
+        "gateway.session_ingress_context": ("native_callback", "capture_provenance"),
+        "hermes_state_runtime": ("find_session_admission", "RuntimeStoreError"),
+        "gateway.session_envelope": ("prepare_native",),
+        "gateway.session_ingress_media": ("reconcile_native_retry",),
+        "gateway.session_results": ("admission_result",),
+        "gateway.session_ingress": ("deliver_response",),
+        "hermes_state_keys": ("admission_fingerprint",),
+    }
+    for name, symbols in required.items():
+        try:
+            module = importlib.import_module(name)
+        except ModuleNotFoundError as error:
+            if error.name != name:
+                raise
+            return False
+        if any(not callable(getattr(module, symbol, None)) for symbol in symbols):
+            return False
+    return True
 ACK_TIMEOUT_SECONDS = 10.0
 RECONNECT_INITIAL_DELAY_SECONDS = 1.0
 RECONNECT_MAX_DELAY_SECONDS = 30.0
@@ -173,12 +203,18 @@ class OrialisAdapter(BasePlatformAdapter):
     """Thin WebSocket bridge; Hermes remains responsible for agent execution."""
 
     supports_code_blocks = False
+    supports_status_text = True
     interactive_resume = False
     SUPPORTS_NATIVE_STREAMING = True
+    # Keep a bounded 32 KiB UI fence intact on the host's non-native send path.
+    MAX_MESSAGE_LENGTH = 64 * 1024
 
     def __init__(self, config: Any):
         super().__init__(config=config, platform=Platform("orialis"))
         self._orialis = OrialisConfig.from_platform_config(config)
+        from .workspace import WorkspaceService
+        self._workspace = WorkspaceService(self._orialis.workspaces)
+        self._host_capabilities = set(protocol.SUPPORTED_CAPABILITIES) | {"workspace.request", "session.status"}
         self._ws = None
         self._reader_task: Optional[asyncio.Task] = None
         self._send_lock = asyncio.Lock()
@@ -187,12 +223,15 @@ class OrialisAdapter(BasePlatformAdapter):
         self._manual_disconnect = False
         self._connection_state = "disconnected"
         self._ack_waiters: Dict[str, asyncio.Future] = {}
+        self._event_receipts: Dict[str, tuple[str, int]] = {}
+        self._stream_reply_ids: "OrderedDict[tuple[str, str, str], str]" = OrderedDict()
         self._seen_message_ids: set[str] = set()
         self._seen_message_order: list[str] = []
         self._seen_delivery_ids: set[str] = set()
         self._seen_delivery_order: list[str] = []
         self._reply_anchors: Dict[str, str] = {}
         self._command_anchors: Dict[str, str] = {}
+        self._reply_scope: ContextVar = ContextVar("orialis_reply_scope", default=None)
         self._server_capabilities: set[str] = set()
         self._negotiated = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -200,8 +239,15 @@ class OrialisAdapter(BasePlatformAdapter):
         self._pending_interactions: Dict[str, Dict[str, Any]] = {}
         self._resolved_interactions: "OrderedDict[str, float]" = OrderedDict()
         self._active_streams: Dict[str, Dict[str, Any]] = {}
+        self._active_tools: Dict[str, Dict[str, Any]] = {}
+        self._active_turn_events: Dict[str, MessageEvent] = {}
+        self._processing_status: "OrderedDict[str, Dict[str, str]]" = OrderedDict()
+        self._inbound_turn_sources: "OrderedDict[str, Any]" = OrderedDict()
+        self._stop_receipts: Dict[str, MessageEvent] = {}
+        self._replay_receipts: Dict[str, bool] = {}
         self._stream_context: Dict[str, Any] = {}
         self._scheduled_wire_tasks: set[asyncio.Task] = set()
+        self._dispatch_tasks: set[asyncio.Task] = set()
         self._attachment_cache = AttachmentCache(
             self._orialis.server_url, self._orialis.device_id, self._orialis.device_token
         )
@@ -235,13 +281,13 @@ class OrialisAdapter(BasePlatformAdapter):
                 headers["Authorization"] = f"Bearer {self._orialis.device_token}"
             try:
                 await self._close_socket()
-                kwargs: Dict[str, Any] = {"ping_interval": 30, "ping_timeout": 60}
+                kwargs: Dict[str, Any] = {"ping_interval": 30, "ping_timeout": 60, "max_size": 2 * 1024 * 1024}
                 if headers:
                     kwargs["additional_headers"] = headers
                 self._ws = await websockets.connect(self._orialis.server_url, **kwargs)
                 await self._send_wire(protocol.hello(
                     self._orialis.device_id, plugin_version=PLUGIN_VERSION, platform=_platform_name(),
-                    capabilities=sorted(protocol.SUPPORTED_CAPABILITIES),
+                    capabilities=sorted(self._host_capabilities),
                 ))
                 raw_ack = await asyncio.wait_for(self._ws.recv(), timeout=15)
                 ack = protocol.parse_message(raw_ack)
@@ -271,6 +317,7 @@ class OrialisAdapter(BasePlatformAdapter):
                 return False
 
     async def disconnect(self) -> None:
+        await self._workspace.close()
         self._manual_disconnect = True
         self._connection_state = "stopped"
         reconnect_task, self._reconnect_task = self._reconnect_task, None
@@ -298,6 +345,7 @@ class OrialisAdapter(BasePlatformAdapter):
         await self._close_socket()
         self._fail_ack_waiters(ConnectionError("Orialis Server connection closed"))
         self._fail_request_waiters(ConnectionError("Orialis Server connection closed"))
+        await self._cancel_dispatch_tasks()
         logger.info("[%s] disconnected from Orialis Server", self.name)
 
     def _schedule_reconnect(self) -> None:
@@ -350,6 +398,7 @@ class OrialisAdapter(BasePlatformAdapter):
             if not waiter.done():
                 waiter.set_exception(error)
         self._ack_waiters.clear()
+        self._event_receipts.clear()
 
     def _fail_request_waiters(self, error: Exception) -> None:
         for waiter in list(self._request_waiters.values()):
@@ -397,7 +446,7 @@ class OrialisAdapter(BasePlatformAdapter):
         try:
             await asyncio.sleep(0.05)
             if self._ws is not None and self._running:
-                await self._send_wire(protocol.capabilities_hello())
+                await self._send_wire(protocol.capabilities_hello(sorted(self._host_capabilities)))
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -407,7 +456,20 @@ class OrialisAdapter(BasePlatformAdapter):
         try:
             while self._running and self._ws is not None:
                 raw = await self._ws.recv()
-                await self._handle_wire(raw)
+                try:
+                    kind = protocol.parse_message(raw)["type"]
+                except protocol.ProtocolError:
+                    kind = None
+                if kind in {"message.send", "command.request", "slash.command", "delivery.send",
+                            "cron.delivery", "proactive.delivery", "workspace.request",
+                            "session.open", "session.close", "session.reset", "session.list", "session.info"}:
+                    # Native slash handlers can await send() receipts; keep this reader free to receive them.
+                    task = asyncio.create_task(self._handle_wire(raw), name="orialis-inbound-dispatch")
+                    self._dispatch_tasks.add(task)
+                    task.add_done_callback(self._dispatch_tasks.discard)
+                    task.add_done_callback(self._log_scheduled_wire_failure)
+                else:
+                    await self._handle_wire(raw)
         except ConnectionClosed:
             logger.info("[%s] Orialis Server connection closed", self.name)
         except asyncio.CancelledError:
@@ -415,13 +477,22 @@ class OrialisAdapter(BasePlatformAdapter):
         except Exception:
             logger.exception("[%s] Orialis Agent receive loop failed", self.name)
         finally:
+            await self._workspace.close()
             self._mark_disconnected()
             await self._close_socket()
             self._fail_ack_waiters(ConnectionError("Orialis Server connection closed"))
             self._fail_request_waiters(ConnectionError("Orialis Server connection closed"))
+            await self._cancel_dispatch_tasks()
             if not self._manual_disconnect:
                 self._connection_state = "disconnected"
                 self._schedule_reconnect()
+
+    async def _cancel_dispatch_tasks(self) -> None:
+        tasks = [task for task in self._dispatch_tasks if task is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _handle_wire(self, raw: Any) -> None:
         try:
@@ -432,7 +503,11 @@ class OrialisAdapter(BasePlatformAdapter):
                 await self._send_wire(protocol.error(exc.code, str(exc)))
             return
         message_type = message["type"]
-        if message_type == "ping":
+        if message_type == "workspace.request":
+            result = await self._workspace.handle(message["conversation_id"], message["payload"])
+            await self._send_wire({"version": 1, "type": "workspace.response", "request_id": message["request_id"],
+                                   "conversation_id": message["conversation_id"], "payload": result})
+        elif message_type == "ping":
             await self._send_wire(protocol.pong())
         elif message_type == "message.ack":
             waiter = self._ack_waiters.get(message["message_id"])
@@ -442,6 +517,11 @@ class OrialisAdapter(BasePlatformAdapter):
             if request_waiter is not None and not request_waiter.done():
                 request_waiter.set_result(message)
         elif message_type == "agent.ack":
+            receipt = self._event_receipts.get(message["event_id"])
+            if receipt is not None and receipt[1] == message["seq"]:
+                waiter = self._ack_waiters.get(receipt[0])
+                if waiter is not None and not waiter.done():
+                    waiter.set_result(message["status"])
             logger.debug(
                 "[%s] received agent acknowledgement event_id=%s seq=%s status=%s",
                 self.name,
@@ -520,16 +600,21 @@ class OrialisAdapter(BasePlatformAdapter):
             self._mark_interaction_resolved(request_id)
             await self._send_interaction_error("INTERACTION_EXPIRED", "interaction response arrived after its deadline", request_id)
             return
-        if pending.get("conversation_id") != message.get("conversation_id"):
+        # Rust flat resolve frames carry the conversation in session_id.
+        conversation_id = message.get("conversation_id") or message.get("session_id")
+        if pending.get("conversation_id") != conversation_id:
             await self._send_interaction_error("INTERACTION_SCOPE_MISMATCH", "interaction belongs to another conversation", request_id)
             return
         kind = pending["kind"]
+        if not message.get("type", "").startswith(f"{kind}."):
+            await self._send_interaction_error("INTERACTION_TYPE_MISMATCH", "response type does not match the pending interaction", request_id)
+            return
         resolved = False
         if kind == "clarify":
             try:
-                from tools.clarify_gateway import resolve_gateway_clarify
+                from tools.clarify_gateway import CANCELLED, resolve_gateway_clarify
                 if message.get("type") == "clarify.cancel":
-                    response = message.get("reason") or "cancelled"
+                    response = CANCELLED
                 else:
                     response = message.get("response") or message.get("answer") or ""
                 resolved = bool(resolve_gateway_clarify(request_id, response))
@@ -628,14 +713,22 @@ class OrialisAdapter(BasePlatformAdapter):
             message_id=message_id,
             media_urls=paths,
             media_types=media_types,
+            timestamp=datetime.fromtimestamp(0, timezone.utc),
         )
+        receipt = await self._native_retry_receipt(event)
+        if receipt is not None and receipt[1]["status"] == "terminal":
+            await self._replay_native_terminal(event, *receipt)
+            return
         logger.info(
             "[%s] message received type=message.send message_id=%s conversation_id=%s attachments=%d",
             self.name, message_id, conversation_id, len(paths),
         )
-        self._reply_anchors[chat_id] = message_id
+        self._reply_anchors.setdefault(chat_id, message_id)
+        self._inbound_turn_sources[message_id] = event.source
+        while len(self._inbound_turn_sources) > 512:
+            self._inbound_turn_sources.popitem(last=False)
         try:
-            await self.handle_message(event)
+            await self._handle_native_input(event)
             # BasePlatformAdapter.handle_message returns immediately after it
             # claims the event. Pin files during the background turn; unpin
             # without deleting when no handler accepted it.
@@ -645,7 +738,9 @@ class OrialisAdapter(BasePlatformAdapter):
             self._release_inbound_attachments(message_id)
             raise
         finally:
-            self._reply_anchors.pop(chat_id, None)
+            if (not getattr(event, "_gateway_accepted", False)
+                    and self._reply_anchors.get(chat_id) == message_id):
+                self._reply_anchors.pop(chat_id, None)
 
     async def _dispatch_command(self, message: Dict[str, Any]) -> None:
         """Pass a server-originated Hermes slash command through the real gateway.
@@ -677,13 +772,11 @@ class OrialisAdapter(BasePlatformAdapter):
             source=source, raw_message=message, message_id=request_id,
             metadata={"orialis_request_id": request_id, "event_type": message["type"]},
         )
-        self._reply_anchors[chat_id] = request_id
-        self._command_anchors[chat_id] = request_id
+        scope = self._reply_scope.set((chat_id, request_id, request_id))
         try:
-            await self.handle_message(event)
+            await self._handle_native_input(event)
         finally:
-            self._command_anchors.pop(chat_id, None)
-            self._reply_anchors.pop(chat_id, None)
+            self._reply_scope.reset(scope)
 
     async def _dispatch_delivery(self, message: Dict[str, Any]) -> None:
         """Deliver cron/proactive input without allowing payload text to invoke controls."""
@@ -711,11 +804,11 @@ class OrialisAdapter(BasePlatformAdapter):
             metadata={"event_type": message["type"], **(message.get("metadata") or {})},
             allow_gateway_control=False,
         )
-        self._reply_anchors[chat_id] = delivery_id
+        scope = self._reply_scope.set((chat_id, delivery_id, None))
         try:
             await self.handle_message(event)
         finally:
-            self._reply_anchors.pop(chat_id, None)
+            self._reply_scope.reset(scope)
 
     async def _dispatch_artifact(self, message: Dict[str, Any]) -> None:
         """Expose an artifact event to Hermes as metadata, never as executable content."""
@@ -750,11 +843,136 @@ class OrialisAdapter(BasePlatformAdapter):
         request_id = message["request_id"]
         conversation_id = message.get("conversation_id") or ""
         if self._ws is not None:
+            if message["type"] == "session.info":
+                snapshot = self._processing_status.get(chat_id_for_conversation(conversation_id)) if conversation_id else None
+                snapshot = snapshot or {"status": "unknown", "message": "尚无本设备记录的处理状态"}
+                await self._send_wire({
+                    "version": protocol.PROTOCOL_VERSION, "type": "session.reply",
+                    "request_id": request_id, "conversation_id": conversation_id,
+                    "session_id": message.get("session_id"),
+                    "status": snapshot["status"], "message": snapshot["message"],
+                })
+                return
             await self._send_wire({
                 "version": protocol.PROTOCOL_VERSION, "type": "session.reply",
                 "request_id": request_id, "conversation_id": conversation_id,
                 "status": "accepted",
             })
+
+    def _reply_anchor(self, chat_id: str) -> Optional[str]:
+        scope = self._reply_scope.get()
+        return scope[1] if scope and scope[0] == chat_id else self._reply_anchors.get(chat_id)
+
+    async def _native_retry_receipt(self, event: MessageEvent):
+        """Restore only this authenticated route/principal/request's provider-less timestamp."""
+        runner = self.gateway_runner
+        if runner is None or not getattr(runner, "session_store", None):
+            return None
+        if not _native_receipts_available():
+            return None
+        from gateway.session_authorities import authority_for_home
+        from gateway.session_ingress_context import native_callback, capture_provenance
+        from hermes_state_runtime import find_session_admission
+        self._canonicalize(event.source)
+        profile = runner._adapter_profile_for_source(event.source)
+        home = getattr(runner, "_native_transport_homes", {}).get(profile)
+        if home is None:
+            return None
+        with native_callback(runner, event, home, profile):
+            provenance = capture_provenance(runner, event)
+        authority = authority_for_home(runner, provenance["runtime_home"])
+        if authority is None:
+            return None
+        route = runner.session_store._generate_session_key(event.source)
+        entry = runner.session_store.lookup_by_session_key(route)
+        if entry is None:
+            return None
+        source = event.source
+        principal = "messaging:" + json.dumps(
+            [source.profile, source.platform.value, source.chat_id, source.thread_id, source.user_id], separators=(",", ":"))
+        row = await asyncio.to_thread(find_session_admission, authority.db, principal_id=principal,
+                                      session_id=entry.session_id, request_id=event.message_id)
+        if row is None:
+            return None
+        timestamp = row["payload"].get("native_text_v1", {}).get("timestamp")
+        if isinstance(timestamp, str):
+            event.timestamp = datetime.fromisoformat(timestamp)
+        return authority, row, route
+
+    async def _replay_native_terminal(self, event: MessageEvent, authority, row, route) -> None:
+        from gateway.session_envelope import prepare_native
+        from gateway.session_ingress_media import reconcile_native_retry
+        from gateway.session_results import admission_result
+        from gateway.session_ingress import deliver_response
+        from gateway.session_ingress_context import native_callback
+        from hermes_state_keys import admission_fingerprint
+        from hermes_state_runtime import RuntimeStoreError
+        runner = self.gateway_runner
+        profile = runner._adapter_profile_for_source(event.source)
+        home = runner._native_transport_homes[profile]
+        with native_callback(runner, event, home, profile):
+            payload = await prepare_native(runner, event)
+        payload = await asyncio.to_thread(reconcile_native_retry, authority.db,
+            principal_id=row["principal_id"], session_id=row["target_session_id"],
+            request_id=event.message_id, payload=payload, raw=event.raw_message)
+        digest = admission_fingerprint(canonical_target=row["target_session_id"],
+                                       payload={"input": payload, "intent": row["intent"]})
+        retained_digest = admission_fingerprint(canonical_target=row["target_session_id"],
+            payload={"input": row["payload"], "intent": row["intent"]})
+        if digest != retained_digest:
+            raise RuntimeStoreError("admission_conflict")
+        saved = await asyncio.to_thread(admission_result, authority.db, row["admission_id"])
+        response = (saved or {}).get("result", {}).get("final_response")
+        if not isinstance(response, str) or not response:
+            status = {"cancelled": "已停止", "interrupted": "已停止", "failed": "已失败"}.get(row.get("outcome"), "已结束")
+            response = f"此任务此前{status}，没有可回放的回复；未重新执行。"
+        chat_id = event.source.chat_id
+        scope = self._reply_scope.set((chat_id, event.message_id, None))
+        self._replay_receipts[event.message_id] = False
+        try:
+            logger.info("[%s] replaying committed native receipt request_id=%s admission_id=%s", self.name,
+                        event.message_id, row["admission_id"])
+            await deliver_response(self, event, route, response)
+        finally:
+            if not self._replay_receipts.pop(event.message_id, False):
+                self._seen_message_ids.discard(event.message_id)
+                if event.message_id in self._seen_message_order:
+                    self._seen_message_order.remove(event.message_id)
+            self._reply_scope.reset(scope)
+            self._release_inbound_attachments(event.message_id)
+
+    async def _handle_native_input(self, event: MessageEvent) -> None:
+        """Finish a bypassed original turn only after the real native /stop reply was committed."""
+        chat_id = event.source.chat_id
+        target = None
+        if event.text.strip().split(maxsplit=1)[:1] == ["/stop"]:
+            context = self._stream_context
+            anchor = context.get("reply_to") if context.get("chat_id") == chat_id else None
+            source = "native_stream" if anchor else "active_hook"
+            anchor = anchor or self._reply_anchors.get(chat_id)
+            target = self._active_turn_events.get(anchor)
+            if target is None and anchor in self._inbound_turn_sources:
+                session_key = self._event_session_key(event)
+                task = self._session_tasks.get(session_key)
+                native_stream = context.get("chat_id") == chat_id and context.get("reply_to") == anchor
+                if native_stream or (session_key in self._active_sessions and task is not None and not task.done()):
+                    # Retain only the actual inbound identity/source, never raw prompts or attachment references.
+                    target = SimpleNamespace(message_id=anchor, source=self._inbound_turn_sources[anchor])
+                    source = "native_stream" if native_stream else "active_session_task"
+            logger.info("[%s] native stop capture request_id=%s target=%s source=%s accepted=%s", self.name,
+                        event.message_id, getattr(target, "message_id", None), source,
+                        getattr(event, "_gateway_accepted", False))
+        if target is None or target.message_id == event.message_id:
+            await self.handle_message(event)
+            return
+        self._stop_receipts[event.message_id] = target
+        while len(self._stop_receipts) > 512:
+            self._stop_receipts.pop(next(iter(self._stop_receipts)))
+        try:
+            await self.handle_message(event)
+        except BaseException:
+            self._stop_receipts.pop(event.message_id, None)
+            raise
 
     async def send(
         self,
@@ -765,7 +983,7 @@ class OrialisAdapter(BasePlatformAdapter):
     ) -> SendResult:
         if self._ws is None or not self._running:
             return SendResult(success=False, error="Orialis Server connection is not available", retryable=True)
-        reply_to = reply_to or self._reply_anchors.get(chat_id)
+        reply_to = reply_to or self._reply_anchor(chat_id)
         metadata = metadata or {}
         if metadata.get("force_proactive_send") or metadata.get("proactive"):
             if self.supports_feature("proactive_delivery") or self.supports_feature("cron_delivery"):
@@ -776,9 +994,13 @@ class OrialisAdapter(BasePlatformAdapter):
         if not reply_to:
             return SendResult(success=False, error="Orialis reply is missing reply_to message id")
         conversation_id = conversation_id_for_chat_id(chat_id)
-        message_id = f"msg_{uuid.uuid4().hex[:12]}"
         attachments = metadata.get("attachments")
-        command_id = self._command_anchors.get(chat_id)
+        message_id = (self._stream_reply_ids.get((chat_id, reply_to, content))
+                      if not attachments else None) or f"msg_{uuid.uuid4().hex[:12]}"
+        scope = self._reply_scope.get()
+        command_id = scope[2] if scope and scope[0] == chat_id else self._command_anchors.get(chat_id)
+        if command_id != reply_to:
+            command_id = None
         if command_id and self.supports_feature("slash_commands"):
             message = protocol.command_reply(
                 request_id=command_id, conversation_id=conversation_id,
@@ -795,13 +1017,23 @@ class OrialisAdapter(BasePlatformAdapter):
         self._ack_waiters[ack_key] = ack_waiter
         try:
             await self._send_wire(message)
-            await asyncio.wait_for(asyncio.shield(ack_waiter), timeout=self._orialis.ack_timeout_seconds)
+            status = await asyncio.wait_for(asyncio.shield(ack_waiter), timeout=self._orialis.ack_timeout_seconds)
+            if status not in {"received", "duplicate", "accepted", "completed"}:
+                self._stop_receipts.pop(reply_to, None)
+                return SendResult(success=False, error=f"Orialis reply rejected: {status}", retryable=True)
             logger.info(
                 "[%s] message sent type=message.reply message_id=%s conversation_id=%s reply_to=%s",
                 self.name, message_id, conversation_id, reply_to,
             )
+            stopped_turn = self._stop_receipts.pop(reply_to, None)
+            if reply_to in self._replay_receipts:
+                self._replay_receipts[reply_to] = True
+            if stopped_turn is not None:
+                logger.info("[%s] native stop reply committed; closing original message_id=%s", self.name, stopped_turn.message_id)
+                await self._finish_processing(stopped_turn, "cancelled")
             return SendResult(success=True, message_id=message_id if message["type"] == "message.reply" else command_id)
         except Exception as exc:
+            self._stop_receipts.pop(reply_to, None)
             logger.error("[%s] could not send Hermes reply to Orialis Server: %s", self.name, exc)
             if isinstance(exc, asyncio.TimeoutError):
                 error = "Orialis Server acknowledgement timed out"
@@ -864,13 +1096,8 @@ class OrialisAdapter(BasePlatformAdapter):
             logger.debug("[%s] typing-stop notification failed", self.name, exc_info=True)
 
     def supports_native_streaming(self, chat_id=None, chat_type=None, metadata=None) -> bool:
-        # The current Orialis Server advertises agent event frames, but its
-        # mobile dispatch registry is resolved only by message.reply. Sending
-        # structured stream frames here makes Hermes suppress that required
-        # final reply and leaves the mobile request pending until timeout.
-        # Keep the baseline message.reply path authoritative until the server
-        # advertises an explicit stream-completion contract.
-        return False
+        return (self.supports_feature("streaming") and self.supports_feature("reply_followups")
+                and self._ws is not None and self._running)
 
     def _schedule_wire(self, message: Dict[str, Any]) -> None:
         """Schedule a frame from Hermes' synchronous stream formatter thread."""
@@ -896,7 +1123,7 @@ class OrialisAdapter(BasePlatformAdapter):
         self, content: str, *, finalize: bool = False, chat_id: str, reply_to: Optional[str] = None,
         turn_id: Optional[str] = None,
     ) -> bool:
-        """Bridge Hermes' real stream consumer to structured Orialis frames."""
+        """Hermes supplies cumulative snapshots; only persisted final replies count as delivered."""
         if not self.supports_native_streaming(chat_id=chat_id):
             return False
         turn_id = turn_id or uuid.uuid4().hex
@@ -904,33 +1131,65 @@ class OrialisAdapter(BasePlatformAdapter):
         if context is None:
             context = {
                 "stream_id": f"stream_{uuid.uuid4().hex[:16]}",
+                "run_id": f"{turn_id}:{uuid.uuid4().hex[:12]}",
                 "conversation_id": conversation_id_for_chat_id(chat_id), "sequence": 0,
                 "content": "",
-                "reply_to": reply_to,
+                "reply_to": reply_to or self._reply_anchor(chat_id),
+                "rewritten": False,
             }
             self._active_streams[turn_id] = context
-            self._stream_context = {**context, "chat_id": chat_id, "turn_id": turn_id}
+            self._stream_context = {**context, "chat_id": chat_id, "turn_id": context["run_id"]}
             try:
-                await self._send_wire(protocol.agent_start(
-                    conversation_id=context["conversation_id"], run_id=turn_id,
+                frame = protocol.agent_start(
+                    conversation_id=context["conversation_id"], run_id=context["run_id"],
                     session_id=self._session_id, seq=self._next_event_seq(), stream_id=context["stream_id"],
-                ))
+                )
+                result = await self._send_feature_request(frame, frame["event_id"])
+                if not result.success:
+                    raise ConnectionError(result.error)
             except Exception:
                 self._active_streams.pop(turn_id, None)
                 return False
         try:
-            if content:
-                await self._send_wire(protocol.agent_delta(
-                    conversation_id=context["conversation_id"], run_id=turn_id, delta=content,
+            if finalize and not content:
+                # Native close/abandon sends an empty sentinel, not an authoritative rewrite.
+                content = context["content"]
+            if not content.startswith(context["content"]):
+                # The wire supports append only; the authoritative complete frame replaces rewrites.
+                context["rewritten"] = True
+            delta = content[len(context["content"]):] if not context["rewritten"] else ""
+            if delta:
+                frame = protocol.agent_delta(
+                    conversation_id=context["conversation_id"], run_id=context["run_id"], delta=delta,
                     session_id=self._session_id, seq=self._next_event_seq(), stream_id=context["stream_id"],
-                ))
+                )
+                result = await self._send_feature_request(frame, frame["event_id"])
+                if not result.success:
+                    raise ConnectionError(result.error)
                 context["sequence"] += 1
-                context["content"] += content
+            context["content"] = content
             if finalize:
-                await self._send_wire(protocol.agent_complete(
-                    conversation_id=context["conversation_id"], run_id=turn_id,
+                final_message_id = None
+                if content:
+                    reply_to = context["reply_to"]
+                    key = (chat_id, reply_to, content)
+                    if context.get("final_content") != content:
+                        context["final_message_id"] = f"msg_{uuid.uuid4().hex[:12]}"
+                        context["final_content"] = content
+                    self._stream_reply_ids[key] = context["final_message_id"]
+                    while len(self._stream_reply_ids) > 512:
+                        self._stream_reply_ids.popitem(last=False)
+                    result = await self.send(chat_id, content, reply_to=reply_to)
+                    if not result.success:
+                        return False
+                    final_message_id = result.message_id
+                frame = protocol.agent_complete(
+                    conversation_id=context["conversation_id"], run_id=context["run_id"],
                     session_id=self._session_id, seq=self._next_event_seq(), content=context["content"],
-                ))
+                    message_id=final_message_id,
+                )
+                # A lost preview-close receipt cannot revoke an already persisted message.reply.
+                await self._send_feature_request(frame, frame["event_id"])
                 self._active_streams.pop(turn_id, None)
                 self._stream_context = {}
             return True
@@ -938,7 +1197,7 @@ class OrialisAdapter(BasePlatformAdapter):
             logger.debug("[%s] structured stream frame failed", self.name, exc_info=True)
             return False
 
-    async def send_agent_state(self, chat_id: str, state: str, *, run_id: Optional[str] = None, message: Optional[str] = None) -> bool:
+    async def send_agent_state(self, chat_id: str, state: str, *, run_id: Optional[str] = None, message: Optional[str] = None, message_id: Optional[str] = None) -> bool:
         if not self.supports_feature("agent_state"):
             return False
         try:
@@ -951,12 +1210,12 @@ class OrialisAdapter(BasePlatformAdapter):
                     conversation_id=conversation_id, run_id=run_id, session_id=self._session_id,
                     seq=self._next_event_seq(), status=state,
                 )
-            elif state in {"complete", "completed", "success"}:
+            elif state in {"complete", "completed", "success", "cancelled", "canceled", "stopped"}:
                 if not (self.supports_feature("agent.complete") or (self._negotiated and "agent_state" in self._server_capabilities)):
                     return False
                 frame = protocol.agent_complete(
                     conversation_id=conversation_id, run_id=run_id, session_id=self._session_id,
-                    seq=self._next_event_seq(), content=message or "",
+                    seq=self._next_event_seq(), content=message or "", message_id=message_id,
                 )
             elif state in {"error", "failed", "failure"}:
                 if not (self.supports_feature("agent.error") or (self._negotiated and "agent_state" in self._server_capabilities)):
@@ -996,20 +1255,42 @@ class OrialisAdapter(BasePlatformAdapter):
         except Exception:
             return False
 
+    def set_status_text(self, chat_id: str, text: Optional[str]) -> None:
+        """Mirror the host's real tool phase, never its argument-bearing preview."""
+        public = "正在执行工具" if text else "正在处理请求"
+        super().set_status_text(chat_id, public if text else None)
+        snapshot = self._processing_status.get(chat_id)
+        if not snapshot or snapshot["status"] != "running" or snapshot["message"] == public:
+            return
+        snapshot["message"] = public
+        if self.supports_feature("agent_state"):
+            self._schedule_wire(protocol.agent_status(
+                conversation_id=conversation_id_for_chat_id(chat_id), status="running", message=public,
+                run_id=snapshot["run_id"], session_id=self._session_id, seq=self._next_event_seq(),
+            ))
+
     def format_tool_event(self, event: Any, *, mode: str = "all", preview_max_len: int = 40) -> Optional[str]:
-        """Keep Hermes' native text progress and mirror a structured tool-start event."""
-        line = super().format_tool_event(event, mode=mode, preview_max_len=preview_max_len)
+        """Publish tool identities, without argument previews or hidden thinking."""
+        from gateway.stream_events import ToolCallChunk
+        if not isinstance(event, ToolCallChunk) or event.tool_name == "_thinking":
+            return None
+        tool_name = re.sub(r"[^\w.:-]", "", str(event.tool_name))[:80] or "tool"
         context = self._stream_context
+        scope = self._reply_scope.get()
+        if not context and scope:
+            context = {"chat_id": scope[0], "conversation_id": conversation_id_for_chat_id(scope[0]), "turn_id": scope[1]}
         if context and self.supports_feature("tool_state"):
-            tool_name = getattr(event, "tool_name", "tool")
             index = getattr(event, "index", 0)
+            tool_id = f"{context['turn_id']}:{index}"
+            self._active_tools[tool_id] = {"chat_id": context["chat_id"], "run_id": context["turn_id"],
+                                          "tool_name": tool_name, "reply_to": self._reply_anchor(context["chat_id"])}
             self._schedule_wire(protocol.tool_event(
                 event_type="tool.started", conversation_id=context["conversation_id"],
-                tool_call_id=f"{context['turn_id']}:{index}", session_id=self._session_id,
+                tool_call_id=tool_id, session_id=self._session_id,
                 seq=self._next_event_seq(), tool_name=tool_name, run_id=context["turn_id"],
-                progress={"preview": getattr(event, "preview", None), "args": getattr(event, "args", None)},
+                progress={"message": "开始执行工具"},
             ))
-        return line
+        return f"正在调用 {tool_name}"
 
     async def send_clarify(
         self, chat_id: str, question: str, choices: Optional[list], clarify_id: str,
@@ -1038,7 +1319,7 @@ class OrialisAdapter(BasePlatformAdapter):
             seq=self._next_event_seq(), multi_select=multi_select,
         )
         message["session_key"] = session_key
-        reply_to = (metadata or {}).get("reply_to_message_id") or self._reply_anchors.get(chat_id)
+        reply_to = (metadata or {}).get("reply_to_message_id") or self._reply_anchor(chat_id)
         if reply_to:
             message["reply_to"] = reply_to
         result = await self._send_feature_request(message, clarify_id)
@@ -1051,15 +1332,18 @@ class OrialisAdapter(BasePlatformAdapter):
             return SendResult(success=False, error="Orialis approval capability was not negotiated")
         request_id = ""
         try:
-            from tools.approval import get_pending_gateway_approval
-            pending = get_pending_gateway_approval(prompt.session_key)
-            request_id = str((pending or {}).get("request_id") or "")
+            from tools.approval import list_gateway_approvals
+            from agent.redact import redact_sensitive_text
+            candidates = [item for item in list_gateway_approvals(prompt.session_key)
+                          if item.get("request_id") not in self._pending_interactions
+                          and redact_sensitive_text(str(item.get("command") or ""), force=True) == prompt.command
+                          and (not item.get("description") or item["description"] == prompt.description)]
+            if len(candidates) == 1:
+                request_id = str(candidates[0].get("request_id") or "")
         except Exception:
-            pending = None
+            logger.warning("[%s] could not bind the native approval request", self.name, exc_info=True)
         if not request_id:
-            # Direct callers may exercise the adapter without first installing
-            # Hermes' approval queue; the generated id is still safe and bound.
-            request_id = f"approval_{uuid.uuid4().hex[:16]}"
+            return SendResult(success=False, error="No unambiguous native approval request matches this prompt")
         self._pending_interactions[request_id] = {
             "kind": "approval", "session_key": prompt.session_key,
             "conversation_id": conversation_id_for_chat_id(prompt.chat_id),
@@ -1076,7 +1360,7 @@ class OrialisAdapter(BasePlatformAdapter):
             "timeout_seconds": self._orialis.interaction_timeout_seconds,
             "smart_denied": prompt.smart_denied,
         })
-        reply_to = (prompt.metadata or {}).get("reply_to_message_id") or self._reply_anchors.get(prompt.chat_id)
+        reply_to = (prompt.metadata or {}).get("reply_to_message_id") or self._reply_anchor(prompt.chat_id)
         if reply_to:
             message["reply_to"] = reply_to
         result = await self._send_feature_request(message, request_id)
@@ -1111,9 +1395,14 @@ class OrialisAdapter(BasePlatformAdapter):
         loop = asyncio.get_running_loop()
         waiter = loop.create_future()
         self._ack_waiters[request_id] = waiter
+        event_id = message.get("event_id")
+        if event_id:
+            self._event_receipts[event_id] = (request_id, message["seq"])
         try:
             await self._send_wire(message)
-            await asyncio.wait_for(asyncio.shield(waiter), timeout=self._orialis.ack_timeout_seconds)
+            status = await asyncio.wait_for(asyncio.shield(waiter), timeout=self._orialis.ack_timeout_seconds)
+            if status not in {"received", "duplicate", "accepted", "completed"}:
+                return SendResult(success=False, error=f"Orialis request rejected: {status}", retryable=True)
             return SendResult(success=True, message_id=request_id)
         except asyncio.TimeoutError:
             return SendResult(success=False, error="Orialis request acknowledgement timed out", retryable=True)
@@ -1121,6 +1410,8 @@ class OrialisAdapter(BasePlatformAdapter):
             return SendResult(success=False, error="Orialis request failed", retryable=True)
         finally:
             self._ack_waiters.pop(request_id, None)
+            if event_id:
+                self._event_receipts.pop(event_id, None)
 
     async def request_session(
         self, action: str, chat_id: str, *, session_id: Optional[str] = None,
@@ -1169,7 +1460,7 @@ class OrialisAdapter(BasePlatformAdapter):
         caption: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
         if not self.supports_feature("artifacts"):
-            return await self._send_file(chat_id, file_path, caption, self._reply_anchors.get(chat_id), metadata, file_name=name)
+            return await self._send_file(chat_id, file_path, caption, self._reply_anchor(chat_id), metadata, file_name=name)
         try:
             attachment = await asyncio.to_thread(
                 _upload_attachment, file_path, self._orialis.server_url,
@@ -1191,6 +1482,7 @@ class OrialisAdapter(BasePlatformAdapter):
         self, chat_id: str, file_path: str, caption: Optional[str], reply_to: Optional[str],
         metadata: Optional[Dict[str, Any]], *, file_name: Optional[str] = None,
     ) -> SendResult:
+        reply_to = reply_to or self._reply_anchor(chat_id)
         if not reply_to:
             return SendResult(success=False, error="Orialis reply is missing reply_to message id")
         if self._ws is None or not self._running:
@@ -1239,16 +1531,82 @@ class OrialisAdapter(BasePlatformAdapter):
         await super().on_processing_start(event)
         chat_id = getattr(getattr(event, "source", None), "chat_id", None)
         if chat_id:
+            if getattr(event, "text", "") != "/stop" or chat_id not in self._processing_status:
+                self._processing_status[chat_id] = {
+                    "status": "running", "message": "正在处理请求", "run_id": getattr(event, "message_id", "") or "",
+                }
+                self._processing_status.move_to_end(chat_id)
+                while len(self._processing_status) > SEEN_MESSAGE_CACHE:
+                    self._processing_status.popitem(last=False)
+            if getattr(event, "message_id", None):
+                self._reply_anchors[chat_id] = event.message_id
+                self._reply_scope.set((chat_id, event.message_id, None))
+                self._active_turn_events[event.message_id] = event
             await self.send_agent_state(chat_id, "started", run_id=getattr(event, "message_id", None))
 
     async def on_processing_complete(self, event: MessageEvent, outcome: Any) -> None:
         await super().on_processing_complete(event, outcome)
+        await self._finish_processing(event, getattr(outcome, "value", str(outcome)).lower())
+
+    async def _finish_processing(self, event: MessageEvent, state: str) -> None:
         if getattr(event, "message_id", None):
             self._release_inbound_attachments(event.message_id)
         chat_id = getattr(getattr(event, "source", None), "chat_id", None)
         if chat_id:
-            state = getattr(outcome, "value", str(outcome)).lower()
-            await self.send_agent_state(chat_id, state, run_id=getattr(event, "message_id", None))
+            snapshot = self._processing_status.get(chat_id)
+            if snapshot and snapshot["run_id"] == getattr(event, "message_id", None):
+                status = ("error" if state in {"error", "failed", "failure"}
+                          else "cancelled" if state in {"cancelled", "canceled", "stopped"}
+                          else "completed")
+                snapshot.update(status=status, message={"error": "处理失败", "cancelled": "已停止处理", "completed": "本轮处理已完成"}[status])
+            # Native cancellation only abandons draft transports; close any surviving event stream here.
+            await asyncio.sleep(0)
+            if self._scheduled_wire_tasks:
+                await asyncio.gather(*list(self._scheduled_wire_tasks), return_exceptions=True)
+            conversation_id = conversation_id_for_chat_id(chat_id)
+            anchor = getattr(event, "message_id", None)
+            active = [(turn_id, stream) for turn_id, stream in self._active_streams.items()
+                      if stream["conversation_id"] == conversation_id and stream["reply_to"] == anchor]
+            cancelled = state in {"cancelled", "canceled", "stopped"}
+            stop_message_id = None
+            stop_text = ""
+            if cancelled and anchor:
+                partial = "\n\n".join(stream["content"] for _, stream in active if stream["content"])
+                stop_text = (partial + "\n\n" if partial else "") + "已停止本次任务。"
+                self._stream_reply_ids.setdefault((chat_id, anchor, stop_text), f"msg_{uuid.uuid4().hex[:12]}")
+                result = await self.send(chat_id, stop_text, reply_to=anchor)
+                if result.success:
+                    stop_message_id = result.message_id
+                else:
+                    logger.error("[%s] could not commit cancellation reply for %s: %s", self.name, anchor, result.error)
+            await self.send_agent_state(chat_id, state, run_id=anchor, message_id=stop_message_id)
+            for turn_id, stream in active:
+                try:
+                    await self._send_wire(protocol.agent_complete(
+                        conversation_id=conversation_id, run_id=stream["run_id"],
+                        content=stop_text if cancelled else stream["content"], message_id=stop_message_id,
+                        session_id=self._session_id, seq=self._next_event_seq(),
+                    ))
+                finally:
+                    self._active_streams.pop(turn_id, None)
+            for tool_id, tool in list(self._active_tools.items()):
+                if tool["chat_id"] == chat_id and tool["reply_to"] == getattr(event, "message_id", None):
+                    ending = ("本轮已取消" if state in {"cancelled", "canceled", "stopped"}
+                              else "本轮失败" if state in {"error", "failed", "failure"} else "本轮已结束")
+                    await self.send_tool_state(chat_id, tool_call_id=tool_id, run_id=tool["run_id"],
+                        tool_name=tool["tool_name"], state="completed",
+                        data=f"{ending}；工具不再运行，未收到单项结果")
+                    self._active_tools.pop(tool_id, None)
+            if self._reply_anchors.get(chat_id) == getattr(event, "message_id", None):
+                self._reply_anchors.pop(chat_id, None)
+            scope = self._reply_scope.get()
+            if scope and scope[:2] == (chat_id, getattr(event, "message_id", None)):
+                self._reply_scope.set(None)
+            if (self._stream_context.get("chat_id") == chat_id
+                    and self._stream_context.get("reply_to") == anchor):
+                self._stream_context = {}
+            self._active_turn_events.pop(getattr(event, "message_id", None), None)
+            self._inbound_turn_sources.pop(getattr(event, "message_id", None), None)
 
 
 async def _standalone_send(
@@ -1338,13 +1696,5 @@ def register(ctx) -> None:
         allowed_users_env="ORIALIS_ALLOWED_USERS",
         allow_all_env="ORIALIS_ALLOW_ALL_USERS",
         emoji="🔗",
-        platform_hint=(
-            "You are communicating through the Orialis Agent Gateway. "
-            "Use plain text unless the user asks for a structured response. "
-            "The read-only `orialis_capabilities` tool reports the Orialis "
-            "Server API capabilities and the plugin's supported message operations. "
-            "The reported server capabilities are API categories, not automatically "
-            "callable Hermes tools; only use an operation when an explicit Hermes "
-            "tool exposes it."
-        ),
+        platform_hint=PLATFORM_HINT,
     )

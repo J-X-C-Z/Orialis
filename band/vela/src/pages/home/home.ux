@@ -1,14 +1,121 @@
 <template>
-<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><scroll class="content" scroll-y="true"><div class="stack">
-<div class="header"><div class="back" if="{{ selection || homeSection }}" onclick="goBack"><text class="backText">‹</text></div><text class="title">{{ selection ? '详情' : homeSection ? sectionTitle : '今日' }}</text><text class="source">{{ vm.sourceShort }}</text></div><div class="stack glanceStack" if="{{ !selection && !homeSection }}">
-<div class="glanceCard" for="{{ organizer.cards }}" onclick="openSection($item.key)"><div class="glanceAccent {{ $item.tone }}"></div><div class="copy"><div class="glanceHeading"><text class="glanceLabel">{{ $item.label }}</text><text class="glanceCount">{{ $item.countLabel }}</text></div><text class="glanceValue">{{ $item.preview }}</text></div></div>
-<div class="glanceFooter" onclick="menu"><text class="hintText">{{ organizer.partial ? '部分快照 · ' : '' }}左滑打开菜单</text><text class="chevron">›</text></div></div>
-<div class="stack" if="{{ homeSection && !selection }}"><text class="emptyBody" if="{{ !visibleRows.length }}">{{ organizer.available ? '暂无内容' : '请先在手机连接并同步' }}</text><div class="row" for="{{ visibleRows }}" onclick="openItem($item.kind, $item.id)"><div class="copy"><text class="rowTitle">{{ $item.title }}</text><text class="rowHint">{{ $item.subtitle }}</text></div><text class="chevron">›</text></div><div class="disabled" if="{{ hasMore }}" onclick="showMore"><text class="buttonText">显示更多</text></div></div><div class="stack" if="{{ selection && organizer.detail }}"><div class="card"><text class="taskName">{{ organizer.detail.displayTitle }}</text><text class="stateBadge">{{ organizer.detail.statusLabel }}</text><text class="meta" if="{{ organizer.detail.due }}">截止 {{ organizer.detail.due }}</text><text class="emptyBody" if="{{ organizer.detail.notes }}">{{ organizer.detail.notes }}</text><text class="emptyBody" if="{{ organizer.detail.description }}">{{ organizer.detail.description }}</text><text class="emptyBody" if="{{ organizer.detail.goal }}">{{ organizer.detail.goal }}</text><text class="meta" if="{{ organizer.detail.when }}">{{ organizer.detail.when }}</text><text class="meta" if="{{ organizer.detail.location }}">{{ organizer.detail.location }}</text><text class="meta" if="{{ organizer.detail.kind === 'tasks' || organizer.detail.kind === 'schedules' }}">提前提醒 {{ organizer.detail.reminderMinutes === null || organizer.detail.reminderMinutes === undefined ? '未设置' : organizer.detail.reminderMinutes + '分钟' }}</text><text class="meta" if="{{ organizer.detail.kind === 'tasks' || organizer.detail.kind === 'schedules' }}">通知送达待接入</text><text class="meta" if="{{ organizer.detail.recurrence }}">已有重复规则 · 在手机编辑</text><text class="meta" if="{{ organizer.detail.kind === 'projects' }}">里程碑 {{ organizer.detail.progress }}</text><text class="body" if="{{ organizer.detail.kind === 'projects' }}">下一步 {{ organizer.detail.next }}</text></div>
+<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd">
+<scroll class="content" scroll-y="true">
+<div class="stack">
+<div class="header">
+<div class="back" if="{{ selection || homeSection }}" onclick="goBack">
+<text class="backText">‹</text>
+</div>
+<text class="title">{{ selection ? '详情' : homeSection ? sectionTitle : '今日' }}</text>
+<text class="source">{{ vm.sourceShort }}</text>
+<div class="homeMenu" if="{{ !selection && !homeSection }}" onclick="menu">
+<div class="glyph menuGlyph">
+<div class="menuLine">
+</div>
+</div>
+</div>
+</div>
+<div class="stack glanceStack" if="{{ !selection && !homeSection }}">
+<text class="homeDate" if="{{ organizer.today }}">{{ organizer.today.slice(5, 7) + '月' + organizer.today.slice(8) + '日' }}</text>
+<div class="glanceCard" for="{{ organizer.cards }}" onclick="openSection($item.key)">
+<div class="glanceAccent {{ $item.tone }}">
+</div>
+<div class="copy">
+<div class="glanceHeading">
+<text class="glanceLabel">{{ $item.label + ($item.timeLabel ? ' · ' + $item.timeLabel : '') }}</text>
+<text class="glanceCount">{{ $item.countLabel + (organizer.available ? '项' : '') }}</text>
+</div>
+<text class="glanceValue">{{ $item.preview }}</text>
+</div>
+</div>
+<div class="homeStatus">
+<text class="sectionTitle">同步状态</text>
+<text class="homeStatusText">{{ organizer.today ? '快照日期 ' + organizer.today : '等待手机同步安排' }}</text>
+<text class="homeStatusText">{{ vm.demo ? '本地演示 · 只读预览' : vm.stale ? '缓存只读 · 请连接手机更新' : '手机互联 · ' + vm.phoneLabel }}</text>
+<text class="homeStatusText" if="{{ vm.hasSnapshot && !vm.demo }}">{{ vm.syncLabel }}</text>
+<div class="secondaryButton" if="{{ !vm.demo && (!vm.hasSnapshot || vm.stale) }}" onclick="diagnostics">
+<text class="buttonText">检查手机连接</text>
+</div>
+</div>
+<text class="notice" if="{{ organizer.partial }}">部分快照 · 完整安排请在手机查看</text>
+<div class="glanceFooter" onclick="menu">
+<text class="hintText">菜单 · 左滑进入 / 右滑退出</text>
+<text class="chevron">›</text>
+</div>
+</div>
+<div class="stack" if="{{ homeSection && !selection }}">
+<div class="emptyCard" if="{{ !visibleRows.length }}">
+<text class="emptyTitle">{{ organizer.available ? organizer.partial ? '已同步内容暂无记录' : '暂无内容' : '等待手机同步' }}</text>
+<text class="emptyBody">{{ organizer.available ? '可在手机查看或添加更多安排。' : '请保持小米运动健康连接，并在手机 Orialis 同步内容。' }}</text>
+</div>
+<div class="row {{ vm.compact ? 'compactRow' : '' }}" for="{{ visibleRows }}" onclick="openItem($item.kind, $item.id)">
+<div class="copy">
+<text class="rowTitle">{{ $item.title }}</text>
+<text class="rowHint" if="{{ !vm.compact }}">{{ $item.subtitle }}</text>
+</div>
+<text class="chevron">›</text>
+</div>
+<div class="secondaryButton" if="{{ hasMore }}" onclick="showMore">
+<text class="buttonText">显示更多</text>
+</div>
+</div>
+<div class="stack" if="{{ selection && organizer.detail }}">
+<div class="statusCard">
+<text class="detailTitle">{{ organizer.detail.displayTitle }}</text>
+<text class="stateBadge">{{ organizer.detail.statusLabel }}</text>
+<text class="meta" if="{{ organizer.detail.due }}">截止 {{ organizer.detail.due }}</text>
+<text class="sectionTitle" if="{{ organizer.detail.notes }}">备注</text>
+<text class="detailBody" if="{{ organizer.detail.notes }}">{{ organizer.detail.notes }}</text>
+<text class="sectionTitle" if="{{ organizer.detail.description }}">说明</text>
+<text class="detailBody" if="{{ organizer.detail.description }}">{{ organizer.detail.description }}</text>
+<text class="sectionTitle" if="{{ organizer.detail.goal }}">项目目标</text>
+<text class="detailBody" if="{{ organizer.detail.goal }}">{{ organizer.detail.goal }}</text>
+<text class="meta" if="{{ organizer.detail.when }}">{{ organizer.detail.when }}</text>
+<text class="meta" if="{{ organizer.detail.location }}">地点 · {{ organizer.detail.location }}</text>
+<text class="meta" if="{{ organizer.detail.kind === 'tasks' || organizer.detail.kind === 'schedules' }}">提前提醒 {{ organizer.detail.reminderMinutes === null || organizer.detail.reminderMinutes === undefined ? '未设置' : organizer.detail.reminderMinutes + '分钟' }}</text>
+<text class="meta" if="{{ organizer.detail.kind === 'tasks' || organizer.detail.kind === 'schedules' }}">提醒由手机通知发出；请在小米运动健康开启 Orialis 通知显示</text>
+<text class="meta" if="{{ organizer.detail.recurrence }}">已有重复规则 · 在手机编辑</text>
+<text class="meta" if="{{ organizer.detail.kind === 'projects' }}">里程碑 {{ organizer.detail.progress }}</text>
+<text class="body" if="{{ organizer.detail.kind === 'projects' }}">下一步 {{ organizer.detail.next }}</text>
+</div>
 
 
-<text class="label" if="{{ organizer.detail.kind === 'projects' }}">里程碑</text><div class="row {{ $item.completed ? 'selected' : '' }}" for="{{ organizer.milestones }}" onclick="openItem($item.kind, $item.id)"><div class="glyphCircle teal"><div class="check"></div></div><div class="copy"><text class="rowTitle">{{ $item.title }}</text><text class="rowHint">{{ $item.subtitle }}</text></div><text class="chevron">›</text></div><text class="label" if="{{ organizer.detail.kind === 'tasks' || organizer.detail.kind === 'schedules' || organizer.detail.kind === 'projects' }}">{{ organizer.detail.kind === 'tasks' ? '一级子任务' : '关联任务' }}</text><div class="row {{ $item.completed ? 'selected' : '' }}" for="{{ organizer.related }}" onclick="openItem($item.kind, $item.id)"><div class="glyphCircle teal"><div class="check"></div></div><div class="copy"><text class="rowTitle">{{ $item.title }}</text><text class="rowHint">{{ $item.subtitle }}</text></div><text class="chevron">›</text></div>
-<div class="disabled" onclick="closeDetail"><text class="buttonText">返回列表</text></div></div><div class="block" if="{{ selection || homeSection }}"><text class="provenance">{{ vm.provenance }}</text><text class="meta">{{ vm.syncLabel }}</text><text class="notice" if="{{ organizer.partial }}">部分数据 · 完整记录请在手机查看</text></div>
-</div></scroll></div>
+<div class="secondaryButton {{ taskMutationStatus === '正在同步…' ? 'sendingButton' : '' }}" if="{{ organizer.detail.kind === 'tasks' && organizer.detail.version !== undefined }}" onclick="toggleTask">
+<text class="buttonText">{{ taskMutationStatus === '正在同步…' ? '正在同步…' : organizer.detail.completed ? '标记为未完成' : '勾选完成' }}</text>
+</div>
+<text class="notice" if="{{ taskMutationStatus }}">{{ taskMutationStatus }}</text>
+<text class="sectionTitle" if="{{ organizer.detail.kind === 'projects' }}">里程碑</text>
+<div class="row {{ vm.compact ? 'compactRow' : '' }} {{ $item.completed ? 'selected' : '' }}" for="{{ organizer.milestones }}" onclick="openItem($item.kind, $item.id)">
+<div class="taskMarker {{ $item.completed ? 'taskMarkerDone' : '' }}">
+</div>
+<div class="copy">
+<text class="rowTitle">{{ $item.title }}</text>
+<text class="rowHint" if="{{ !vm.compact }}">{{ $item.subtitle }}</text>
+</div>
+<text class="chevron">›</text>
+</div>
+<text class="sectionTitle" if="{{ organizer.detail.kind === 'tasks' || organizer.detail.kind === 'schedules' || organizer.detail.kind === 'projects' }}">{{ organizer.detail.kind === 'tasks' ? '一级子任务' : '关联任务' }}</text>
+<div class="row {{ vm.compact ? 'compactRow' : '' }} {{ $item.completed ? 'selected' : '' }}" for="{{ organizer.related }}" onclick="openItem($item.kind, $item.id)">
+<div class="taskMarker {{ $item.completed ? 'taskMarkerDone' : '' }}">
+</div>
+<div class="copy">
+<text class="rowTitle">{{ $item.title }}</text>
+<text class="rowHint" if="{{ !vm.compact }}">{{ $item.subtitle }}</text>
+</div>
+<text class="chevron">›</text>
+</div>
+<div class="secondaryButton" onclick="closeDetail">
+<text class="buttonText">返回列表</text>
+</div>
+</div>
+<div class="block" if="{{ selection || homeSection }}">
+<text class="provenance">{{ vm.provenance }}</text>
+<text class="meta">{{ vm.syncLabel }}</text>
+<text class="notice" if="{{ organizer.partial }}">部分数据 · 完整记录请在手机查看</text>
+</div>
+</div>
+</scroll>
+</div>
 </template>
 <script>
 const pages = require('../../services/page')

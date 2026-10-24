@@ -1,14 +1,19 @@
 import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
 import '../../app/app.dart';
+
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show OrialisPageScaffold;
+
 import '../../core/database/app_database.dart';
 import '../../features/events/presentation/task_editor.dart';
 import '../../features/events/presentation/task_children.dart';
 import '../../features/events/presentation/long_press_orderable.dart';
+import '../../features/events/presentation/quick_event_button.dart';
 import '../shared/page_parts.dart';
 
 class TodayPage extends ConsumerStatefulWidget {
@@ -60,6 +65,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
     return OrialisPageScaffold(
       title: '今日',
       padding: EdgeInsets.zero,
+      floatingActionButton: const QuickEventButton(),
       actions: [
         Padding(
           padding: const EdgeInsets.only(right: 8),
@@ -230,6 +236,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
                                 Expanded(
                                   flex: 3,
                                   child: ListView(
+                                    padding: const EdgeInsets.only(bottom: 80),
                                     key: const PageStorageKey(
                                       'today-focus-scroll',
                                     ),
@@ -244,6 +251,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
                                 Expanded(
                                   flex: 2,
                                   child: ListView(
+                                    padding: const EdgeInsets.only(bottom: 80),
                                     key: const PageStorageKey(
                                       'today-agenda-scroll',
                                     ),
@@ -266,7 +274,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
                       20,
                       LuminaPageHeaderInset.of(context) + 16,
                       20,
-                      24 +
+                      104 +
                           LuminaNavigationInset.of(context) +
                           MediaQuery.paddingOf(context).bottom,
                     ),
@@ -286,9 +294,8 @@ class _TodayPageState extends ConsumerState<TodayPage> {
     child: Text(
       message,
       textAlign: TextAlign.center,
-      style: LuminaTheme.of(context).textTheme.bodyMedium.copyWith(
-        color: LuminaTheme.of(context).colors.muted,
-      ),
+      style: LuminaTheme.of(context).textTheme.bodyMedium
+          .copyWith(color: LuminaTheme.of(context).colors.muted),
     ),
   );
 

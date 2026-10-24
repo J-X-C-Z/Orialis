@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "title": "今天的学习安排",
+  "fallback": "今天安排数学 60 分钟、英语 30 分钟，共 90 分钟。先复习再练习；可追问详细安排。",
+  "blocks": [
+    {"type": "metrics", "items": [{"label": "学习时间", "value": "90 分钟", "detail": "留出休息时间"}, {"label": "学习科目", "value": "2 门"}]},
+    {"type": "chart", "unit": "分钟", "items": [{"label": "数学", "value": 60}, {"label": "英语", "value": 30}]},
+    {"type": "tabs", "items": [{"label": "数学", "content": "复习导数，再完成三道练习。"}, {"label": "英语", "content": "复习词汇，再精读一篇短文。"}]},
+    {"type": "checklist", "items": [{"label": "准备学习材料", "checked": true}, {"label": "完成第一轮复习", "checked": false}]},
+    {"type": "choices", "items": [{"label": "展开详细安排", "prompt": "请展开今天的详细学习安排"}, {"label": "只剩 30 分钟", "prompt": "请把今天的学习安排压缩到 30 分钟"}]}
+  ]
+}

@@ -1,18 +1,27 @@
 import 'dart:async';
+
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import 'package:orialis_mobile/app/app.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/core/config/app_config.dart';
+import 'package:orialis_mobile/core/attachments/attachment_bridge.dart';
 import 'package:orialis_mobile/core/database/app_database.dart';
 import 'package:orialis_mobile/core/realtime/mobile_realtime_client.dart';
 import 'package:orialis_mobile/core/sync/sync_coordinator.dart';
 import 'package:orialis_mobile/core/sync/sync_engine.dart';
 import 'package:orialis_mobile/features/chat/data/agent_chat_service.dart';
 import 'package:orialis_mobile/features/chat/data/chat_repository.dart';
+import 'package:orialis_mobile/features/chat/data/chat_drafts.dart';
+import 'package:orialis_mobile/features/chat/application/chat_share_coordinator.dart';
 import 'package:orialis_mobile/pages/chat/chat_page.dart';
+import 'package:orialis_mobile/features/chat/presentation/agent_status_ring.dart';
+import 'package:orialis_mobile/features/chat/presentation/chat_activity_panel.dart';
 
 class _Config extends AppConfig {
   @override
@@ -21,6 +30,13 @@ class _Config extends AppConfig {
   Future<String?> sessionUsername() async => null;
   @override
   Future<String> deviceId() async => 'agent-chat-widget-test';
+}
+
+class _ShareConfig extends _Config {
+  @override
+  Future<String?> sessionToken() async => 'test-token';
+  @override
+  Future<String?> sessionUsername() async => 'alice';
 }
 
 class _Service extends AgentChatService {
@@ -109,6 +125,7 @@ Future<_Service> _openChat(
   WidgetTester tester, {
   bool notificationMessages = false,
   bool slowUnknown = false,
+  ChatShareCoordinator? shares,
 }) async {
   tester.view.physicalSize = const Size(432, 960);
   tester.view.devicePixelRatio = 1;
@@ -151,6 +168,8 @@ Future<_Service> _openChat(
         realtimeClientProvider.overrideWithValue(realtime),
         syncCoordinatorProvider.overrideWithValue(sync),
         agentChatServiceProvider.overrideWithValue(service),
+        if (shares != null)
+          chatShareCoordinatorProvider.overrideWithValue(shares),
       ],
       child: const OrialisApp(),
     ),
@@ -172,6 +191,119 @@ Future<_Service> _openChat(
 }
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({});
+  });
+  testWidgets('runtime control is in header and absent from transcript', (
+    tester,
+  ) async {
+    await _openChat(tester);
+    expect(find.byType(AgentStatusRing), findsOneWidget);
+    expect(find.byType(ChatActivityPanel), findsNothing);
+    expect(find.text('原会话 · Mac 电脑'), findsNothing);
+    await tester.tap(find.byType(AgentStatusRing));
+    await tester.pumpAndSettle();
+    expect(find.text('助手状态'), findsOneWidget);
+    expect(find.byType(ChatActivityPanel), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+  testWidgets(
+    'external share selects an existing conversation, appends its draft and never sends automatically',
+    (tester) async {
+      const channel = MethodChannel('test/chat-share-ui');
+      const id = '0c1b166e-7ea2-4877-b386-8c83f9e2d221';
+      final shares = ChatShareCoordinator(
+        config: _ShareConfig(),
+        channel: channel,
+      );
+      Map<String, Object?>? pending;
+      var completions = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'pending' || call.method == 'read') {
+              return pending;
+            }
+            if (call.method == 'complete') {
+              completions++;
+              pending = null;
+            }
+            return null;
+          });
+      addTearDown(() {
+        shares.dispose();
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+      await shares.start();
+      final drafts = await ChatDrafts.open(_Config());
+      await drafts.saveState(
+        'existing-mac',
+        const ChatDraftState(
+          text: '原有草稿',
+          attachments: [
+            AttachmentRecord(
+              localPath: '/private/old.png',
+              name: '旧附件.png',
+              mimeType: 'image/png',
+              size: 4,
+            ),
+          ],
+        ),
+      );
+      final service = await _openChat(
+        tester,
+        shares: shares,
+        notificationMessages: true,
+      );
+      final router = GoRouter.of(tester.element(find.byType(ChatPage)));
+      router.go('/chat?conversationId=existing-mac&messageId=notice-1');
+      await tester.pumpAndSettle();
+      final chatState = tester.state(find.byType(ChatPage));
+      router.go('/today');
+      await tester.pumpAndSettle();
+      pending = {'id': id, 'text': '分享的 https://b23.tv/example', 'files': []};
+      await shares.open(id);
+      await tester.pumpAndSettle();
+      expect(shares.pending?.id, id);
+      expect(tester.widget<ChatPage>(find.byType(ChatPage)).shareId, id);
+      expect(tester.state(find.byType(ChatPage)), same(chatState));
+      expect(find.text('选择会话接收分享'), findsOneWidget);
+      expect(completions, 0);
+      expect(service.validations, 0);
+      await tester.tap(find.text('原会话').first);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<EditableText>(find.byType(EditableText).last)
+            .controller
+            .text,
+        '原有草稿\n分享的 https://b23.tv/example',
+      );
+      expect(completions, 1);
+      expect(service.validations, 0);
+      expect(find.text('旧附件.png'), findsOneWidget);
+      final saved = await drafts.loadState('existing-mac');
+      expect(saved.attachments.single.name, '旧附件.png');
+      expect(saved.appliedShareIds, contains(id));
+      expect(find.text('已加入草稿，确认后发送'), findsOneWidget);
+      await shares.open(id);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<EditableText>(find.byType(EditableText).last)
+            .controller
+            .text,
+        '原有草稿\n分享的 https://b23.tv/example',
+      );
+      expect(completions, 1);
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    },
+  );
+
   testWidgets('cached chat opens while an unknown binding remains pending', (
     tester,
   ) async {
@@ -238,7 +370,9 @@ void main() {
     tester,
   ) async {
     final service = await _openChat(tester);
-    await tester.tap(action('Mac 电脑'));
+    await tester.tap(action('更多会话操作'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('新建设备对话'));
     await tester.pumpAndSettle();
     expect(find.text('Mac 电脑'), findsOneWidget);
     expect(find.text('Azure 服务器'), findsOneWidget);
@@ -249,7 +383,7 @@ void main() {
     await tester.tap(find.text('Mac 电脑'));
     await tester.pumpAndSettle();
     expect(service.created, ['JXCZ_MBA_Hermes']);
-    expect(action('Mac 电脑'), findsOneWidget);
+    expect(find.byType(AgentStatusRing), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
@@ -259,7 +393,9 @@ void main() {
     'device edit renames its card and new chat while keeping exact ID',
     (tester) async {
       final service = await _openChat(tester);
-      await tester.tap(action('Mac 电脑'));
+      await tester.tap(action('更多会话操作'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('新建设备对话'));
       await tester.pumpAndSettle();
       await tester.tap(action('修改设备名称').first);
       await tester.pumpAndSettle();
@@ -271,8 +407,8 @@ void main() {
       await tester.tap(find.text('工作 Mac'));
       await tester.pumpAndSettle();
       expect(service.created, ['JXCZ_MBA_Hermes']);
-      expect(action('工作 Mac'), findsOneWidget);
-      expect(find.text('工作 Mac · 工作 Mac'), findsOneWidget);
+      expect(find.byType(AgentStatusRing), findsOneWidget);
+      expect(find.text('工作 Mac'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
@@ -282,7 +418,9 @@ void main() {
     'empty device name keeps dialog open and cancellation changes nothing',
     (tester) async {
       final service = await _openChat(tester);
-      await tester.tap(action('Mac 电脑'));
+      await tester.tap(action('更多会话操作'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('新建设备对话'));
       await tester.pumpAndSettle();
       await tester.tap(action('修改设备名称').first);
       await tester.pumpAndSettle();
@@ -311,13 +449,13 @@ void main() {
       await tester.enterText(find.byType(EditableText).last, '计划整理');
       await tester.tap(find.widgetWithText(LuminaButton, '保存'));
       await tester.pumpAndSettle();
-      expect(find.text('计划整理 · Mac 电脑'), findsOneWidget);
+      expect(find.text('计划整理'), findsOneWidget);
       await tester.tap(action('返回会话列表'));
       await tester.pumpAndSettle();
       expect(find.text('计划整理'), findsOneWidget);
       await tester.tap(find.text('计划整理'));
       await tester.pumpAndSettle();
-      expect(find.text('计划整理 · Mac 电脑'), findsOneWidget);
+      expect(find.text('计划整理'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
@@ -348,7 +486,9 @@ void main() {
   ) async {
     final service = await _openChat(tester);
     await tester.enterText(find.byType(EditableText).last, '尚未发送的草稿');
-    await tester.tap(action('Mac 电脑'));
+    await tester.tap(action('更多会话操作'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('新建设备对话'));
     await tester.pumpAndSettle();
     // The UI may block switching or ask for confirmation. Neither can silently
     // remove the draft before the user has approved discarding it.

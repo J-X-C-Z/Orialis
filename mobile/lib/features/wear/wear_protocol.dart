@@ -4,8 +4,10 @@ import 'dart:convert';
 class WearProtocol {
   static const namespace = 'orialis.wear.v1';
   // Conservative Fangcun transport budget, including the JSON envelope.
+  // shortcut: snapshots cap at 384 KiB, paginate if real accounts exceed this.
   static const maxFrameBytes = 2200,
-      maxSnapshotBytes = 16384,
+      maxSnapshotBytes = 393216,
+      maxParts = 220,
       maxChunkBytes = 4096;
   static String encode(String type, Map<String, Object?> payload) {
     final data = jsonEncode({
@@ -67,8 +69,8 @@ class WearProtocol {
                 'payload': {
                   'transferId': transferId,
                   'revision': revision,
-                  'index': 31,
-                  'count': 32,
+                  'index': maxParts - 1,
+                  'count': maxParts,
                   'checksum': digest,
                   'chunk': value,
                 },
@@ -88,7 +90,7 @@ class WearProtocol {
       chunk += scalar;
     }
     chunks.add(chunk);
-    if (chunks.length > 32) throw const FormatException('too many parts');
+    if (chunks.length > maxParts) throw const FormatException('too many parts');
     return List.generate(
       chunks.length,
       (index) => encode('snapshot.part', {

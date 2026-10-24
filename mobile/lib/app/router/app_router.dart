@@ -15,6 +15,7 @@ import '../../pages/today/today_page.dart';
 import '../../pages/projects/projects_page.dart';
 import '../../features/devices/presentation/device_center_page.dart';
 import '../../features/wear/wear_connection_page.dart';
+import '../../features/memory/presentation/memory_page.dart';
 import '../../pages/profile/system_settings_page.dart';
 import '../../news/news_app.dart';
 import '../../features/web_services/web_services_page.dart';
@@ -24,6 +25,19 @@ GoRouter buildRouter({bool desktop = false}) {
     initialLocation: '/today',
     routes: [
       GoRoute(path: '/auth', builder: (_, _) => const AuthPage()),
+      if (!desktop)
+        GoRoute(
+          path: '/memory',
+          builder: (_, _) => Consumer(
+            builder: (context, ref, _) => MemoryPage(
+              key: ValueKey(ref.watch(desktopDatabaseNameProvider)),
+              repository: ref.watch(memoryRepositoryProvider),
+              onAnalyze: (record) async {
+                await ref.read(memoryCoordinatorProvider)?.retry(record);
+              },
+            ),
+          ),
+        ),
       if (!desktop)
         GoRoute(path: '/system', builder: (_, _) => const SystemSettingsPage()),
       if (!desktop)
@@ -71,10 +85,14 @@ GoRouter buildRouter({bool desktop = false}) {
                           state.uri.queryParameters['conversationId'] ??
                           'default';
                       return ChatPage(
-                        key: ValueKey(conversationId),
+                        key: ValueKey((
+                          ref.watch(desktopDatabaseNameProvider),
+                          conversationId,
+                        )),
                         repository: ref.watch(chatRepositoryProvider),
                         conversationId: conversationId,
                         messageId: state.uri.queryParameters['messageId'],
+                        shareId: state.uri.queryParameters['shareId'],
                       );
                     },
                   ),

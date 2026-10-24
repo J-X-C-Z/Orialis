@@ -1,23 +1,35 @@
+import 'dart:convert';
+
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 import '../domain/agent_event_state.dart';
+import 'chat_activity_panel.dart';
 import 'safe_markdown.dart';
 
-typedef AgentActionCallback =
-    Future<void> Function(
-      String type,
-      String requestId,
-      Map<String, dynamic> payload,
-    );
+typedef AgentActionCallback = Future<void> Function(
+  String type,
+  String requestId,
+  Map<String, dynamic> payload,
+);
 
 class AgentEventsPanel extends StatelessWidget {
   const AgentEventsPanel({
     required this.store,
     required this.onAction,
+    this.showClarifications = true,
+    this.persistedMessageIds = const {},
+    this.onPromptSelected,
+    this.onRefresh,
+    this.showActivity = true,
     super.key,
   });
   final AgentEventStore store;
   final AgentActionCallback onAction;
+  final bool showClarifications;
+  final Set<String> persistedMessageIds;
+  final ValueChanged<String>? onPromptSelected;
+  final Future<void> Function()? onRefresh;
+  final bool showActivity;
 
   @override
   Widget build(BuildContext context) {
@@ -26,23 +38,55 @@ class AgentEventsPanel extends StatelessWidget {
       listenable: store,
       builder: (context, _) {
         final children = <Widget>[];
+        if (showActivity &&
+            (onRefresh != null ||
+                store.typing ||
+                store.agentStatus != null ||
+                store.agentStatusDetail != null ||
+                store.streams.isNotEmpty ||
+                store.tools.isNotEmpty)) {
+          children.add(
+            ChatActivityPanel(
+              key: const ValueKey('chat-activity'),
+              store: store,
+              onRefresh: onRefresh,
+            ),
+          );
+        }
         for (final stream in store.streams.values) {
+          if (stream.complete &&
+              stream.error == null &&
+              persistedMessageIds.contains(stream.messageId)) {
+            continue;
+          }
           if (stream.text.isNotEmpty || stream.error != null) {
-            children.add(_StreamCard(stream: stream));
+            children.add(
+              _StreamCard(
+                key: ValueKey('stream-${stream.id}'),
+                stream: stream,
+                onPromptSelected: stream.complete ? onPromptSelected : null,
+              ),
+            );
           }
         }
-        if (store.tools.isNotEmpty) {
-          children.add(_ToolTimelineCard(items: store.tools.values.toList()));
-        }
-        for (final request in store.clarifications.values) {
+        for (final request
+            in showClarifications
+                ? store.clarifications.values
+                : const <ClarificationRequest>[]) {
           children.add(
-            _ClarifyCard(request: request, store: store, onAction: onAction),
+            _ClarifyCard(
+              key: ValueKey('clarify-${request.id}'),
+              request: request,
+              store: store,
+              onAction: onAction,
+            ),
           );
         }
         for (final result in store.commandResults.values) {
           children.add(_CommandResultCard(result: result));
         }
         for (final session in store.sessions.values) {
+          if (session.statusSnapshot) continue;
           children.add(_SessionCard(session: session));
         }
         for (final artifact in store.artifacts.values) {
@@ -62,6 +106,76 @@ class AgentEventsPanel extends StatelessWidget {
       },
     );
   }
+}
+
+/// Approvals and questions share one place above the message composer.
+class AgentRequestsPanel extends StatefulWidget {
+  const AgentRequestsPanel({
+    required this.store,
+    required this.onAction,
+    super.key,
+  });
+  final AgentEventStore store;
+  final AgentActionCallback onAction;
+
+  @override
+  State<AgentRequestsPanel> createState() => _AgentRequestsPanelState();
+}
+
+class _AgentRequestsPanelState extends State<AgentRequestsPanel> {
+  bool _expanded = true;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.store,
+    builder: (context, _) {
+      final store = widget.store;
+      final count = store.approvals.length + store.clarifications.length;
+      if (count == 0) return const SizedBox.shrink();
+      return ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * .35,
+        ),
+        child: SingleChildScrollView(
+          child: LuminaExpandableCard(
+            expanded: _expanded,
+            onExpand: () => setState(() => _expanded = true),
+            header: LuminaListRow(
+              title: '待处理请求 · $count',
+              leading: const LuminaIcon(LuminaIcons.notification),
+              trailing: LuminaIcon(
+                _expanded ? LuminaIcons.chevronDown : LuminaIcons.chevronRight,
+              ),
+              onTap: () => setState(() => _expanded = !_expanded),
+            ),
+            summary: const Text('展开查看审批与补充问题'),
+            detailBuilder: (_) => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final request in store.approvals.values)
+                  Padding(
+                    key: ValueKey('approval-${request.id}'),
+                    padding: const EdgeInsets.only(bottom: LuminaSpacing.item),
+                    child: AgentApprovalSheet(
+                      request: request,
+                      store: store,
+                      onAction: widget.onAction,
+                    ),
+                  ),
+                for (final request in store.clarifications.values)
+                  _ClarifyCard(
+                    key: ValueKey('clarify-${request.id}'),
+                    request: request,
+                    store: store,
+                    onAction: widget.onAction,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _EventCard extends StatelessWidget {
@@ -112,46 +226,32 @@ class _EventCard extends StatelessWidget {
 }
 
 class _StreamCard extends StatelessWidget {
-  const _StreamCard({required this.stream});
+  const _StreamCard({required this.stream, this.onPromptSelected, super.key});
   final AgentStream stream;
+  final ValueChanged<String>? onPromptSelected;
   @override
-  Widget build(BuildContext context) => _EventCard(
-    icon: stream.error == null ? LuminaIcons.sparkles : LuminaIcons.error,
-    title: stream.error == null ? 'Orialis' : '回复未完成',
-    color: stream.error == null ? null : LuminaTheme.of(context).colors.danger,
-    child: stream.error == null
-        ? SafeMarkdownView(source: stream.text, fallback: stream.hasGap)
-        : Text(stream.error!),
-  );
-}
-
-class _ToolTimelineCard extends StatelessWidget {
-  const _ToolTimelineCard({required this.items});
-  final List<ToolTimelineItem> items;
-  @override
-  Widget build(BuildContext context) => _EventCard(
-    icon: LuminaIcons.branch,
-    title: '工具时间线',
+  Widget build(BuildContext context) => Padding(
+    key: ValueKey('assistant-stream-${stream.id}'),
+    padding: const EdgeInsets.symmetric(vertical: 12),
     child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final item in items)
-          LuminaListRow(
-            leading: LuminaIcon(
-              item.status == 'running'
-                  ? LuminaIcons.clock
-                  : LuminaIcons.checkCircle,
-              size: LuminaIconSize.control,
-            ),
-            title: item.name,
-            subtitle: item.detail,
-            trailing: Text(
-              item.status == 'running'
-                  ? '运行中'
-                  : item.status == 'completed'
-                  ? '完成'
-                  : item.status,
-            ),
-          ),
+        Text(
+          stream.error == null ? 'Orialis' : '回复未完成',
+          style: LuminaTheme.of(context).textTheme.labelSmall,
+        ),
+        const SizedBox(height: 4),
+        stream.error == null
+            ? SafeMarkdownView(
+                source: stream.text,
+                fallback: stream.hasGap,
+                allowResponseUi: true,
+                onPromptSelected: onPromptSelected,
+              )
+            : Text(
+                stream.error!,
+                style: TextStyle(color: LuminaTheme.of(context).colors.danger),
+              ),
       ],
     ),
   );
@@ -162,6 +262,7 @@ class _ClarifyCard extends StatefulWidget {
     required this.request,
     required this.store,
     required this.onAction,
+    super.key,
   });
   final ClarificationRequest request;
   final AgentEventStore store;
@@ -172,7 +273,11 @@ class _ClarifyCard extends StatefulWidget {
 
 class _ClarifyCardState extends State<_ClarifyCard> {
   final _controller = TextEditingController();
+  final Set<String> _selected = {};
   bool _sending = false;
+  String? _error;
+  bool get _disabled =>
+      _sending || widget.store.actions.contains(widget.request.id);
 
   @override
   void dispose() {
@@ -180,16 +285,31 @@ class _ClarifyCardState extends State<_ClarifyCard> {
     super.dispose();
   }
 
-  Future<void> _submit(String value) async {
-    if (_sending || !widget.store.actions.claim(widget.request.id)) return;
-    setState(() => _sending = true);
+  Future<void> _submit(String value, {bool cancel = false}) async {
+    if (value.trim().isEmpty ||
+        _disabled ||
+        !widget.store.actions.claim(widget.request.id)) {
+      return;
+    }
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
     try {
-      await widget.onAction('clarify.response', widget.request.id, {
-        'answer': value,
-      });
+      await widget.onAction(
+        cancel ? 'clarify.cancel' : 'clarify.response',
+        widget.request.id,
+        {if (cancel) 'reason': 'cancelled' else 'answer': value},
+      );
+      if (mounted) setState(() => _sending = false);
     } catch (_) {
       widget.store.actions.release(widget.request.id);
-      if (mounted) setState(() => _sending = false);
+      if (mounted) {
+        setState(() {
+          _sending = false;
+          _error = '暂时无法发送，请重试。';
+        });
+      }
     }
   }
 
@@ -208,26 +328,53 @@ class _ClarifyCardState extends State<_ClarifyCard> {
             runSpacing: LuminaSpacing.tight,
             children: [
               for (final option in widget.request.options)
-                LuminaButton(
-                  onPressed: _sending ? null : () => _submit(option),
-                  child: Text(option),
-                ),
+                if (widget.request.multiSelect)
+                  LuminaChip(
+                    label: Text(option),
+                    selected: _selected.contains(option),
+                    onSelected: _disabled
+                        ? null
+                        : (selected) => setState(() {
+                            if (selected) {
+                              _selected.add(option);
+                            } else {
+                              _selected.remove(option);
+                            }
+                          }),
+                  )
+                else
+                  LuminaButton(
+                    onPressed: _disabled ? null : () => _submit(option),
+                    child: Text(option),
+                  ),
             ],
           ),
         ],
+        if (widget.request.multiSelect && widget.request.options.isNotEmpty)
+          LuminaButton(
+            onPressed: _disabled || _selected.isEmpty
+                ? null
+                : () => _submit(
+                    jsonEncode(
+                      widget.request.options.where(_selected.contains).toList(),
+                    ),
+                  ),
+            child: const Text('提交所选'),
+          ),
         const SizedBox(height: LuminaSpacing.controlGap),
         Row(
           children: [
             Expanded(
               child: LuminaTextField(
                 controller: _controller,
-                enabled: !_sending,
+                enabled: !_disabled,
                 hintText: '自定义回答',
+                onChanged: (_) => setState(() {}),
               ),
             ),
             const SizedBox(width: LuminaSpacing.controlGap),
             LuminaIconButton(
-              onPressed: _sending
+              onPressed: _disabled || _controller.text.trim().isEmpty
                   ? null
                   : () => _submit(_controller.text.trim()),
               icon: const LuminaIcon(LuminaIcons.send),
@@ -236,9 +383,15 @@ class _ClarifyCardState extends State<_ClarifyCard> {
           ],
         ),
         LuminaButton(
-          onPressed: _sending ? null : () => _submit('取消'),
+          onPressed: _disabled ? null : () => _submit('取消', cancel: true),
           child: const Text('取消'),
         ),
+        if (_disabled) const Text('回答已提交，等待处理'),
+        if (_error != null)
+          Text(
+            _error!,
+            style: TextStyle(color: LuminaTheme.of(context).colors.danger),
+          ),
       ],
     ),
   );
@@ -262,6 +415,8 @@ class AgentApprovalSheet extends StatefulWidget {
 class _AgentApprovalSheetState extends State<AgentApprovalSheet> {
   bool _sending = false;
   String? _error;
+  bool get _disabled =>
+      _sending || widget.store.actions.contains(widget.request.id);
   Future<void> _submit(String decision) async {
     if (_sending || !widget.store.actions.claim(widget.request.id)) return;
     setState(() {
@@ -272,6 +427,7 @@ class _AgentApprovalSheetState extends State<AgentApprovalSheet> {
       await widget.onAction('approval.response', widget.request.id, {
         'decision': decision,
       });
+      if (mounted) setState(() => _sending = false);
     } catch (_) {
       widget.store.actions.release(widget.request.id);
       if (mounted) {
@@ -319,11 +475,11 @@ class _AgentApprovalSheetState extends State<AgentApprovalSheet> {
           padding: const EdgeInsets.only(bottom: 12),
           child: LuminaButton(
             primary: value.key != 'deny',
-            onPressed: _sending ? null : () => _submit(value.key),
+            onPressed: _disabled ? null : () => _submit(value.key),
             child: Text(value.value),
           ),
         ),
-      if (_sending) const Center(child: LuminaProgress()),
+      if (_disabled) const Text('决定已提交，等待处理'),
       if (_error != null)
         Text(
           _error!,

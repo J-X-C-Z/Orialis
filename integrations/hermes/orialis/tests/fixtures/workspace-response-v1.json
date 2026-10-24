@@ -1,0 +1,1 @@
+{"version":1,"type":"workspace.response","request_id":"workspace_req_1","conversation_id":"conversation_1","payload":{"ok":true,"data":{"entries":[{"name":"main.py","path":"src/main.py","isDirectory":false,"size":20}]}}}

@@ -13,7 +13,6 @@ import 'package:orialis_mobile/app/design/lumina_compat.dart'
 import '../shared/page_parts.dart';
 import '../../core/config/app_config.dart';
 import '../../core/network/orialis_api_client.dart';
-import '../../core/presentation/sync_state_presentation.dart';
 import '../../core/sync/sync_engine.dart';
 
 class ProfilePage extends ConsumerStatefulWidget {
@@ -208,9 +207,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         Expanded(
                           child: Text(
                             'Orialis',
-                            style: LuminaTheme.of(
-                              context,
-                            ).textTheme.headlineMedium,
+                            style: LuminaTheme.of(context)
+                                .textTheme
+                                .headlineMedium,
                           ),
                         ),
                       ],
@@ -342,6 +341,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   leading: const LuminaIcon(LuminaIcons.devices),
                   trailing: const LuminaIcon(LuminaIcons.chevronRight),
                   onTap: () => context.push('/system'),
+                ),
+              if (!ref.watch(desktopModeProvider))
+                LuminaListRow(
+                  title: '屏幕记忆',
+                  subtitle: '快捷记录屏幕、Bilibili 链接与理解结果',
+                  leading: const LuminaIcon(LuminaIcons.image),
+                  trailing: const LuminaIcon(LuminaIcons.chevronRight),
+                  onTap: () => context.push('/memory'),
                 ),
               if (!ref.watch(desktopModeProvider))
                 LuminaListRow(

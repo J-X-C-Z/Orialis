@@ -31,7 +31,7 @@ class ChatController {
         replyRole: replyRole,
       );
       lastMessageId = message.id;
-      await flush();
+      await _flushMessage(conversationId, message.id);
       state = ChatSendState.idle;
     } catch (error) {
       lastError = error;
@@ -40,17 +40,28 @@ class ChatController {
     }
   }
 
-  Future<void> retry(String messageId) async {
+  Future<void> retry(String messageId, {required String conversationId}) async {
     lastMessageId = messageId;
     state = ChatSendState.sending;
     lastError = null;
     try {
-      await flush();
+      await _flushMessage(conversationId, messageId);
       state = ChatSendState.idle;
     } catch (error) {
       lastError = error;
       state = ChatSendState.failed;
       rethrow;
+    }
+  }
+
+  Future<void> _flushMessage(String conversationId, String messageId) async {
+    try {
+      await flush();
+    } catch (_) {
+      // Other sync domains may fail after this message was acknowledged.
+      if (!await repository.isMessageUploaded(conversationId, messageId)) {
+        rethrow;
+      }
     }
   }
 }

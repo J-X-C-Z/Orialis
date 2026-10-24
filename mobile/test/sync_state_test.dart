@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:orialis_mobile/core/presentation/sync_state_presentation.dart';
 import 'package:orialis_mobile/core/sync/sync_engine.dart';
 import 'package:orialis_mobile/core/config/app_config.dart';
 import 'package:orialis_mobile/core/database/app_database.dart';

@@ -62,6 +62,10 @@ requires_env:
     prompt: "Orialis device ID"
     password: false
 optional_env:
+  - name: ORIALIS_WORKSPACES
+    description: "JSON array of explicitly shared directories: [{path,name,terminal}]; empty exposes no host files"
+    prompt: "Allowed workspace directories (JSON array, default [])"
+    password: false
   - name: ORIALIS_ALLOWED_USERS
     description: "Sender allowlist; set to this gateway ORIALIS_DEVICE_ID for authenticated Orialis chat"
     prompt: "Allowed Orialis sender (this device ID)"

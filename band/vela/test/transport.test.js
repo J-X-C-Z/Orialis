@@ -76,3 +76,30 @@ test('guard read failure blocks snapshots while missing guard preserves legacy W
   h.writes.shift()(); assert.equal(h.sent[0].type, 'snapshot.ack')
   h.transport.onDestroy()
 })
+
+test('task completion waits for a correlated phone result and reports its status', () => {
+  const h = harness(); const results = []
+  h.transport.completeTask({ id: 'task-1', version: 7 }, true, (status) => results.push(status))
+  const request = h.sent[h.sent.length - 1]
+  assert.equal(request.type, 'task.complete.request')
+  assert.deepEqual(JSON.parse(JSON.stringify(request.payload)), { mutationId: request.payload.mutationId, taskId: 'task-1', completed: true, baseVersion: 7 })
+  h.transport.receive(JSON.stringify({ ns: 'orialis.wear.v1', type: 'task.complete.result', payload: { mutationId: request.payload.mutationId, taskId: 'other-task', completed: true, status: 'completed' } }))
+  assert.deepEqual(results, [])
+  h.transport.receive(JSON.stringify({ ns: 'orialis.wear.v1', type: 'task.complete.result', payload: { mutationId: request.payload.mutationId, taskId: 'task-1', completed: true, status: 'conflict' } }))
+  assert.deepEqual(results, ['conflict'])
+  h.transport.onDestroy()
+})
+
+
+test('same task cannot send twice while a phone result is pending, even across pages', () => {
+  const h = harness(); const results = []
+  h.transport.completeTask({ id: 'a', version: 3 }, true, s => results.push(s))
+  h.transport.completeTask({ id: 'a', version: 3 }, false, s => results.push(s))
+  assert.equal(h.sent.length, 1); assert.deepEqual(results, ['busy'])
+  h.transport.receive(JSON.stringify({ ns: 'orialis.wear.v1', type: 'task.complete.result', payload: {
+    mutationId: h.sent[0].payload.mutationId, taskId: 'a', completed: true, status: 'completed'
+  } }))
+  h.transport.completeTask({ id: 'a', version: 4 }, false, s => results.push(s))
+  assert.equal(h.sent.length, 2)
+  h.transport.onDestroy()
+})

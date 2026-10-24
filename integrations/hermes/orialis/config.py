@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from gateway.platforms._shared import extra_or_secret, seed_extra_from_env
 from .protocol import is_valid_agent_device_id
+from .workspace import configured_workspaces
 
 
 _ENV_SPEC = (
@@ -12,6 +13,7 @@ _ENV_SPEC = (
     ("ORIALIS_DEVICE_ID", "device_id", None),
     ("ORIALIS_DEVICE_TOKEN", "device_token", None),
     ("ORIALIS_HOME_CHANNEL", "home_channel", None),
+    ("ORIALIS_WORKSPACES", "workspaces", None),
 )
 
 
@@ -32,6 +34,7 @@ class OrialisConfig:
     ack_timeout_seconds: float = 10.0
     interaction_timeout_seconds: float = 300.0
     stream_timeout_seconds: float = 120.0
+    workspaces: tuple = ()
 
     @classmethod
     def from_platform_config(cls, platform_config: Any) -> "OrialisConfig":
@@ -46,6 +49,7 @@ class OrialisConfig:
             ack_timeout_seconds=_positive_float(extra.get("ack_timeout_seconds"), 10.0),
             interaction_timeout_seconds=_positive_float(extra.get("interaction_timeout_seconds"), 300.0),
             stream_timeout_seconds=_positive_float(extra.get("stream_timeout_seconds"), 120.0),
+            workspaces=tuple(configured_workspaces(extra_or_secret(extra, "workspaces", "ORIALIS_WORKSPACES", "[]"))),
         )
 
 

@@ -1,13 +1,105 @@
 <template>
-<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><scroll class="content" scroll-y="true"><div class="stack">
-<div class="header"><div class="back" onclick="goBack"><text class="backText">‹</text></div><text class="title">{{ selection ? '详情' : quadrantFilter >= 0 ? quadrantLabel : '四象限' }}</text></div>
-<text class="notice" if="{{ organizer.partial }}">部分数据 · 数量仅为已同步记录</text><div class="stack" if="{{ !selection && quadrantFilter < 0 }}"><div class="row quadrantRow" for="{{ quadrants }}" onclick="selectQuadrant($item.index)"><div class="glanceAccent {{ $item.tone }}"></div><div class="copy"><text class="quadrantTitle">{{ $item.name }}</text></div><text class="quadCount">{{ $item.count }}</text><text class="chevron">›</text></div><div class="disabled" onclick="selectQuadrant(4)"><text class="controlText">未分类 · {{ unclassifiedCount }}</text></div><text class="hint">{{ vm.sourceShort }} · 仅查看</text></div>
-<div class="stack" if="{{ !selection && quadrantFilter >= 0 }}"><div class="disabled" onclick="cycleFilter"><text class="buttonText">{{ filter }} · 切换筛选</text></div><text class="emptyBody" if="{{ !visibleRows.length }}">此分类暂无任务</text><div class="row" for="{{ visibleRows }}" onclick="openItem($item.kind, $item.id)"><div class="copy"><text class="rowTitle">{{ $item.title }}</text><text class="rowHint">{{ $item.subtitle }}</text></div><text class="chevron">›</text></div><div class="disabled" if="{{ hasMore }}" onclick="showMore"><text class="buttonText">显示更多</text></div></div><div class="stack" if="{{ selection && organizer.detail }}"><div class="card"><text class="taskName">{{ organizer.detail.displayTitle }}</text><text class="stateBadge">{{ organizer.detail.statusLabel }}</text><text class="meta" if="{{ organizer.detail.due }}">截止 {{ organizer.detail.due }}</text><text class="emptyBody" if="{{ organizer.detail.notes }}">{{ organizer.detail.notes }}</text><text class="emptyBody" if="{{ organizer.detail.description }}">{{ organizer.detail.description }}</text><text class="emptyBody" if="{{ organizer.detail.goal }}">{{ organizer.detail.goal }}</text><text class="meta" if="{{ organizer.detail.when }}">{{ organizer.detail.when }}</text><text class="meta" if="{{ organizer.detail.location }}">{{ organizer.detail.location }}</text><text class="meta" if="{{ organizer.detail.kind === 'tasks' || organizer.detail.kind === 'schedules' }}">提前提醒 {{ organizer.detail.reminderMinutes === null || organizer.detail.reminderMinutes === undefined ? '未设置' : organizer.detail.reminderMinutes + '分钟' }}</text><text class="meta" if="{{ organizer.detail.kind === 'tasks' || organizer.detail.kind === 'schedules' }}">通知送达待接入</text><text class="meta" if="{{ organizer.detail.recurrence }}">已有重复规则 · 在手机编辑</text><text class="meta" if="{{ organizer.detail.kind === 'projects' }}">里程碑 {{ organizer.detail.progress }}</text><text class="body" if="{{ organizer.detail.kind === 'projects' }}">下一步 {{ organizer.detail.next }}</text></div>
-
-
-<text class="label" if="{{ organizer.detail.kind === 'projects' }}">里程碑</text><div class="row {{ $item.completed ? 'selected' : '' }}" for="{{ organizer.milestones }}" onclick="openItem($item.kind, $item.id)"><div class="glyphCircle teal"><div class="check"></div></div><div class="copy"><text class="rowTitle">{{ $item.title }}</text><text class="rowHint">{{ $item.subtitle }}</text></div><text class="chevron">›</text></div><text class="label" if="{{ organizer.detail.kind === 'tasks' || organizer.detail.kind === 'schedules' || organizer.detail.kind === 'projects' }}">{{ organizer.detail.kind === 'tasks' ? '一级子任务' : '关联任务' }}</text><div class="row {{ $item.completed ? 'selected' : '' }}" for="{{ organizer.related }}" onclick="openItem($item.kind, $item.id)"><div class="glyphCircle teal"><div class="check"></div></div><div class="copy"><text class="rowTitle">{{ $item.title }}</text><text class="rowHint">{{ $item.subtitle }}</text></div><text class="chevron">›</text></div>
-<div class="disabled" onclick="closeDetail"><text class="buttonText">返回列表</text></div></div>
-</div></scroll></div>
+  <div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd">
+    <scroll class="content" scroll-y="true">
+      <div class="stack">
+        <div class="header">
+          <div class="back" onclick="goBack">
+            <text class="backText">‹</text>
+          </div>
+          <text class="title">{{ selection ? '详情' : quadrantFilter >= 0 ? quadrantLabel : '四象限' }}</text>
+        </div>
+        <text class="notice" if="{{ organizer.partial }}">部分数据 · 数量仅为已同步记录</text>
+        <div class="stack" if="{{ !selection && quadrantFilter < 0 }}">
+          <div class="row quadrantRow" for="{{ quadrants }}" onclick="selectQuadrant($item.index)">
+            <div class="glanceAccent {{ $item.tone }}"></div>
+            <div class="copy">
+              <text class="quadrantTitle">{{ $item.name }}</text>
+            </div>
+            <text class="quadCount">{{ organizer.available ? $item.count : '—' }}</text>
+            <text class="chevron">›</text>
+          </div>
+          <div class="secondaryButton" onclick="selectQuadrant(4)">
+            <text class="controlText">未分类 · {{ organizer.available ? unclassifiedCount : '—' }}</text>
+          </div>
+          <text class="footerNote">{{ vm.sourceShort }} · 仅查看</text>
+        </div>
+        <div class="stack" if="{{ !selection && quadrantFilter >= 0 }}">
+          <div class="secondaryButton" onclick="cycleFilter">
+            <text class="buttonText">{{ filter }} · 切换筛选</text>
+          </div>
+          <div class="emptyCard" if="{{ !visibleRows.length }}">
+            <text class="emptyTitle">{{ organizer.available ? (organizer.partial ? '已同步内容暂无此类任务' : '此分类暂无任务') : '等待手机同步任务' }}</text>
+            <text class="emptyBody">{{ organizer.available ? '可切换筛选，或右滑查看其他象限。' : '在手机打开 Orialis，同步后查看任务。' }}</text>
+          </div>
+          <div class="row {{ vm.compact ? 'compactRow' : '' }}" for="{{ visibleRows }}" onclick="openItem($item.kind, $item.id)">
+            <div class="taskMarker {{ $item.completed ? 'taskMarkerDone' : '' }}">
+              <div class="check" if="{{ $item.completed }}"></div>
+            </div>
+            <div class="copy">
+              <text class="rowTitle">{{ $item.title }}</text>
+              <text class="rowHint" if="{{ !vm.compact }}">{{ $item.subtitle }}</text>
+            </div>
+            <text class="chevron">›</text>
+          </div>
+          <div class="secondaryButton" if="{{ hasMore }}" onclick="showMore">
+            <text class="buttonText">显示更多</text>
+          </div>
+        </div>
+        <div class="stack" if="{{ selection && organizer.detail }}">
+          <div class="statusCard">
+            <text class="detailTitle">{{ organizer.detail.displayTitle }}</text>
+            <text class="stateBadge">{{ organizer.detail.statusLabel }}</text>
+            <text class="caption" if="{{ organizer.detail.due }}">截止 {{ organizer.detail.due }}</text>
+            <text class="sectionTitle" if="{{ organizer.detail.notes }}">备注</text>
+            <text class="detailBody" if="{{ organizer.detail.notes }}">{{ organizer.detail.notes }}</text>
+            <text class="sectionTitle" if="{{ organizer.detail.description }}">说明</text>
+            <text class="detailBody" if="{{ organizer.detail.description }}">{{ organizer.detail.description }}</text>
+            <text class="sectionTitle" if="{{ organizer.detail.goal }}">目标</text>
+            <text class="detailBody" if="{{ organizer.detail.goal }}">{{ organizer.detail.goal }}</text>
+            <text class="sectionTitle" if="{{ organizer.detail.when }}">时间</text>
+            <text class="detailBody" if="{{ organizer.detail.when }}">{{ organizer.detail.when }}</text>
+            <text class="sectionTitle" if="{{ organizer.detail.location }}">地点</text>
+            <text class="detailBody" if="{{ organizer.detail.location }}">{{ organizer.detail.location }}</text>
+            <text class="caption" if="{{ organizer.detail.kind === 'tasks' || organizer.detail.kind === 'schedules' }}">提前提醒 {{ organizer.detail.reminderMinutes === null || organizer.detail.reminderMinutes === undefined ? '未设置' : organizer.detail.reminderMinutes + '分钟' }}</text>
+            <text class="caption" if="{{ organizer.detail.kind === 'tasks' || organizer.detail.kind === 'schedules' }}">提醒由手机通知发出；请在小米运动健康开启 Orialis 通知显示</text>
+            <text class="caption" if="{{ organizer.detail.recurrence }}">已有重复规则 · 在手机编辑</text>
+            <text class="caption" if="{{ organizer.detail.kind === 'projects' }}">里程碑 {{ organizer.detail.progress }}</text>
+            <text class="sectionTitle" if="{{ organizer.detail.kind === 'projects' }}">下一步</text>
+            <text class="detailBody" if="{{ organizer.detail.kind === 'projects' }}">{{ organizer.detail.next }}</text>
+          </div>
+          <div class="secondaryButton {{ taskMutationStatus === '正在同步…' ? 'sendingButton' : '' }}" if="{{ organizer.detail.kind === 'tasks' && organizer.detail.version !== undefined }}" onclick="toggleTask">
+            <text class="buttonText">{{ taskMutationStatus === '正在同步…' ? '正在同步…' : organizer.detail.completed ? '标记为未完成' : '勾选完成' }}</text>
+          </div>
+          <text class="notice" if="{{ taskMutationStatus }}">{{ taskMutationStatus }}</text>
+          <text class="sectionTitle" if="{{ organizer.detail.kind === 'projects' }}">里程碑</text>
+          <div class="row {{ vm.compact ? 'compactRow' : '' }} {{ $item.completed ? 'selected' : '' }}" for="{{ organizer.milestones }}" onclick="openItem($item.kind, $item.id)">
+            <div class="taskMarker {{ $item.completed ? 'taskMarkerDone' : '' }}">
+              <div class="check" if="{{ $item.completed }}"></div>
+            </div>
+            <div class="copy">
+              <text class="rowTitle">{{ $item.title }}</text>
+              <text class="rowHint" if="{{ !vm.compact }}">{{ $item.subtitle }}</text>
+            </div>
+            <text class="chevron">›</text>
+          </div>
+          <text class="sectionTitle" if="{{ organizer.detail.kind === 'tasks' || organizer.detail.kind === 'schedules' || organizer.detail.kind === 'projects' }}">{{ organizer.detail.kind === 'tasks' ? '一级子任务' : '关联任务' }}</text>
+          <div class="row {{ vm.compact ? 'compactRow' : '' }} {{ $item.completed ? 'selected' : '' }}" for="{{ organizer.related }}" onclick="openItem($item.kind, $item.id)">
+            <div class="taskMarker {{ $item.completed ? 'taskMarkerDone' : '' }}">
+              <div class="check" if="{{ $item.completed }}"></div>
+            </div>
+            <div class="copy">
+              <text class="rowTitle">{{ $item.title }}</text>
+              <text class="rowHint" if="{{ !vm.compact }}">{{ $item.subtitle }}</text>
+            </div>
+            <text class="chevron">›</text>
+          </div>
+          <div class="secondaryButton" onclick="closeDetail">
+            <text class="buttonText">返回列表</text>
+          </div>
+        </div>
+      </div>
+    </scroll>
+  </div>
 </template>
 <script>
 const pages = require('../../services/page')

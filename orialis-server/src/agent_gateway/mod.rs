@@ -16,6 +16,9 @@ const EVENT_CACHE: usize = 4096;
 const DEFAULT_APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_APPROVAL_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 pub(crate) const SERVER_CAPABILITIES: &[&str] = &[
+    "reply_followups",
+    "workspace.request",
+    "session.status",
     "agent.typing",
     "agent.start",
     "agent.delta",
@@ -67,11 +70,15 @@ struct AgentConnection {
     device_id: String,
     platform: String,
     command_tx: mpsc::Sender<AgentCommand>,
+    capabilities: HashSet<String>,
 }
 
 #[derive(Default)]
 struct DeviceEventState {
     last_inbound_seq: u64,
+    inbound_session: Option<String>,
+    retired_sessions: HashSet<String>,
+    retired_session_order: VecDeque<String>,
     seen_event_ids: HashSet<String>,
     seen_event_order: VecDeque<String>,
     inbound_events: VecDeque<GatewayMessage>,
@@ -96,6 +103,9 @@ pub(crate) struct OnlineAgent {
 struct PendingRequest {
     reply_tx: oneshot::Sender<GatewayMessage>,
     device_id: String,
+    interaction: bool,
+    conversation_id: Option<String>,
+    last_activity: Instant,
 }
 
 #[derive(Default)]
@@ -125,6 +135,7 @@ pub(crate) enum EventDisposition {
     Duplicate,
     Gap { expected_seq: u64 },
     UnknownApproval,
+    StaleSession,
 }
 
 impl fmt::Display for RegistryError {
@@ -140,6 +151,19 @@ impl fmt::Display for RegistryError {
 impl std::error::Error for RegistryError {}
 
 impl AgentRegistry {
+    pub(crate) async fn set_peer_capabilities(&self, device_id: &str, capabilities: Vec<String>) {
+        if let Some(connection) = self.state.lock().await.connections.values_mut()
+            .find(|connection| connection.device_id == device_id) {
+            connection.capabilities = capabilities.into_iter().collect();
+        }
+    }
+
+    pub(crate) async fn supports_for_user(&self, user_id: &str, device_id: &str, capability: &str) -> bool {
+        self.state.lock().await.connections.values().any(|connection|
+            connection.user_id == user_id && connection.device_id == device_id
+            && connection.capabilities.contains(capability))
+    }
+
     pub(crate) async fn register_connection(
         &self,
         id: String,
@@ -166,6 +190,15 @@ impl AgentRegistry {
                     state
                         .pending
                         .retain(|_, pending| pending.device_id != pending_device);
+                    if let Some(events) = state.events.get_mut(&pending_device) {
+                        events.outbound_events.retain(|event| {
+                            !matches!(
+                                event,
+                                GatewayMessage::ApprovalResolve { .. }
+                                    | GatewayMessage::ClarifyResolve { .. }
+                            )
+                        });
+                    }
                 }
                 state.connections.remove(&previous_id)
             } else {
@@ -177,6 +210,7 @@ impl AgentRegistry {
                 device_id,
                 platform,
                 command_tx,
+                capabilities: HashSet::new(),
             };
             state.connections.insert(connection.id.clone(), connection);
             previous
@@ -197,6 +231,15 @@ impl AgentRegistry {
             state
                 .pending
                 .retain(|_, pending| pending.device_id != connection.device_id);
+            if let Some(events) = state.events.get_mut(&connection.device_id) {
+                events.outbound_events.retain(|event| {
+                    !matches!(
+                        event,
+                        GatewayMessage::ApprovalResolve { .. }
+                            | GatewayMessage::ClarifyResolve { .. }
+                    )
+                });
+            }
         }
     }
 
@@ -236,7 +279,7 @@ impl AgentRegistry {
         &self,
         user_id: Option<&str>,
         device_id: Option<&str>,
-        message: GatewayMessage,
+        mut message: GatewayMessage,
     ) -> Result<oneshot::Receiver<GatewayMessage>, RegistryError> {
         let message_id = message
             .message_id()
@@ -258,11 +301,30 @@ impl AgentRegistry {
             if state.pending.contains_key(&message_id) || state.completed.contains(&message_id) {
                 return Err(RegistryError::DuplicateMessage);
             }
+            let interaction = matches!(
+                &message,
+                GatewayMessage::ClarifyResolve { .. } | GatewayMessage::ApprovalResolve { .. }
+            );
+            if message.event_metadata().is_some() {
+                let events = state.events.entry(device_id.clone()).or_default();
+                events.next_outbound_seq = events.next_outbound_seq.saturating_add(1).max(1);
+                message = message.with_seq(events.next_outbound_seq);
+                events.outbound_events.push_back(message.clone());
+                while events.outbound_events.len() > EVENT_CACHE {
+                    events.outbound_events.pop_front();
+                }
+            }
             state.pending.insert(
                 message_id.clone(),
                 PendingRequest {
                     reply_tx,
                     device_id,
+                    interaction,
+                    conversation_id: match &message {
+                        GatewayMessage::MessageSend { conversation_id, .. } => Some(conversation_id.clone()),
+                        _ => None,
+                    },
+                    last_activity: Instant::now(),
                 },
             );
             command_tx
@@ -280,11 +342,42 @@ impl AgentRegistry {
     }
 
     async fn pending_remove(&self, message_id: &str) {
-        self.state.lock().await.pending.remove(message_id);
+        let mut state = self.state.lock().await;
+        if let Some(pending) = state.pending.remove(message_id) {
+            if pending.interaction {
+                if let Some(events) = state.events.get_mut(&pending.device_id) {
+                    events
+                        .outbound_events
+                        .retain(|event| event.message_id() != Some(message_id));
+                }
+            }
+        }
     }
 
     pub(crate) async fn cancel_request(&self, message_id: &str) {
         self.pending_remove(message_id).await;
+    }
+
+    /// Only accepted events from the dispatched device and conversation keep a
+    /// message alive. Device-wide ping/typing in another chat cannot do so.
+    pub(crate) async fn touch_message_activity(&self, device_id: &str, conversation_id: &str) {
+        let mut state = self.state.lock().await;
+        for pending in state.pending.values_mut() {
+            if pending.device_id == device_id
+                && pending.conversation_id.as_deref() == Some(conversation_id)
+            {
+                pending.last_activity = Instant::now();
+            }
+        }
+    }
+
+    pub(crate) async fn message_activity_age(&self, message_id: &str) -> Option<Duration> {
+        self.state.lock().await.pending.get(message_id).map(|p| p.last_activity.elapsed())
+    }
+
+    pub(crate) async fn pending_message_matches(&self, message_id: &str, device_id: &str, conversation_id: &str) -> bool {
+        self.state.lock().await.pending.get(message_id).is_some_and(|pending|
+            pending.device_id == device_id && pending.conversation_id.as_deref() == Some(conversation_id))
     }
 
     #[cfg(test)]
@@ -322,8 +415,25 @@ impl AgentRegistry {
                 .pending
                 .remove(&reply_to)
                 .expect("checked pending request");
+            let retryable_failure =
+                pending.interaction && matches!(&message, GatewayMessage::Error { .. });
+            let acknowledged = matches!(&message, GatewayMessage::MessageAck { status, .. } if status == "resolved")
+                || matches!(
+                    &message,
+                    GatewayMessage::ApprovalResolve { .. } | GatewayMessage::ClarifyResolve { .. }
+                );
+            if pending.interaction {
+                if let Some(events) = state.events.get_mut(&pending.device_id) {
+                    events
+                        .outbound_events
+                        .retain(|event| event.message_id() != Some(reply_to.as_str()));
+                    if acknowledged && events.pending_approvals.remove(&reply_to).is_some() {
+                        remember_resolved_approval(events, &reply_to);
+                    }
+                }
+            }
             let delivered = pending.reply_tx.send(message).is_ok();
-            if delivered {
+            if delivered && !retryable_failure {
                 state.completed.insert(reply_to.to_owned());
                 state.completed_order.push_back(reply_to.to_owned());
                 while state.completed_order.len() > COMPLETED_REQUEST_CACHE {
@@ -347,12 +457,33 @@ impl AgentRegistry {
         device_id: &str,
         message: GatewayMessage,
     ) -> EventDisposition {
-        let Some((event_id, seq, _)) = message.event_metadata() else {
+        let Some((event_id, seq, session_id)) = message.event_metadata() else {
             return EventDisposition::UnknownApproval;
         };
         let mut state = self.state.lock().await;
         let events = state.events.entry(device_id.to_owned()).or_default();
-        if events.seen_event_ids.contains(event_id) || seq <= events.last_inbound_seq {
+        if events.retired_sessions.contains(session_id) {
+            return EventDisposition::StaleSession;
+        }
+        if events.seen_event_ids.contains(event_id) {
+            return EventDisposition::Duplicate;
+        }
+        if events.inbound_session.as_deref() != Some(session_id) {
+            if let Some(previous) = events.inbound_session.replace(session_id.to_owned()) {
+                events.retired_sessions.insert(previous.clone());
+                events.retired_session_order.push_back(previous);
+                while events.retired_session_order.len() > EVENT_CACHE {
+                    if let Some(oldest) = events.retired_session_order.pop_front() {
+                        events.retired_sessions.remove(&oldest);
+                    }
+                }
+            }
+            // Process restart epochs deliberately preserve event-ID replay
+            // protection and pending approvals, but establish a new sequence
+            // baseline. Server restart can first observe a high client seq.
+            events.last_inbound_seq = seq.saturating_sub(1);
+        }
+        if seq <= events.last_inbound_seq {
             return EventDisposition::Duplicate;
         }
         if seq > events.last_inbound_seq.saturating_add(1) {
@@ -592,6 +723,30 @@ mod tests {
         assert!(capabilities
             .iter()
             .any(|value| value == "proactive_delivery"));
+    }
+
+    #[tokio::test]
+    async fn event_sequence_recovers_plugin_and_server_restart_but_rejects_retired_epoch() {
+        let registry=AgentRegistry::default();
+        let event=|id:&str, session:&str, seq| GatewayMessage::AgentStatus {
+            version:1,event_id:id.into(),seq,session_id:session.into(),status:"running".into(),message:None,
+        };
+        // A server restart can first observe any positive seq from an already
+        // running plugin. Subsequent gaps in that epoch remain errors.
+        assert_eq!(registry.accept_event("device",event("old-91","old-process",91)).await,EventDisposition::Accepted);
+        assert_eq!(registry.accept_event("device",event("old-93","old-process",93)).await,EventDisposition::Gap {expected_seq:92});
+        assert_eq!(registry.accept_event("device",event("old-92","old-process",92)).await,EventDisposition::Accepted);
+        // Socket reconnect uses the same session and does not reset sequence.
+        assert_eq!(registry.accept_event("device",event("old-repeat","old-process",92)).await,EventDisposition::Duplicate);
+        // A restarted plugin uses a new process session and can start from 1.
+        assert_eq!(registry.accept_event("device",event("new-1","new-process",1)).await,EventDisposition::Accepted);
+        assert_eq!(registry.accept_event("device",event("late-old","old-process",94)).await,EventDisposition::StaleSession);
+        assert_eq!(registry.accept_event("device",event("new-3","new-process",3)).await,EventDisposition::Gap {expected_seq:2});
+        assert_eq!(registry.accept_event("device",event("new-2","new-process",2)).await,EventDisposition::Accepted);
+        // Device isolation and event-ID idempotency survive epoch changes.
+        assert_eq!(registry.accept_event("other-device",event("other-20","other",20)).await,EventDisposition::Accepted);
+        assert_eq!(registry.accept_event("device",event("old-91","third-process",1)).await,EventDisposition::Duplicate);
+        assert_eq!(registry.accept_event("device",event("new-3-ok","new-process",3)).await,EventDisposition::Accepted);
     }
 
     #[tokio::test]

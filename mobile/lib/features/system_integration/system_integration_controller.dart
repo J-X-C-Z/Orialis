@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -94,10 +95,16 @@ class SystemIntegrationController {
       if (call.method == 'openRoute') await _route(call.arguments);
     });
     _subscriptions.add(
-      database.watchActiveTasks().listen((_) => unawaited(refresh())),
-    );
-    _subscriptions.add(
-      database.watchActiveCalendarEvents().listen((_) => unawaited(refresh())),
+      database
+          .tableUpdates(
+            TableUpdateQuery.onAllTables([
+              database.tasks,
+              database.calendarEvents,
+            ]),
+          )
+          .listen((_) {
+            if (enabled) unawaited(refresh());
+          }),
     );
     _scheduleMidnight();
     // Clear may discard a native pending scoped intent. Read it first, then
@@ -253,8 +260,15 @@ class SystemIntegrationController {
         final snapshot = await database.transaction(
           () async => buildSystemSnapshot(
             scope: scope!,
-            tasks: await database.select(database.tasks).get(),
-            events: await database.select(database.calendarEvents).get(),
+            tasks:
+                await (database.select(database.tasks)..where(
+                      (row) =>
+                          row.deletedAt.isNull() & row.completed.equals(false),
+                    ))
+                    .get(),
+            events: await (database.select(
+              database.calendarEvents,
+            )..where((row) => row.deletedAt.isNull())).get(),
             now: DateTime.now(),
           ),
         );

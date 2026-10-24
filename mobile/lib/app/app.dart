@@ -16,6 +16,11 @@ import '../features/events/data/task_repository.dart';
 import '../features/events/data/schedule_repository.dart';
 import '../features/projects/data/project_repository.dart';
 import '../features/chat/data/chat_repository.dart';
+import '../features/chat/application/chat_share_coordinator.dart';
+import '../pages/chat/chat_page.dart' show agentChatServiceProvider;
+import '../features/memory/application/memory_analyzer.dart';
+import '../features/memory/application/memory_coordinator.dart';
+import '../features/memory/data/memory_repository.dart';
 import '../core/realtime/mobile_realtime_client.dart';
 import '../core/sync/sync_engine.dart';
 import '../core/sync/sync_coordinator.dart';
@@ -78,6 +83,44 @@ final databaseProvider = Provider<AppDatabase>((ref) {
 });
 
 final appConfigProvider = Provider<AppConfig>((ref) => AppConfig());
+
+final memoryRepositoryProvider = Provider<MemoryRepository>((ref) {
+  final repository = MemoryRepository();
+  ref.onDispose(repository.dispose);
+  return repository;
+});
+
+final memoryCoordinatorProvider = Provider<MemoryCoordinator?>((ref) {
+  if (ref.watch(desktopModeProvider) ||
+      kIsWeb ||
+      defaultTargetPlatform != TargetPlatform.android) {
+    return null;
+  }
+  final repository = ref.watch(memoryRepositoryProvider);
+  final coordinator = MemoryCoordinator(
+    config: ref.watch(appConfigProvider),
+    repository: repository,
+    analyzer: MemoryAnalyzer(
+      repository: repository,
+      agents: ref.watch(agentChatServiceProvider),
+    ),
+  );
+  ref.onDispose(coordinator.dispose);
+  return coordinator;
+});
+
+final chatShareCoordinatorProvider = Provider<ChatShareCoordinator?>((ref) {
+  if (ref.watch(desktopModeProvider) ||
+      kIsWeb ||
+      defaultTargetPlatform != TargetPlatform.android) {
+    return null;
+  }
+  final coordinator = ChatShareCoordinator(
+    config: ref.watch(appConfigProvider),
+  );
+  ref.onDispose(coordinator.dispose);
+  return coordinator;
+});
 
 final systemIntegrationProvider = Provider<SystemIntegrationController?>((ref) {
   if (ref.watch(desktopModeProvider) ||
@@ -246,11 +289,21 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
     with WidgetsBindingObserver {
   late final _router = buildRouter(desktop: ref.read(desktopModeProvider));
   SystemIntegrationController? _systemIntegration;
+  MemoryCoordinator? _memoryCoordinator;
+  ChatShareCoordinator? _chatShareCoordinator;
+  Uri? _lastChatRoute;
+
+  void _rememberChatRoute() {
+    final route = _router.routeInformationProvider.value.uri;
+    if (route.path == '/chat') _lastChatRoute = route;
+  }
+
   bool? _lastPerformanceMode;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _router.routeInformationProvider.addListener(_rememberChatRoute);
     unawaited(ref.read(syncCoordinatorProvider).start());
     final system = ref.read(systemIntegrationProvider);
     _systemIntegration = system;
@@ -261,6 +314,46 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
       WidgetsBinding.instance.scheduleFrame();
     };
     if (system != null) unawaited(system.start());
+    final memory = ref.read(memoryCoordinatorProvider);
+    _memoryCoordinator = memory;
+    memory?.onRoute = (route) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _router.go(route);
+      });
+      WidgetsBinding.instance.scheduleFrame();
+    };
+    memory?.onScopeWillChange = () {
+      if (_router.routeInformationProvider.value.uri.path == '/memory') {
+        _router.routerDelegate.navigatorKey.currentState?.popUntil(
+          (route) => route.isFirst,
+        );
+        _router.go('/profile');
+      }
+    };
+    final shares = ref.read(chatShareCoordinatorProvider);
+    _chatShareCoordinator = shares;
+    shares?.onShare = (id) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || shares.pending?.id != id) return;
+        final current = _router.routeInformationProvider.value.uri;
+        final chatRoute = current.path == '/chat' ? current : _lastChatRoute;
+        _router.go(
+          Uri(
+            path: '/chat',
+            queryParameters: {
+              if (chatRoute?.queryParameters['conversationId'] != null)
+                'conversationId': chatRoute!.queryParameters['conversationId']!,
+              'shareId': id,
+            },
+          ).toString(),
+        );
+      });
+      WidgetsBinding.instance.scheduleFrame();
+    };
+    unawaited(() async {
+      await memory?.start();
+      if (mounted) await shares?.start();
+    }());
   }
 
   @override
@@ -269,6 +362,8 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
       unawaited(ref.read(syncCoordinatorProvider).requestSync());
       final system = ref.read(systemIntegrationProvider);
       if (system != null) unawaited(system.refresh());
+      unawaited(_memoryCoordinator?.resume());
+      unawaited(_chatShareCoordinator?.refresh());
     }
   }
 
@@ -276,6 +371,10 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _systemIntegration?.onRoute = null;
+    _memoryCoordinator?.onRoute = null;
+    _memoryCoordinator?.onScopeWillChange = null;
+    _chatShareCoordinator?.onShare = null;
+    _router.routeInformationProvider.removeListener(_rememberChatRoute);
     _router.dispose();
     super.dispose();
   }
@@ -322,14 +421,14 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
               child: Material(
                 color: LuminaTheme.of(context).colors.paper,
                 textStyle: LuminaTheme.of(context).textTheme.bodyMedium,
-                child: Column(
-                  children: [
-                    const SafeArea(
-                      bottom: false,
-                      child: LegacyRecoveryNotice(),
-                    ),
-                    Expanded(child: child ?? const SizedBox.shrink()),
-                  ],
+                child: SafeArea(
+                  bottom: false,
+                  child: Column(
+                    children: [
+                      const LegacyRecoveryNotice(),
+                      Expanded(child: child ?? const SizedBox.shrink()),
+                    ],
+                  ),
                 ),
               ),
             ),

@@ -27,6 +27,7 @@ HELPER_CAPABILITIES = frozenset({
     "slash_commands", "command.request", "command.reply", "slash.command",
     "delivery.send", "cron.delivery", "proactive.delivery", "cron_delivery",
     "proactive_delivery", "sessions", "artifacts",
+    "workspace.request", "reply_followups", "session.status",
 })
 KNOWN_CAPABILITIES = SUPPORTED_CAPABILITIES | HELPER_CAPABILITIES
 LEGACY_CAPABILITIES = frozenset({"messages", "attachments", "ack", "reconnect", "device_auth"})
@@ -43,6 +44,7 @@ KNOWN_TYPES = frozenset({
     "command.request", "command.reply", "slash.command", "slash.reply", "delivery.send", "delivery.ack",
     "cron.delivery", "proactive.delivery", "session.open", "session.close", "session.reset", "session.list",
     "session.info", "session.reply", "artifact", "artifact.event",
+    "workspace.request", "workspace.response",
 })
 
 MAX_ATTACHMENTS = 16
@@ -562,6 +564,15 @@ def parse_message(raw: Any) -> dict[str, Any]:
         message["capabilities"] = _text_list(message.get("capabilities"), "capabilities", max_items=MAX_CAPABILITIES)
         _non_negative_int(message, "resume_from", optional=True)
         _non_negative_int(message, "next_seq", optional=True)
+    elif message_type in {"workspace.request", "workspace.response"}:
+        for field in ("request_id", "conversation_id"):
+            _required_text(message, field)
+            if len(message[field]) > 160:
+                raise ProtocolError(f"{field} is too long")
+        if not isinstance(message.get("payload"), dict):
+            raise ProtocolError("workspace payload must be an object")
+        if len(json.dumps(message["payload"]).encode("utf-8")) > 1_500_000:
+            raise ProtocolError("workspace payload is too large")
     elif message_type == "message.send":
         for field in ("message_id", "conversation_id"):
             _required_text(message, field)
@@ -842,10 +853,10 @@ def agent_delta(*, conversation_id: str, run_id: str, delta: str, session_id: st
     return _event("agent.delta", event_id=event_id, seq=seq, session_id=session_id, conversation_id=conversation_id, run_id=run_id, delta=delta, stream_id=stream_id)
 
 
-def agent_complete(*, conversation_id: str, run_id: str, session_id: str = "session_default", seq: int = 1, event_id: Optional[str] = None, content: str = "", artifacts: Optional[Sequence[Mapping[str, Any]]] = None) -> dict[str, Any]:
+def agent_complete(*, conversation_id: str, run_id: str, session_id: str = "session_default", seq: int = 1, event_id: Optional[str] = None, content: str = "", artifacts: Optional[Sequence[Mapping[str, Any]]] = None, message_id: Optional[str] = None) -> dict[str, Any]:
     return _event(
         "agent.complete", event_id=event_id, seq=seq, session_id=session_id,
-        conversation_id=conversation_id, run_id=run_id, content=content,
+        conversation_id=conversation_id, run_id=run_id, content=content, message_id=message_id,
         artifacts=list(artifacts) if artifacts else None,
     )
 

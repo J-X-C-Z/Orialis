@@ -25,6 +25,9 @@ class AgentEventStore extends ChangeNotifier {
   bool typing = false;
   String? agentStatus;
   String? agentStatusDetail;
+  bool hasStatusSnapshot = false;
+  int runtimeRevision = 0;
+  bool runtimeAttributed = true;
   final Map<String, AgentStream> streams = {};
   final Map<String, ToolTimelineItem> tools = {};
   final Map<String, ClarificationRequest> clarifications = {};
@@ -49,7 +52,7 @@ class AgentEventStore extends ChangeNotifier {
   void notify() => notifyListeners();
 
   /// Applies one event without waking listeners; batch callers notify once.
-  void applySilent(MobileEnvelope envelope) {
+  void applySilent(MobileEnvelope envelope, {bool attributed = true}) {
     if (envelope.type == 'message.ack') {
       _receiveMessage(envelope.payload);
       return;
@@ -86,16 +89,49 @@ class AgentEventStore extends ChangeNotifier {
       payload = _normalizeEventPayload(Map<String, dynamic>.from(nested));
       kind = _eventKind(payload);
       if (kind == null) {
-        fallbacks.add(UnknownAgentEvent(kind: 'agent_gateway_event', payload: payload));
+        fallbacks.add(
+          UnknownAgentEvent(kind: 'agent_gateway_event', payload: payload),
+        );
         return;
       }
     } else {
       final nested = outer['data'];
       if (nested is Map) {
-        payload = {...outer, ..._normalizeEventPayload(Map<String, dynamic>.from(nested))};
+        payload = {
+          ...outer,
+          ..._normalizeEventPayload(Map<String, dynamic>.from(nested)),
+        };
       }
     }
     kind = _canonicalEventKind(kind);
+    if (const {
+      'agent.start',
+      'agent.status',
+      'agent.typing',
+      'stream.delta',
+      'agent.delta',
+      'stream.complete',
+      'agent.complete',
+      'stream.error',
+      'agent.error',
+      'tool.start',
+      'tool.update',
+      'tool.end',
+    }.contains(kind)) {
+      hasStatusSnapshot = false;
+      runtimeRevision++;
+      runtimeAttributed = attributed;
+    }
+    if (const {
+      'clarify.request',
+      'clarify.resolve',
+      'clarify.cancel',
+      'approval.request',
+      'approval.resolved',
+    }.contains(kind)) {
+      runtimeRevision++;
+      runtimeAttributed = attributed;
+    }
     switch (kind) {
       case 'message.ack':
         _receiveMessage(payload);
@@ -104,22 +140,35 @@ class AgentEventStore extends ChangeNotifier {
       case 'agent.start':
         // Stream open is implied by the first delta; keep the run id warm.
         _stream(payload);
+        agentStatus = 'running';
+        agentStatusDetail = null;
       case 'stream.delta':
       case 'agent.delta':
         _applyDelta(payload);
+        agentStatus = 'responding';
       case 'stream.complete':
       case 'agent.complete':
-        _stream(payload).markComplete();
+        _stream(payload).markComplete(
+          content: payload['content'] is String
+              ? payload['content'] as String
+              : null,
+          messageId: _text(payload['messageId']),
+        );
+        agentStatus = 'completed';
+        typing = false;
       case 'stream.error':
       case 'agent.error':
         _stream(payload).markError(
           _text(payload['message']) ?? _text(payload['error']) ?? '处理失败',
         );
+        agentStatus = 'failed';
+        typing = false;
       case 'agent.status':
         agentStatus = _text(payload['status']) ?? _text(payload['state']);
         agentStatusDetail =
             _text(payload['message']) ?? _text(payload['detail']);
       case 'tool.start':
+        agentStatus = 'working';
         final id = _id(payload, 'tool');
         tools[id] = ToolTimelineItem(
           id: id,
@@ -137,15 +186,21 @@ class AgentEventStore extends ChangeNotifier {
         final status = _text(payload['status']) ?? _text(payload['state']);
         _updateTool(
           payload,
-          status == 'failed' || status == 'error' ? 'failed' : (status ?? 'completed'),
+          status == 'failed' || status == 'error'
+              ? 'failed'
+              : (status ?? 'completed'),
         );
       case 'clarify.request':
+        agentStatus = 'waiting';
+        typing = false;
         final request = ClarificationRequest.fromPayload(payload);
         clarifications[request.id] = request;
       case 'clarify.resolve':
       case 'clarify.cancel':
         clarifications.remove(_id(payload, 'clarification'));
       case 'approval.request':
+        agentStatus = 'waiting';
+        typing = false;
         final request = ApprovalRequest.fromPayload(payload);
         approvals[request.id] = request;
       case 'approval.resolved':
@@ -170,6 +225,24 @@ class AgentEventStore extends ChangeNotifier {
       case 'session.ended':
         final session = SessionInfo.fromPayload(payload, event: kind);
         sessions[session.id] = session;
+        if (session.statusSnapshot) {
+          runtimeRevision++;
+          runtimeAttributed = attributed;
+          hasStatusSnapshot = true;
+          agentStatus = session.status;
+          agentStatusDetail = session.message;
+          typing = const {
+            'running',
+            'working',
+            'processing',
+            'busy',
+            'thinking',
+            'responding',
+            'generating',
+            'streaming',
+            'typing',
+          }.contains(session.status);
+        }
       case 'artifact.created':
       case 'artifact.completed':
         final artifact = ArtifactInfo.fromPayload(payload);
@@ -199,12 +272,12 @@ class AgentEventStore extends ChangeNotifier {
         : stream.nextSequence;
     final delta = _text(payload['delta']) ?? _text(payload['content']) ?? '';
     if (delta.isEmpty || stream.deltas.containsKey(sequence)) return;
-    stream.putDelta(sequence, delta);
-    // Sequential streaming is the common path; only fall back to a scan when
-    // an out-of-order or sparse sequence map needs a precise next index.
-    stream.nextSequence = sequence >= stream.nextSequence
-        ? sequence + 1
-        : _nextSequence(stream.deltas);
+    stream.putDelta(
+      sequence,
+      delta,
+      // Gateway seq spans tool/typing events too, so gaps are not lost text.
+      contiguous: payload['sequence'] != null || payload['index'] != null,
+    );
   }
 
   void _updateTool(Map<String, dynamic> payload, String status) {
@@ -220,11 +293,18 @@ class AgentEventStore extends ChangeNotifier {
   }
 
   void _addError(Map<String, dynamic> payload, String? requestId) {
+    final actionId =
+        requestId ??
+        _text(payload['replyTo']) ??
+        _text(payload['reply_to']) ??
+        _text(payload['requestId']) ??
+        _text(payload['request_id']);
+    if (actionId != null) actions.release(actionId);
     errors.add(
       AgentError(
         code: _text(payload['code']) ?? 'error',
         message: _text(payload['message']) ?? '服务暂时不可用',
-        requestId: requestId ?? _text(payload['replyTo']),
+        requestId: actionId,
       ),
     );
   }
@@ -263,7 +343,10 @@ class AgentEventStore extends ChangeNotifier {
   return (
     kind: _canonicalEventKind(kind),
     conversationId:
-        _text(payload['conversationId']) ?? _text(payload['conversation_id']),
+        _text(payload['conversationId']) ??
+        _text(payload['conversation_id']) ??
+        _text(outer['conversationId']) ??
+        _text(outer['conversation_id']),
   );
 }
 
@@ -286,55 +369,68 @@ class AgentStream {
   int nextSequence = 0;
   bool complete = false;
   String? error;
+  String? messageId;
+  String? _finalContent;
+  bool _contiguousSequences = true;
 
-  // Streaming rebuilds call text/hasGap every frame; keep the last result so
-  // long replies do not re-sort and re-join the full delta map on each tick.
+  // Append the common ordered path; only sort after an out-of-order chunk.
+  final _textBuffer = StringBuffer();
   String? _textCache;
-  bool? _hasGapCache;
-  List<int>? _sortedKeysCache;
+  bool _textNeedsRebuild = false;
+  int? _firstSequence;
+  int? _lastSequence;
 
-  void _invalidate() {
-    _textCache = null;
-    _hasGapCache = null;
-    _sortedKeysCache = null;
-  }
-
-  void putDelta(int sequence, String delta) {
+  void putDelta(int sequence, String delta, {bool contiguous = true}) {
     if (delta.isEmpty || deltas.containsKey(sequence)) return;
+    if (_finalContent != null) return;
+    _contiguousSequences = _contiguousSequences && contiguous;
+    if (_lastSequence == null || sequence > _lastSequence!) {
+      _lastSequence = sequence;
+      if (!_textNeedsRebuild) _textBuffer.write(delta);
+    } else {
+      _textNeedsRebuild = true;
+    }
+    if (_firstSequence == null || sequence < _firstSequence!) {
+      _firstSequence = sequence;
+    }
     deltas[sequence] = delta;
-    _invalidate();
+    _textCache = null;
+    nextSequence = sequence >= nextSequence ? sequence + 1 : _firstSequence!;
+    while (deltas.containsKey(nextSequence)) {
+      nextSequence++;
+    }
   }
 
-  void markComplete() {
+  void markComplete({String? content, String? messageId}) {
     complete = true;
-    _invalidate();
+    _finalContent = content;
+    this.messageId = messageId;
+    _textCache = null;
   }
 
   void markError(String value) {
     error = value;
     complete = true;
-    _invalidate();
   }
 
-  List<int> get _sortedKeys =>
-      _sortedKeysCache ??= (deltas.keys.toList()..sort());
-
   String get text {
+    if (_finalContent != null) return _finalContent!;
     final cached = _textCache;
     if (cached != null) return cached;
-    if (deltas.isEmpty) return _textCache = '';
-    return _textCache = [for (final key in _sortedKeys) deltas[key]!].join();
+    if (_textNeedsRebuild) {
+      _textBuffer.clear();
+      for (final key in deltas.keys.toList()..sort()) {
+        _textBuffer.write(deltas[key]);
+      }
+      _textNeedsRebuild = false;
+    }
+    return _textCache = _textBuffer.toString();
   }
 
   bool get hasGap {
-    final cached = _hasGapCache;
-    if (cached != null) return cached;
-    if (deltas.isEmpty) return _hasGapCache = false;
-    final keys = _sortedKeys;
-    for (var value = keys.first; value <= keys.last; value++) {
-      if (!deltas.containsKey(value)) return _hasGapCache = true;
-    }
-    return _hasGapCache = false;
+    if (_finalContent != null || !_contiguousSequences) return false;
+    return deltas.isNotEmpty &&
+        _lastSequence! - _firstSequence! + 1 != deltas.length;
   }
 
   String get displayStatus {
@@ -363,10 +459,12 @@ class ClarificationRequest {
     required this.id,
     required this.question,
     required this.options,
+    this.multiSelect = false,
   });
   final String id;
   final String question;
   final List<String> options;
+  final bool multiSelect;
 
   factory ClarificationRequest.fromPayload(Map<String, dynamic> payload) =>
       ClarificationRequest(
@@ -374,6 +472,8 @@ class ClarificationRequest {
         question:
             _text(payload['question']) ?? _text(payload['prompt']) ?? '请补充选择',
         options: _stringList(payload['options'] ?? payload['choices']),
+        multiSelect:
+            _bool(payload['multiSelect'] ?? payload['multi_select']) ?? false,
       );
 }
 
@@ -422,9 +522,12 @@ class CommandResult {
             '',
         ok:
             _bool(payload['ok']) ??
-            !const {'error', 'failed', 'cancelled', 'timeout'}.contains(
-              _text(payload['status']),
-            ),
+            !const {
+              'error',
+              'failed',
+              'cancelled',
+              'timeout',
+            }.contains(_text(payload['status'])),
       );
 }
 
@@ -436,6 +539,7 @@ class SessionInfo {
     this.title,
     this.message,
     this.command,
+    this.statusSnapshot = false,
   });
   final String id;
   final String event;
@@ -443,34 +547,42 @@ class SessionInfo {
   final String? title;
   final String? message;
   final String? command;
+  final bool statusSnapshot;
 
   factory SessionInfo.fromPayload(
     Map<String, dynamic> payload, {
     required String event,
   }) {
     final update = payload['update'];
+    final snapshot =
+        payload['event'] == 'session.status' ||
+        (payload['event'] == null && payload['kind'] == 'session.status');
+    final legacySnapshot = snapshot && _text(payload['requestId']) == null;
     return SessionInfo(
       id: _id(payload, 'session'),
       event: event,
-      status:
-          _text(payload['status']) ??
-          _text(payload['state']) ??
-          (update is Map ? _text(update['status']) : null) ??
-          (event == 'session.complete'
-              ? 'completed'
-              : event == 'session.cancel'
-              ? 'cancelled'
-              : event == 'session.error' || event == 'session.ended'
-              ? 'ended'
-              : null),
+      status: legacySnapshot
+          ? 'unknown'
+          : _text(payload['status']) ??
+                _text(payload['state']) ??
+                (update is Map ? _text(update['status']) : null) ??
+                (event == 'session.complete'
+                    ? 'completed'
+                    : event == 'session.cancel'
+                    ? 'cancelled'
+                    : event == 'session.error' || event == 'session.ended'
+                    ? 'ended'
+                    : null),
       title:
           _text(payload['title']) ??
           (update is Map ? _text(update['title']) : null),
-      message:
-          _text(payload['message']) ??
-          _text(payload['content']) ??
-          _text(payload['output']),
+      message: legacySnapshot
+          ? '当前服务端尚未提供可验证的实时状态，请更新服务端与设备插件。'
+          : _text(payload['message']) ??
+                _text(payload['content']) ??
+                _text(payload['output']),
       command: _text(payload['command']),
+      statusSnapshot: snapshot,
     );
   }
 }
@@ -502,8 +614,7 @@ class ArtifactInfo {
             _text(payload['downloadUrl']) ??
             _text(payload['download_url']) ??
             _text(payload['uri']),
-        description:
-            _text(payload['description']) ?? _text(payload['message']),
+        description: _text(payload['description']) ?? _text(payload['message']),
       );
 }
 
@@ -521,9 +632,12 @@ class DeliveryNotice {
             '投递设置已更新',
         ok:
             _bool(payload['ok']) ??
-            !const {'error', 'failed', 'rejected', 'timeout'}.contains(
-              _text(payload['status']),
-            ),
+            !const {
+              'error',
+              'failed',
+              'rejected',
+              'timeout',
+            }.contains(_text(payload['status'])),
       );
 }
 
@@ -545,16 +659,6 @@ class ActionSubmissionGuard {
   bool claim(String id) => _claimed.add(id);
   bool contains(String id) => _claimed.contains(id);
   void release(String id) => _claimed.remove(id);
-}
-
-int _nextSequence(Map<int, String> deltas) {
-  if (deltas.isEmpty) return 0;
-  final keys = deltas.keys.toList()..sort();
-  var next = keys.first;
-  while (deltas.containsKey(next)) {
-    next++;
-  }
-  return next;
 }
 
 String? _text(Object? value) =>
@@ -612,8 +716,7 @@ String _canonicalEventKind(String kind) => switch (kind) {
   'cron.delivery' ||
   'proactive.delivery' ||
   'delivery.ack' => 'delivery.notification',
-  'session.started' ||
-  'session.created' => 'session.created',
+  'session.started' || 'session.created' => 'session.created',
   'session.completed' => 'session.complete',
   'session.cancelled' => 'session.cancel',
   'session.failed' => 'session.error',

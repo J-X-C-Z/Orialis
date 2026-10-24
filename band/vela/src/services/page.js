@@ -1,6 +1,8 @@
 let router = null
 let storage = null
+let application = null
 const feedback = require('./feedback')
+try { application = require('@system.app') } catch (error) { console.warn('app unavailable') }
 try { router = require('@system.router') } catch (error) { console.warn('router unavailable') }
 try { storage = require('@system.storage') } catch (error) { console.warn('storage unavailable') }
 function navigate(uri) { if (router && typeof router.replace === 'function') router.replace({ uri }) }
@@ -11,7 +13,7 @@ function savePreferences(activeStore) {
 }
 function createPage(kind) {
   return Object.assign({
-    data: { pageKind: kind || 'home', motionClass: '', vm: { tasks: [], commands: [], devices: [], provenance: '无数据 · 等待手机同步' }, selectedTask: null, selectedCommand: null, confirmCommand: false, organizer: { rows: [], groups: [], days: [], related: [], milestones: [], deadlines: [], later: [], profile: {}, sync: {} }, selection: null, detailTrail: [], editor: null, fields: [], filter: '待完成', quadrantFilter: -1, quadrantLabel: '全部象限', calendarDate: '', calendarMode: '日', calendarDateLabel: '', calendarWeekday: '', calendarIsToday: false, calendarTotal: 0, visibleScheduleRows: [], notice: '', confirmDelete: false, homeSection: '', sectionTitle: '', visibleRows: [], visibleLimit: 10, hasMore: false, quadrants: [], unclassifiedCount: 0, pageTitle: { home: '今日', events: '四象限', calendar: '日历', projects: '项目', profile: '我的' }[kind] || 'Orialis' },
+    data: { pageKind: kind || 'home', motionClass: '', vm: { tasks: [], commands: [], devices: [], provenance: '无数据 · 等待手机同步' }, selectedTask: null, selectedCommand: null, confirmCommand: false, taskMutationStatus: '', organizer: { rows: [], groups: [], days: [], related: [], milestones: [], deadlines: [], later: [], profile: {}, sync: {} }, selection: null, detailTrail: [], editor: null, fields: [], filter: '待完成', quadrantFilter: -1, quadrantLabel: '全部象限', calendarDate: '', calendarMode: '日', calendarDateLabel: '', calendarWeekday: '', calendarIsToday: false, calendarTotal: 0, visibleScheduleRows: [], notice: '', confirmDelete: false, homeSection: '', sectionTitle: '', visibleRows: [], visibleLimit: 10, hasMore: false, quadrants: [], unclassifiedCount: 0, pageTitle: { home: '今日', events: '四象限', calendar: '日历', projects: '项目', profile: '我的' }[kind] || 'Orialis' },
     onInit() {
       this.wearStore = this.$app.$def.wearStore
       this.wearTransport = this.$app.$def.wearTransport
@@ -33,7 +35,7 @@ function createPage(kind) {
       this.refreshOrganizer()
     },
     onShow() { if (this.wearStore) this.applyView(this.wearStore.view()) },
-    onDestroy() { if (this.unsubscribe) this.unsubscribe() },
+    onDestroy() { this.destroyed = true; if (this.unsubscribe) this.unsubscribe() },
     tapFeedback() { feedback.pulse(this.vm.haptics) },
     ignoreTap() { return !this.swiping && Date.now() < (this.ignoreTapUntil || 0) },
     beginRoute(back) {
@@ -58,6 +60,22 @@ function createPage(kind) {
     menu() { this.visit('menu') }, tasks() { this.visit('tasks') },
     events() { this.visit('events') }, calendar() { this.visit('calendar') }, projects() { this.visit('projects') }, profile() { this.visit('profile') },
     commands() { this.visit('commands') }, devices() { this.visit('devices') }, settings() { this.visit('settings') }, diagnostics() { this.visit('diagnostics') },
+    exitApp() {
+      if (!this.beginRoute(true)) return
+      if (application && typeof application.terminate === 'function') application.terminate()
+    },
+    onBackPress() { return this.handleBack() },
+    handleBack() {
+      const now = Date.now()
+      // Touch/swipe and the system back lifecycle can report the same gesture.
+      if (now - (this.$app.$def.wearBackAt || 0) < 350) return true
+      this.$app.$def.wearBackAt = now
+      const swiping = this.swiping
+      this.swiping = true
+      this.goBack()
+      this.swiping = swiping
+      return true
+    },
     goBack() {
       if (this.ignoreTap()) return
       if (this.selection) { this.closeDetail(); return }
@@ -65,6 +83,7 @@ function createPage(kind) {
       if (this.selectedCommand) { this.closeCommand(); return }
       if (this.homeSection) { this.homeSection = ''; this.visibleLimit = 10; this.tapFeedback(); this.refreshOrganizer(); return }
       if (this.pageKind === 'events' && this.quadrantFilter >= 0) { this.quadrantFilter = -1; this.filter = '待完成'; this.visibleLimit = 10; this.tapFeedback(); this.refreshOrganizer(); return }
+      if (this.pageKind === 'home') { this.exitApp(); return }
       if (!this.beginRoute(true)) return
       if (this.navigation.length > 1 && this.navigation[this.navigation.length - 1] === this.pageKind) this.navigation.pop()
       const previous = this.navigation[this.navigation.length - 1] !== this.pageKind && this.navigation[this.navigation.length - 1] || (this.pageKind === 'diagnostics' ? 'settings' : 'home')
@@ -100,15 +119,15 @@ function createPage(kind) {
       this.lastSwipeAt = now
       this.swiping = true
       // Vela swipe recognizer supplies cardinal directions: vertical scroll never routes.
-      if (event.direction === 'right' && (this.pageKind !== 'home' || this.selection || this.homeSection)) this.goBack()
+      if (event.direction === 'right') this.handleBack()
       else if (event.direction === 'left' && this.pageKind === 'home' && !this.selection && !this.homeSection) this.menu()
       this.swiping = false
     },
-    openTask(id) { this.selectedTask = this.vm.tasks.filter((task) => task.id === id)[0] || null },
-    closeTask() { this.selectedTask = null },
-    openCommand(id) { this.selectedCommand = this.vm.commands.filter((command) => command.id === id)[0] || null; this.confirmCommand = false },
-    previewConfirmation() { this.confirmCommand = true },
-    closeCommand() { this.selectedCommand = null; this.confirmCommand = false },
+    openTask(id) { if (this.ignoreTap()) return; this.selectedTask = this.vm.tasks.filter((task) => task.id === id)[0] || null },
+    closeTask() { if (this.ignoreTap()) return; this.selectedTask = null },
+    openCommand(id) { if (this.ignoreTap()) return; this.selectedCommand = this.vm.commands.filter((command) => command.id === id)[0] || null; this.confirmCommand = false },
+    previewConfirmation() { if (this.ignoreTap()) return; this.confirmCommand = true },
+    closeCommand() { if (this.ignoreTap()) return; this.selectedCommand = null; this.confirmCommand = false },
     refreshOrganizer() {
       if (!this.wearStore || !this.vm.organizer) return
       if (!this.calendarDate) this.calendarDate = this.vm.organizer.today
@@ -145,11 +164,29 @@ function createPage(kind) {
     },
     openSection(key) { if (this.ignoreTap()) return; this.homeSection = key; this.visibleLimit = 10; this.tapFeedback(); this.refreshOrganizer() },
     selectQuadrant(index) { if (this.ignoreTap()) return; this.quadrantFilter = index; this.quadrantLabel = ['重要且紧急', '重要不紧急', '紧急不重要', '不重要不紧急', '未分类'][index]; this.filter = '待完成'; this.visibleLimit = 10; this.tapFeedback(); this.refreshOrganizer() },
-    showMore() { this.visibleLimit += 10; this.refreshOrganizer() },
-    openItem(kind, id) { if (this.ignoreTap()) return; this.tapFeedback(); if (this.selection) { this.detailTrail = this.detailTrail.concat([this.selection]).slice(-4) } this.selection = { kind, id }; this.confirmDelete = false; this.notice = ''; this.refreshOrganizer() },
-    closeDetail() { this.tapFeedback(); this.selection = this.detailTrail.length ? this.detailTrail[this.detailTrail.length - 1] : null; this.detailTrail = this.detailTrail.slice(0, -1); this.confirmDelete = false; this.notice = ''; this.refreshOrganizer() },
-    cycleFilter() { this.visibleLimit = 10; this.tapFeedback(); const choices = ['待完成', '无截止', '已完成']; this.filter = choices[(choices.indexOf(this.filter) + 1) % 3]; this.refreshOrganizer() },
-    cycleGroup() { this.quadrantFilter = (this.quadrantFilter + 2) % 6 - 1; this.quadrantLabel = ['全部象限', '重要且紧急', '重要不紧急', '紧急不重要', '不重要不紧急', '未分类'][this.quadrantFilter + 1]; this.refreshOrganizer() },
+    showMore() { if (this.ignoreTap()) return; this.visibleLimit += 10; this.refreshOrganizer() },
+    openItem(kind, id) { if (this.ignoreTap()) return; this.tapFeedback(); if (this.selection) { this.detailTrail = this.detailTrail.concat([this.selection]).slice(-4) } this.selection = { kind, id }; this.confirmDelete = false; this.taskMutationStatus = ''; this.notice = ''; this.refreshOrganizer() },
+    closeDetail() { if (this.ignoreTap()) return; this.tapFeedback(); this.selection = this.detailTrail.length ? this.detailTrail[this.detailTrail.length - 1] : null; this.detailTrail = this.detailTrail.slice(0, -1); this.confirmDelete = false; this.taskMutationStatus = ''; this.notice = ''; this.refreshOrganizer() },
+    toggleTask() {
+      const task = this.organizer && this.organizer.detail
+      if (this.ignoreTap() || this.taskMutationStatus === '正在同步…' || !task || task.kind !== 'tasks' || !Number.isInteger(task.version)) return
+      if (this.vm.demo || this.vm.mock) { this.taskMutationStatus = '演示内容仅供查看'; return }
+      if (this.vm.stale || this.vm.states.phone !== 'online') { this.taskMutationStatus = '请连接手机并同步最新内容后操作'; return }
+      if (!this.wearTransport || typeof this.wearTransport.completeTask !== 'function') { this.taskMutationStatus = '手机互联暂不可用'; return }
+      const selection = this.selection
+      this.taskMutationStatus = '正在同步…'
+      this.wearTransport.completeTask(task, !task.completed, (status) => {
+        if (this.destroyed || this.selection !== selection) return
+        if (status === 'completed') this.taskMutationStatus = '已同步完成'
+        else if (status === 'conflict') this.taskMutationStatus = '任务已在手机更改，请先重新同步'
+        else if (status === 'pending') this.taskMutationStatus = '手机暂未确认；请检查连接后重试'
+        else if (status === 'busy') this.taskMutationStatus = '该任务正在同步，请稍候'
+        else this.taskMutationStatus = '未能同步，请检查手机连接'
+        this.tapFeedback()
+      })
+    },
+    cycleFilter() { if (this.ignoreTap()) return; this.visibleLimit = 10; this.tapFeedback(); const choices = ['待完成', '无截止', '已完成']; this.filter = choices[(choices.indexOf(this.filter) + 1) % 3]; this.refreshOrganizer() },
+    cycleGroup() { if (this.ignoreTap()) return; this.quadrantFilter = (this.quadrantFilter + 2) % 6 - 1; this.quadrantLabel = ['全部象限', '重要且紧急', '重要不紧急', '紧急不重要', '不重要不紧急', '未分类'][this.quadrantFilter + 1]; this.refreshOrganizer() },
     dateStep(delta) {
       if (this.ignoreTap()) return
       if (!this.calendarDate) { this.notice = '等待手机本地日期同步'; return }
@@ -161,17 +198,17 @@ function createPage(kind) {
       this.calendarDate = value; this.visibleLimit = 10; this.notice = ''; this.tapFeedback(); this.refreshOrganizer()
     },
     todayDate() { this.selectDate(this.vm.organizer.today) },
-    phoneAccount() { this.notice = '登录、注册、退出及账户凭据请在手机「我的」完成' },
-    phoneSync() { this.notice = '服务器、手动同步与冲突处理请在手机「我的」完成' },
-    phoneAppearance() { this.notice = '亮色、暗色、跟随系统与高性能模式请在手机设置；手环采用黑底' },
-    phoneSecurity() { this.notice = '配对确认、拒绝、撤销凭据及切换当前设备请在手机「设备中心」完成' },
-    selectDevice(id) { this.wearStore.selectPreviewTarget(id) },
-    toggleDemo() { this.wearStore.setDemo(!this.vm.demo) },
-    toggleHaptics() { this.wearStore.setHaptics(!this.vm.haptics); this.tapFeedback(); savePreferences(this.wearStore) },
-    toggleReducedMotion() { this.wearStore.setReducedMotion(!this.vm.reducedMotion); this.tapFeedback(); savePreferences(this.wearStore) },
-    toggleCompact() { this.wearStore.setCompact(!this.vm.compact); savePreferences(this.wearStore) },
-    diagnose() { this.wearTransport.diagnose() }, ping() { this.wearTransport.ping() },
-    clearCache() { this.wearStore.resetCache().then(() => this.wearStore.setDiagnostic({ snapshotSummary: '缓存已清除' })).catch(() => this.wearStore.setDiagnostic({ detail: '缓存清除失败，请重试。' })) }
+    phoneAccount() { if (this.ignoreTap()) return; this.notice = '登录、注册、退出及账户凭据请在手机「我的」完成' },
+    phoneSync() { if (this.ignoreTap()) return; this.notice = '服务器、手动同步与冲突处理请在手机「我的」完成' },
+    phoneAppearance() { if (this.ignoreTap()) return; this.notice = '亮色、暗色、跟随系统与高性能模式请在手机设置；手环采用黑底' },
+    phoneSecurity() { if (this.ignoreTap()) return; this.notice = '配对确认、拒绝、撤销凭据及切换当前设备请在手机「设备中心」完成' },
+    selectDevice(id) { if (this.ignoreTap()) return; this.wearStore.selectPreviewTarget(id) },
+    toggleDemo() { if (this.ignoreTap()) return; this.wearStore.setDemo(!this.vm.demo) },
+    toggleHaptics() { if (this.ignoreTap()) return; this.wearStore.setHaptics(!this.vm.haptics); this.tapFeedback(); savePreferences(this.wearStore) },
+    toggleReducedMotion() { if (this.ignoreTap()) return; this.wearStore.setReducedMotion(!this.vm.reducedMotion); this.tapFeedback(); savePreferences(this.wearStore) },
+    toggleCompact() { if (this.ignoreTap()) return; this.wearStore.setCompact(!this.vm.compact); savePreferences(this.wearStore) },
+    diagnose() { if (this.ignoreTap()) return; this.wearTransport.diagnose() }, ping() { if (this.ignoreTap()) return; this.wearTransport.ping() },
+    clearCache() { if (this.ignoreTap()) return; this.wearStore.resetCache().then(() => this.wearStore.setDiagnostic({ snapshotSummary: '缓存已清除' })).catch(() => this.wearStore.setDiagnostic({ detail: '缓存清除失败，请重试。' })) }
   })
 }
 function loadPreferences(activeStore) {

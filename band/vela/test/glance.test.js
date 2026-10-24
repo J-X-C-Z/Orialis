@@ -40,11 +40,13 @@ test('home card detail returns to its category, and revocation removes all displ
   page.goBack(); assert.equal(page.homeSection, '')
   page.onDestroy()
 })
-test('view-only pages have no business mutation controls or handlers, including demo', () => {
+test('watch task completion uses the phone result; other business edits remain phone-only', () => {
   for (const kind of ['home','events','projects','calendar']) {
     const source = fs.readFileSync('src/pages/' + kind + '/' + kind + '.ux','utf8')
     assert.doesNotMatch(source, /onclick="(?:addTask|addSchedule|addProject|addMilestone|editItem|deleteItem|toggleDetail|saveEditor|moveUp|moveDown|cycleQuadrant|undoChange)/)
   }
+  assert.match(fs.readFileSync('src/pages/events/events.ux','utf8'), /onclick="toggleTask"/)
+  assert.match(fs.readFileSync('src/pages/calendar/calendar.ux','utf8'), /onclick="toggleTask"/)
   assert.equal(pages.createPage('home').startEditor, undefined)
 })
 test('vibration is short, throttled, optional and fails without blocking navigation', () => {
@@ -91,4 +93,60 @@ test('repeated settings/profile visits collapse cycles and retain the home root'
   for(let i=0;i<12;i++) { page.routeAt=0; page.visit('profile'); page.pageKind='profile'; page.routeAt=0; page.visit('settings'); page.pageKind='settings' }
   assert.deepEqual(page.navigation,['home','menu','settings'])
   page.onDestroy()
+})
+
+test('scroll suppresses setting, cache and transport clicks until the guard expires', async () => {
+  const {page, store} = harness('settings'); store.setDemo(true)
+  const snapshot = { transferId:'scroll', revision:1, view:{dataState:'live', organizer:organizer.demo()} }
+  store.acceptSnapshot(snapshot)
+  let diagnoses = 0; let pings = 0
+  page.wearTransport = { diagnose() { diagnoses++ }, ping() { pings++ } }
+  const before = store.view()
+  const point = (x,y) => ({identifier:0, clientX:x, clientY:y})
+  page.touchStart({touches:[point(180,90)]})
+  page.touchMove({touches:[point(178,230)]})
+  page.touchEnd({changedTouches:[point(178,230)]})
+  const actions = ['toggleDemo', 'toggleHaptics', 'toggleReducedMotion', 'toggleCompact', 'clearCache', 'diagnose', 'ping']
+  actions.forEach(action => page[action]())
+  await Promise.resolve()
+  const guarded = store.view()
+  for (const key of ['demo','haptics','reducedMotion','compact','hasSnapshot']) assert.equal(guarded[key], before[key], key)
+  assert.equal(diagnoses, 0); assert.equal(pings, 0)
+  page.ignoreTapUntil = Date.now() - 1
+  actions.forEach(action => page[action]())
+  await Promise.resolve()
+  const after = store.view()
+  for (const key of ['demo','haptics','reducedMotion','compact']) assert.equal(after[key], !before[key], key)
+  assert.equal(after.hasSnapshot, false)
+  assert.equal(after.snapshotSummary, '缓存已清除')
+  assert.equal(diagnoses, 1); assert.equal(pings, 1)
+  page.onDestroy()
+})
+
+test('scroll suppresses list controls while horizontal swipe can still close details', () => {
+  const {page, store} = harness('events'); store.setDemo(true)
+  page.selectQuadrant(0); page.openItem('tasks','task-1')
+  page.ignoreTapUntil = Date.now() + 1000
+  page.showMore(); page.cycleFilter(); page.cycleGroup(); page.closeDetail()
+  assert.equal(page.visibleLimit, 10); assert.equal(page.filter, '待完成'); assert.equal(page.quadrantFilter, 0)
+  assert.equal(page.selection.id, 'task-1')
+  page.handleSwipe({direction:'right'})
+  assert.equal(page.selection, null); assert.equal(page.quadrantFilter, 0)
+  page.ignoreTapUntil = Date.now() - 1
+  page.showMore(); assert.equal(page.visibleLimit, 20)
+  page.cycleFilter(); assert.equal(page.filter, '无截止')
+  page.cycleGroup(); assert.equal(page.quadrantFilter, 1)
+  page.onDestroy()
+})
+
+
+test('home distinguishes a running schedule and exposes local start time without losing title', () => {
+  const now = Date.now(); const offset = 480
+  const today = new Date(now + offset * 60000).toISOString().slice(0, 10)
+  const o = organizer.normalize({ schemaVersion: 1, today, utcOffsetMinutes: offset, schedules: [{
+    id: 'current', title: '正在讨论', startAt: new Date(now - 60000).toISOString(), endAt: new Date(now + 60000).toISOString()
+  }] })
+  const card = organizer.build(o, 'home').cards[1]
+  assert.equal(card.label, '正在进行'); assert.equal(card.preview, '正在讨论')
+  assert.equal(card.timeLabel, new Date(now - 60000 + offset * 60000).toISOString().slice(11, 16))
 })

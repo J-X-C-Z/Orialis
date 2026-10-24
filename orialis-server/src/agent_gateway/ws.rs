@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 const DEBUG_REPLY_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_MESSAGE_REPLY_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 pub async fn upgrade(
     ws: WebSocketUpgrade,
@@ -250,6 +251,9 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
                         reason: Some("approval request timed out".into()),
                     };
                     if let Some(timeout) = state.agent.record_server_event(&hello.0, timeout).await {
+                        state.mobile.notify(&user_id, protocol::mobile_event(serde_json::json!({
+                            "kind":"agent_gateway_event", "event":timeout,
+                        })));
                         if send_message(&mut socket, &timeout).await.is_err() { break; }
                     }
                 }
@@ -372,7 +376,7 @@ async fn handle_text(
     // pipeline. Peek the type so they reach mobile instead of UnknownType.
     if let Ok(value) = serde_json::from_str::<Value>(text.as_str()) {
         if let Some(message_type) = value.get("type").and_then(Value::as_str) {
-            if protocol::is_extension_type(message_type) {
+            if protocol::is_extension_type(message_type) && !matches!(message_type, "session.info" | "session.reply") {
                 handle_extension_frame(state, socket, user_id, text.as_str()).await;
                 return;
             }
@@ -388,15 +392,28 @@ async fn handle_text(
             )
             .await;
         }
-        Ok(message @ protocol::GatewayMessage::MessageReply { .. }) => {
-            let message_id = message.message_id().map(ToOwned::to_owned);
-            if state
+        Ok(message @ (protocol::GatewayMessage::WorkspaceResponse { .. } | protocol::GatewayMessage::SessionReply { .. })) => {
+            state
                 .agent
                 .resolve_reply_for_device(device_id, message)
-                .await
-            {
-                if let Some(message_id) = message_id {
-                    let _ = send_message(socket, &protocol::ack(message_id)).await;
+                .await;
+        }
+        Ok(message @ protocol::GatewayMessage::MessageReply { .. }) => {
+            let message_id = message.message_id().unwrap().to_owned();
+            match accept_message_reply(state, user_id, device_id, message).await {
+                Ok(ack) => {
+                    // ACK only after the message and queue mutation commit. A
+                    // native boundary/file may already have resolved the waiter.
+                    let _ = send_message(socket, &ack).await;
+                }
+                Err(error) => {
+                    tracing::warn!(%error, %message_id, "rejected or failed Agent reply persistence");
+                    let _ = send_message(socket, &protocol::GatewayMessage::Error {
+                        version: protocol::PROTOCOL_VERSION,
+                        code: "REPLY_REJECTED".into(),
+                        message: "reply could not be committed for this owner, conversation and device".into(),
+                        reply_to: Some(message_id),
+                    }).await;
                 }
             }
         }
@@ -414,12 +431,15 @@ async fn handle_text(
                 tracing::warn!(device_id = %device_id, "received unsolicited Orialis Agent error");
             }
         }
-        Ok(protocol::GatewayMessage::MessageAck {
-            message_id, status, ..
-        }) => {
-            tracing::debug!(%message_id, %status, "Orialis Hermes plugin acknowledged message");
+        Ok(message @ protocol::GatewayMessage::MessageAck { .. }) => {
+            if message.reply_to().is_some() {
+                state.agent.resolve_reply_for_device(device_id, message).await;
+            } else {
+                tracing::debug!("Orialis Hermes plugin acknowledged receipt");
+            }
         }
-        Ok(protocol::GatewayMessage::CapabilitiesHello { resume_from, .. }) => {
+        Ok(protocol::GatewayMessage::CapabilitiesHello { resume_from, capabilities, .. }) => {
+            state.agent.set_peer_capabilities(device_id, capabilities).await;
             let resume_from = resume_from.unwrap_or(0);
             let acknowledgement = state.agent.capabilities_ack(device_id, resume_from).await;
             if send_message(socket, &acknowledgement).await.is_err() {
@@ -438,6 +458,24 @@ async fn handle_text(
             let disposition = state.agent.accept_event(device_id, message.clone()).await;
             match disposition {
                 EventDisposition::Accepted => {
+                    let raw = serde_json::from_str::<Value>(&text).ok();
+                    let kind = raw.as_ref().and_then(|value| value.get("type")).and_then(Value::as_str).unwrap_or("event");
+                    tracing::info!(%device_id, %event_id, seq, kind, "accepted Agent event");
+                    if let Some(conversation_id) = serde_json::from_str::<Value>(&text).ok()
+                        .and_then(|raw| raw.get("conversation_id").and_then(Value::as_str).map(ToOwned::to_owned))
+                    {
+                        state.agent.touch_message_activity(device_id, &conversation_id).await;
+                    }
+                    if matches!(
+                        &message,
+                        protocol::GatewayMessage::ApprovalResolve { .. }
+                            | protocol::GatewayMessage::ClarifyResolve { .. }
+                    ) {
+                        state
+                            .agent
+                            .resolve_reply_for_device(device_id, message.clone())
+                            .await;
+                    }
                     let _ = send_message(
                         socket,
                         &protocol::agent_ack(event_id, seq, "received", None),
@@ -447,6 +485,8 @@ async fn handle_text(
                         user_id,
                         protocol::mobile_event(serde_json::json!({
                             "kind": "agent_gateway_event",
+                            "conversationId": serde_json::from_str::<Value>(&text).ok()
+                                .and_then(|raw| raw.get("conversation_id").cloned()),
                             "event": serde_json::to_value(message).unwrap_or(Value::Null),
                         })),
                     );
@@ -475,6 +515,10 @@ async fn handle_text(
                         "approval request is not pending",
                     )
                     .await;
+                }
+                EventDisposition::StaleSession => {
+                    let _ = send_message(socket, &protocol::agent_ack(event_id, seq, "unknown", None)).await;
+                    let _ = send_error(socket, "STALE_SESSION", "event belongs to a retired Agent process session").await;
                 }
             }
         }
@@ -658,6 +702,20 @@ pub(crate) async fn dispatch_message(
                 return;
             }
         };
+    let Some(mut active_device_id) = active_device_id else {
+        fail_delivery(&state, &message_id, attempts, "conversation has no explicit Agent destination".into()).await;
+        return;
+    };
+    if let Err(error) = sqlx::query("UPDATE conversations SET agent_device_id=? WHERE user_id=? AND id=? AND deleted_at IS NULL AND agent_device_id IS NULL")
+        .bind(&active_device_id).bind(&user_id).bind(&conversation_id).execute(&state.pool).await
+    {
+        fail_delivery(&state, &message_id, attempts, error.to_string()).await;
+        return;
+    }
+    match crate::conversation_agent_device(&state.pool, &user_id, &conversation_id).await {
+        Ok(Some(device)) => active_device_id = device,
+        _ => { fail_delivery(&state, &message_id, attempts, "conversation destination unavailable".into()).await; return; }
+    }
     // A mobile POST can race the final handshake bookkeeping on a freshly
     // connected Agent. Give that connection a short grace window before
     // rescheduling the durable delivery for a much longer retry interval.
@@ -666,7 +724,7 @@ pub(crate) async fn dispatch_message(
     for attempt in 0..4 {
         match state
             .agent
-            .send_request_for_user(&user_id, active_device_id.as_deref(), request.clone())
+            .send_request_for_user(&user_id, Some(&active_device_id), request.clone())
             .await
         {
             Ok(value) => {
@@ -687,7 +745,7 @@ pub(crate) async fn dispatch_message(
         fail_delivery(&state, &message_id, attempts, error.to_string()).await;
         return;
     };
-    let reply = match tokio::time::timeout(DEBUG_REPLY_TIMEOUT, receiver).await {
+    let reply = match wait_for_message_reply(&state.agent, &message_id, receiver, DEBUG_REPLY_TIMEOUT, MAX_MESSAGE_REPLY_TIMEOUT).await {
         Ok(Ok(reply)) => reply,
         Ok(Err(_)) => {
             tracing::warn!(%message_id, "Hermes disconnected before replying to mobile message");
@@ -714,150 +772,151 @@ pub(crate) async fn dispatch_message(
             return;
         }
     };
+    if let Err(error) = persist_message_reply(&state, &user_id, &active_device_id, &reply).await {
+        fail_delivery(&state, &message_id, attempts, error.to_string()).await;
+    }
+}
+
+/// Stream activity extends the idle window, but cannot keep a request forever.
+async fn wait_for_message_reply(
+    agent: &super::AgentRegistry,
+    message_id: &str,
+    mut receiver: tokio::sync::oneshot::Receiver<protocol::GatewayMessage>,
+    idle: Duration,
+    maximum: Duration,
+) -> Result<Result<protocol::GatewayMessage, tokio::sync::oneshot::error::RecvError>, ()> {
+    let started = tokio::time::Instant::now();
+    let mut remaining_idle = idle;
+    loop {
+        let remaining_total = maximum.saturating_sub(started.elapsed());
+        if remaining_total.is_zero() { return Err(()); }
+        tokio::select! {
+            result = &mut receiver => return Ok(result),
+            _ = tokio::time::sleep(remaining_idle.min(remaining_total)) => {
+                let age = agent.message_activity_age(message_id).await.unwrap_or(idle);
+                if age >= idle || started.elapsed() >= maximum { return Err(()); }
+                remaining_idle = idle - age;
+            }
+        }
+    }
+}
+
+/// Durable replies are independent of the transient first-reply waiter. Every
+/// additional native boundary or MEDIA item must still prove the same anchor,
+/// account, immutable conversation destination and idempotent reply identity.
+pub(crate) async fn persist_message_reply(
+    state: &AppState,
+    user_id: &str,
+    device_id: &str,
+    message: &protocol::GatewayMessage,
+) -> Result<(), sqlx::Error> {
     let protocol::GatewayMessage::MessageReply {
-        message_id: reply_id,
-        reply_to,
-        conversation_id: reply_conversation_id,
-        content,
-        attachments,
-        ..
-    } = reply
-    else {
-        tracing::warn!(%message_id, "Hermes returned a non-reply response for mobile message");
-        fail_delivery(
-            &state,
-            &message_id,
-            attempts,
-            "agent returned a non-reply response".into(),
-        )
-        .await;
-        return;
+        message_id, reply_to, conversation_id, content, attachments, ..
+    } = message else { return Err(sqlx::Error::Protocol("not a message reply".into())); };
+    let attachments_json = canonical_reply_attachments(state, user_id, conversation_id, attachments).await?;
+    let mut transaction = state.pool.begin().await?;
+    let authorized: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM messages m JOIN conversations c ON c.user_id=m.user_id AND c.id=m.conversation_id JOIN agent_devices d ON d.user_id=c.user_id AND d.device_id=c.agent_device_id WHERE m.id=? AND m.user_id=? AND m.conversation_id=? AND m.role='user' AND c.deleted_at IS NULL AND c.agent_device_id=?)"
+    ).bind(reply_to).bind(user_id).bind(conversation_id).bind(device_id).fetch_one(&mut *transaction).await?;
+    if !authorized { return Err(sqlx::Error::Protocol("reply anchor or destination mismatch".into())); }
+    let inserted = sqlx::query(
+        "INSERT INTO messages (id,user_id,conversation_id,role,content,attachments_json,reply_to_message_id) VALUES (?,?,?,'assistant',?,?,?) ON CONFLICT(id) DO NOTHING"
+    ).bind(message_id).bind(user_id).bind(conversation_id).bind(content).bind(&attachments_json).bind(reply_to)
+        .execute(&mut *transaction).await?.rows_affected() == 1;
+    let stored = sqlx::query_as::<_, (String,String,String,String,String,Option<String>,String,i64)>(
+        "SELECT user_id,conversation_id,role,content,attachments_json,reply_to_message_id,created_at,version FROM messages WHERE id=?"
+    ).bind(message_id).fetch_one(&mut *transaction).await?;
+    if stored.0 != user_id || stored.1 != *conversation_id || stored.2 != "assistant"
+        || stored.3 != *content || stored.4 != attachments_json || stored.5.as_deref() != Some(reply_to)
+    { return Err(sqlx::Error::Protocol("reply id was already used with different data".into())); }
+    sqlx::query("DELETE FROM agent_delivery_queue WHERE message_id=? AND user_id=? AND conversation_id=?")
+        .bind(reply_to).bind(user_id).bind(conversation_id).execute(&mut *transaction).await?;
+    transaction.commit().await?;
+    if inserted {
+        state.mobile.notify(user_id, protocol::mobile_message(serde_json::json!({
+            "id": message_id, "conversationId": conversation_id, "role": "assistant", "content": content,
+            "attachments": serde_json::from_str::<Value>(&attachments_json).unwrap_or(Value::Null),
+            "replyToMessageId": reply_to, "createdAt": stored.6, "version": stored.7,
+        })));
+    }
+    Ok(())
+}
+
+pub(crate) async fn accept_message_reply(
+    state: &AppState,
+    user_id: &str,
+    device_id: &str,
+    message: protocol::GatewayMessage,
+) -> Result<protocol::GatewayMessage, sqlx::Error> {
+    let id = message.message_id().unwrap_or_default().to_owned();
+    let protocol::GatewayMessage::MessageReply { reply_to, conversation_id, .. } = &message else {
+        return Err(sqlx::Error::Protocol("not a message reply".into()));
     };
-    if reply_to != message_id || reply_conversation_id != conversation_id {
-        tracing::warn!(
-            %message_id,
-            %reply_to,
-            reply_conversation_id = %reply_conversation_id,
-            "Hermes reply did not match mobile message"
-        );
-        fail_delivery(
-            &state,
-            &message_id,
-            attempts,
-            "agent reply did not match request".into(),
-        )
-        .await;
-        return;
+    let pending = state.agent.pending_message_matches(reply_to, device_id, conversation_id).await;
+    // The development-only debug endpoint deliberately has no persisted user
+    // anchor; keep that isolated contract out of production followup handling.
+    if state.metadata.environment == "development" && pending {
+        let anchor_exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM messages WHERE id=?)")
+            .bind(reply_to).fetch_one(&state.pool).await?;
+        if !anchor_exists {
+            state.agent.resolve_reply_for_device(device_id, message).await;
+            return Ok(protocol::ack(id));
+        }
+    }
+    persist_message_reply(state, user_id, device_id, &message).await?;
+    if pending { state.agent.resolve_reply_for_device(device_id, message).await; }
+    Ok(protocol::ack(id))
+}
+
+#[cfg(test)]
+mod reply_activity_tests {
+    use super::*;
+
+    async fn waiting() -> (super::super::AgentRegistry, tokio::sync::oneshot::Receiver<protocol::GatewayMessage>) {
+        let agent = super::super::AgentRegistry::default();
+        let (tx, mut rx) = mpsc::channel(2);
+        agent.register_connection("connection".into(),"owner".into(),"device".into(),"test".into(),tx).await;
+        let receiver = agent.send_request_for_user("owner",Some("device"),protocol::GatewayMessage::MessageSend {
+            version:1,message_id:"anchor".into(),conversation_id:"chat".into(),content:"test".into(),attachments:vec![],
+        }).await.unwrap();
+        rx.recv().await.unwrap();
+        // The initial request was actually enqueued before testing its waiter.
+        (agent, receiver)
     }
 
-    let attachments_json =
-        match canonical_reply_attachments(&state, &user_id, &conversation_id, &attachments).await {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::warn!(%message_id, %error, "Hermes reply contained invalid attachments");
-                fail_delivery(
-                    &state,
-                    &message_id,
-                    attempts,
-                    "agent reply contained invalid attachments".into(),
-                )
-                .await;
-                return;
+    #[tokio::test]
+    async fn active_stream_outlives_idle_window_but_not_absolute_deadline() {
+        let (agent, receiver)=waiting().await;
+        let active=agent.clone();
+        let keepalive=tokio::spawn(async move {
+            for _ in 0..20 {
+                tokio::time::sleep(Duration::from_millis(15)).await;
+                active.touch_message_activity("device","chat").await;
             }
-        };
-    let mut transaction = match state.pool.begin().await {
-        Ok(transaction) => transaction,
-        Err(error) => {
-            tracing::error!(%error, %message_id, "failed to start reply transaction");
-            fail_delivery(
-                &state,
-                &message_id,
-                attempts,
-                "could not start reply transaction".into(),
-            )
-            .await;
-            return;
-        }
-    };
-    if let Err(error) = sqlx::query(
-        "INSERT INTO messages (id,user_id,conversation_id,role,content,attachments_json)
-         VALUES (?,?,?,'assistant',?,?) ON CONFLICT(id) DO NOTHING",
-    )
-    .bind(&reply_id)
-    .bind(&user_id)
-    .bind(&conversation_id)
-    .bind(&content)
-    .bind(&attachments_json)
-    .execute(&mut *transaction)
-    .await
-    {
-        tracing::error!(%error, %message_id, "failed to persist Hermes reply");
-        fail_delivery(
-            &state,
-            &message_id,
-            attempts,
-            "failed to persist agent reply".into(),
-        )
-        .await;
-        return;
-    };
-    let Ok((created_at, version)) = sqlx::query_as::<_, (String, i64)>(
-        "SELECT created_at,version FROM messages WHERE id=? AND user_id=?",
-    )
-    .bind(&reply_id)
-    .bind(&user_id)
-    .fetch_one(&mut *transaction)
-    .await
-    else {
-        tracing::error!(%reply_id, "failed to read persisted Hermes reply");
-        fail_delivery(
-            &state,
-            &message_id,
-            attempts,
-            "failed to read persisted agent reply".into(),
-        )
-        .await;
-        return;
-    };
-    if let Err(error) = sqlx::query("DELETE FROM agent_delivery_queue WHERE message_id=?")
-        .bind(&message_id)
-        .execute(&mut *transaction)
-        .await
-    {
-        tracing::error!(%error, %message_id, "failed to remove delivered agent message");
-        fail_delivery(
-            &state,
-            &message_id,
-            attempts,
-            "failed to finalize agent delivery".into(),
-        )
-        .await;
-        return;
+        });
+        let start=tokio::time::Instant::now();
+        assert!(wait_for_message_reply(&agent,"anchor",receiver,Duration::from_millis(80),Duration::from_millis(180)).await.is_err());
+        assert!(start.elapsed()>=Duration::from_millis(160));
+        assert!(start.elapsed()<Duration::from_secs(1));
+        keepalive.abort();
     }
-    if let Err(error) = transaction.commit().await {
-        tracing::error!(%error, %message_id, "failed to commit agent delivery");
-        fail_delivery(
-            &state,
-            &message_id,
-            attempts,
-            "failed to commit agent delivery".into(),
-        )
-        .await;
-        return;
+
+    #[tokio::test]
+    async fn unrelated_device_or_conversation_cannot_extend_idle_timeout() {
+        let (agent, receiver)=waiting().await;
+        let active=agent.clone();
+        let unrelated=tokio::spawn(async move {
+            for _ in 0..20 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                active.touch_message_activity("other-device","chat").await;
+                active.touch_message_activity("device","other-chat").await;
+            }
+        });
+        let start=tokio::time::Instant::now();
+        assert!(wait_for_message_reply(&agent,"anchor",receiver,Duration::from_millis(60),Duration::from_millis(300)).await.is_err());
+        assert!(start.elapsed()<Duration::from_millis(250));
+        unrelated.abort();
     }
-    state.mobile.notify(
-        &user_id,
-        protocol::mobile_message(serde_json::json!({
-            "id": reply_id,
-            "conversationId": conversation_id,
-            "role": "assistant",
-            "content": content,
-            "attachments": serde_json::from_str::<Value>(&attachments_json).unwrap_or_default(),
-            "createdAt": created_at,
-            "version": version,
-        })),
-    );
-    tracing::info!(%message_id, %reply_id, "persisted Hermes reply for mobile conversation");
 }
 
 async fn claim_delivery(state: &AppState, message_id: &str) -> Option<i64> {
@@ -868,7 +927,7 @@ async fn claim_delivery(state: &AppState, message_id: &str) -> Option<i64> {
          SET attempts=attempts+1,next_attempt_at=?,updated_at=?
          WHERE message_id=? AND next_attempt_at<=?",
     )
-    .bind((current + ChronoDuration::minutes(2)).to_rfc3339())
+    .bind((current + ChronoDuration::seconds(MAX_MESSAGE_REPLY_TIMEOUT.as_secs() as i64 + 5)).to_rfc3339())
     .bind(&now)
     .bind(message_id)
     .bind(&now)

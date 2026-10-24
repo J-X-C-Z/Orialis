@@ -10,11 +10,15 @@ import android.view.HapticFeedbackConstants
 class MainActivity : FlutterActivity() {
     private var wearBridge: WearBridge? = null
     private var systemBridge: SystemBridge? = null
+    private var memoryBridge: MemoryBridge? = null
+    private var chatShareBridge: ChatShareBridge? = null
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         if (packageName != "top.jxcz.orialis.news") {
             wearBridge = WearBridge(flutterEngine.dartExecutor.binaryMessenger, XiaomiWearAdapter(applicationContext))
             systemBridge = SystemBridge(this, flutterEngine.dartExecutor.binaryMessenger)
+            memoryBridge = MemoryBridge(this, flutterEngine.dartExecutor.binaryMessenger)
+            chatShareBridge = ChatShareBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "top.jxcz.orialis/haptics")
             .setMethodCallHandler { call, result ->
@@ -32,6 +36,8 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         systemBridge?.onNewIntent(intent)
+        memoryBridge?.onNewIntent(intent)
+        chatShareBridge?.onNewIntent(intent)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -40,6 +46,10 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        chatShareBridge?.dispose()
+        chatShareBridge = null
+        memoryBridge?.dispose()
+        memoryBridge = null
         systemBridge?.dispose()
         systemBridge = null
         wearBridge?.dispose()

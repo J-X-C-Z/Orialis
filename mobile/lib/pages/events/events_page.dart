@@ -1,14 +1,18 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../app/app.dart';
+
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show OrialisPageScaffold;
+
 import '../../core/database/app_database.dart';
 import '../../features/events/presentation/task_editor.dart';
 import '../../features/events/presentation/task_quadrant.dart';
 import '../../features/events/presentation/long_press_orderable.dart';
+import '../../features/events/presentation/quick_event_button.dart';
 import '../projects/projects_page.dart';
 import '../shared/page_parts.dart';
 
@@ -103,6 +107,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
     title: '事件',
     subtitle: ref.watch(desktopModeProvider) ? '四象限' : null,
     padding: EdgeInsets.zero,
+    floatingActionButton: const QuickEventButton(),
     actions: [
       if (_page == 0)
         LuminaIconButton(
@@ -131,10 +136,13 @@ class _EventsPageState extends ConsumerState<EventsPage> {
               onPageChanged: (v) => setState(() => _page = v),
               children: [
                 _tasks(topInset),
-                ProjectsPage(
-                  embedded: true,
-                  active: _page == 1,
-                  topInset: topInset,
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 80),
+                  child: ProjectsPage(
+                    embedded: true,
+                    active: _page == 1,
+                    topInset: topInset,
+                  ),
                 ),
               ],
             ),
@@ -159,7 +167,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
           20,
           topInset,
           20,
-          24 +
+          104 +
               LuminaNavigationInset.of(context) +
               MediaQuery.paddingOf(context).bottom,
         ),

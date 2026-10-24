@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -36,6 +37,7 @@ void main() {
   var changeIdentity = false;
   var unavailable = false;
   String? createdTitle;
+  var expectedDeviceId = 'JXCZ_MBA_Hermes';
   int unavailableStatus = 503;
   bool changeRegistryIdentity = false;
   late _Config config;
@@ -58,6 +60,7 @@ void main() {
     changeIdentity = false;
     unavailable = false;
     createdTitle = null;
+    expectedDeviceId = 'JXCZ_MBA_Hermes';
     unavailableStatus = 503;
     changeRegistryIdentity = false;
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -101,6 +104,11 @@ void main() {
                 'online': true,
               },
               {
+                'deviceId': 'JXCZ_PC_Hermes',
+                'platform': 'windows',
+                'online': true,
+              },
+              {
                 'deviceId': 'JXCZ_AOZORA_Hermes',
                 'platform': 'linux',
                 'online': false,
@@ -114,7 +122,7 @@ void main() {
         request.response.write(jsonEncode({...remote, 'title': createdTitle}));
       } else if (request.method == 'PUT') {
         final body = jsonDecode(await utf8.decoder.bind(request).join());
-        expect(body['deviceId'], 'JXCZ_MBA_Hermes');
+        expect(body['deviceId'], expectedDeviceId);
         request.response.statusCode = bindingAvailable ? 200 : 404;
         request.response.write('{}');
         if (changeIdentity) config.token = 'another-account';
@@ -137,12 +145,39 @@ void main() {
     await server.close(force: true);
   });
 
-  test('registry exposes only Mac and Azure Hermes', () async {
+  test('registry exposes configured Mac, Windows and Azure Hermes', () async {
     final devices = await service.devices();
-    expect(devices.map((d) => d.label), ['Mac 电脑', 'Azure 服务器']);
+    expect(devices.map((d) => d.label), ['Mac 电脑', 'Windows 电脑', 'Azure 服务器']);
+    expect(devices[1].online, true);
+    expect(service.isAllowedTarget('JXCZ_PC_Hermes'), true);
+    expect(service.targetLabel('JXCZ_PC_Hermes'), 'Windows 电脑');
     expect(devices.last.online, false);
-    expect(devices.map((d) => d.id), ['JXCZ_MBA_Hermes', 'JXCZ_AOZORA_Hermes']);
+    expect(devices.map((d) => d.id), [
+      'JXCZ_MBA_Hermes',
+      'JXCZ_PC_Hermes',
+      'JXCZ_AOZORA_Hermes',
+    ]);
     expect(await service.target('conversation-mac'), 'JXCZ_MBA_Hermes');
+  });
+  test(
+    'presence distinguishes authoritative offline from unavailable registry',
+    () async {
+      expect(await service.devicePresence('JXCZ_MBA_Hermes'), isTrue);
+      expect(await service.devicePresence('JXCZ_AOZORA_Hermes'), isFalse);
+      expect(await service.devicePresence('unknown_Hermes'), isNull);
+      unavailable = true;
+      await expectLater(
+        service.devicePresence('JXCZ_MBA_Hermes'),
+        throwsException,
+      );
+    },
+  );
+  test('presence refuses an old account registry response', () async {
+    changeRegistryIdentity = true;
+    await expectLater(
+      service.devicePresence('JXCZ_MBA_Hermes'),
+      throwsStateError,
+    );
   });
   test(
     'configured missing Azure remains offline without choosing Codex',
@@ -152,10 +187,28 @@ void main() {
         azureDeviceId: 'JXCZ_NEWAZURE_Hermes',
       );
       final devices = await configured.devices();
-      expect(devices.length, 2);
+      expect(devices.length, 3);
       expect(devices.last.id, 'JXCZ_NEWAZURE_Hermes');
       expect(devices.last.label, 'Azure 服务器');
       expect(devices.last.online, false);
+    },
+  );
+  test(
+    'Windows chat binds the online PC and preserves its device alias',
+    () async {
+      expectedDeviceId = 'JXCZ_PC_Hermes';
+      await service.renameDevice(expectedDeviceId, '这台电脑');
+      final device = (await service.devices()).singleWhere(
+        (device) => device.id == expectedDeviceId,
+      );
+      expect(device.label, '这台电脑');
+      expect(device.online, true);
+      await service.createConversation(device);
+      expect(createdTitle, '这台电脑');
+      expect(
+        requests.last,
+        'PUT /api/v1/conversations/conversation-mac/agent-device',
+      );
     },
   );
   test('direct Codex or test device cannot bypass the picker', () async {
@@ -179,6 +232,7 @@ void main() {
       throwsException,
     );
     expect((await restarted.devices()).map((device) => device.online), [
+      false,
       false,
       false,
     ]);
@@ -343,23 +397,20 @@ void main() {
       await service.renameDevice('JXCZ_MBA_Hermes', '工作 Mac');
       changeRegistryIdentity = true;
       final devices = await service.devices();
-      expect(devices.map((device) => device.online), [false, false]);
+      expect(devices.map((device) => device.online), [false, false, false]);
       expect(devices.first.label, 'Mac 电脑');
     },
   );
-  test(
-    'device aliases survive same-account token renewal and isolate another username',
-    () async {
-      config.username = 'jxcz';
-      await service.renameDevice('JXCZ_MBA_Hermes', '工作 Mac');
-      config.token = 'renewed-session';
-      unavailable = true;
-      final restarted = AgentChatService(config);
-      expect((await restarted.devices()).first.label, '工作 Mac');
-      config.username = 'other-user';
-      expect((await restarted.devices()).first.label, 'Mac 电脑');
-    },
-  );
+  test('device aliases survive same-account token renewal and isolate another username', () async {
+    config.username = 'jxcz';
+    await service.renameDevice('JXCZ_MBA_Hermes', '工作 Mac');
+    config.token = 'renewed-session';
+    unavailable = true;
+    final restarted = AgentChatService(config);
+    expect((await restarted.devices()).first.label, '工作 Mac');
+    config.username = 'other-user';
+    expect((await restarted.devices()).first.label, 'Mac 电脑');
+  });
   test('create binds exact device before exposing conversation', () async {
     final result = await service.createConversation(
       (await service.devices()).first,

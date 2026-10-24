@@ -1,7 +1,10 @@
 import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:orialis_mobile/app/app.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/core/config/app_config.dart';
@@ -75,7 +78,11 @@ Future<
     String id,
   })
 >
-openChat(WidgetTester tester, {bool largeDark = false}) async {
+openChat(
+  WidgetTester tester, {
+  bool largeDark = false,
+  AgentChatService? agentService,
+}) async {
   tester.view.physicalSize = const Size(432, 960);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -100,7 +107,9 @@ openChat(WidgetTester tester, {bool largeDark = false}) async {
         appConfigProvider.overrideWithValue(_Config()),
         realtimeClientProvider.overrideWithValue(realtime),
         syncCoordinatorProvider.overrideWithValue(sync),
-        agentChatServiceProvider.overrideWithValue(_HermesChatService()),
+        agentChatServiceProvider.overrideWithValue(
+          agentService ?? _HermesChatService(),
+        ),
       ],
       child: const OrialisApp(),
     ),
@@ -128,6 +137,10 @@ openChat(WidgetTester tester, {bool largeDark = false}) async {
 }
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({});
+  });
   testWidgets(
     'detail hides navigation, opens latest and preserves history position',
     (tester) async {
@@ -198,9 +211,9 @@ void main() {
       await tester.tap(iconAction('发送'));
       await tester.pumpAndSettle();
       expect(
-        (await tester.runAsync(
-          () => h.repo.watchMessages(h.id).first,
-        ))!.single.content,
+        (await tester.runAsync(() => h.repo.watchMessages(h.id).first))!
+            .single
+            .content,
         '离线消息不会丢失',
       );
       final before = h.sync.attempts;
@@ -242,7 +255,7 @@ void main() {
   );
 
   testWidgets(
-    'approval failure restores choices and successful retry closes sheet',
+    'approval failure restores choices and confirmed retry clears request panel',
     (tester) async {
       final h = await openChat(tester);
       h.realtime.ingestForTest(
@@ -268,6 +281,19 @@ void main() {
       expect(h.realtime.attempts, 2);
       expect(h.realtime.sent.single['decision'], 'once');
       expect(h.realtime.sent.single['conversationId'], h.id);
+      // Sending is not execution confirmation: keep the request until Hermes resolves it.
+      expect(find.byType(AgentApprovalSheet), findsOneWidget);
+      h.realtime.ingestForTest(
+        jsonEncode({
+          'type': 'event',
+          'payload': {
+            'kind': 'approval.resolved',
+            'conversationId': h.id,
+            'id': 'approval-1',
+          },
+        }),
+      );
+      await tester.pumpAndSettle();
       expect(find.byType(AgentApprovalSheet), findsNothing);
       await tester.pump(const Duration(seconds: 4));
       expect(tester.takeException(), isNull);

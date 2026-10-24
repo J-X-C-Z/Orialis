@@ -14,11 +14,19 @@ final chatMessagesProvider =
       return query.repository.watchMessages(query.conversationId);
     });
 
-final chatLatestMessageProvider =
-    StreamProvider.family<
-      Message?,
-      ({ChatRepository repository, String conversationId})
+final chatMessageWindowProvider = StreamProvider.autoDispose
+    .family<
+      List<Message>,
+      ({ChatRepository repository, String conversationId, int limit})
     >(
+      (ref, query) => query.repository.watchMessages(
+        query.conversationId,
+        limit: query.limit,
+      ),
+    );
+
+final chatLatestMessageProvider = StreamProvider.autoDispose
+    .family<Message?, ({ChatRepository repository, String conversationId})>(
       (ref, query) => query.repository.watchLatestMessage(query.conversationId),
     );
 
@@ -165,17 +173,74 @@ class ChatRepository {
               (r) => OrderingTerm.desc(r.id),
             ])
             ..limit(1))
-          .watchSingleOrNull();
+          .watchSingleOrNull()
+          .distinct();
 
-  Stream<List<Message>> watchMessages(String conversationId) {
-    return (database.select(database.messages)
-          ..where((row) => row.conversationId.equals(conversationId))
-          ..orderBy([(row) => OrderingTerm(expression: row.createdAt)]))
-        .watch();
+  Stream<List<Message>> watchMessages(String conversationId, {int? limit}) {
+    if (limit != null && limit < 1) throw ArgumentError.value(limit, 'limit');
+    final query = database.select(database.messages)
+      ..where((row) => row.conversationId.equals(conversationId));
+    if (limit == null) {
+      return (query
+            ..orderBy([(row) => OrderingTerm(expression: row.createdAt)]))
+          .watch();
+    }
+    return (query
+          ..orderBy([
+            (row) => OrderingTerm.desc(row.createdAt),
+            (row) => OrderingTerm.desc(row.id),
+          ])
+          ..limit(limit))
+        .watch()
+        .map((rows) => rows.reversed.toList());
+  }
+
+  /// Count from a target to the newest message without loading older bodies.
+  Future<int?> messageWindowSizeFor(
+    String conversationId,
+    String messageId,
+  ) async {
+    final table = database.messages;
+    final target =
+        await (database.select(table)..where(
+              (row) =>
+                  row.conversationId.equals(conversationId) &
+                  row.id.equals(messageId),
+            ))
+            .getSingleOrNull();
+    if (target == null) return null;
+    final count = table.id.count();
+    final result =
+        await (database.selectOnly(table)
+              ..addColumns([count])
+              ..where(
+                table.conversationId.equals(conversationId) &
+                    (table.createdAt.isBiggerThanValue(target.createdAt) |
+                        (table.createdAt.equals(target.createdAt) &
+                            table.id.isBiggerOrEqualValue(messageId))),
+              ))
+            .getSingle();
+    return result.read(count);
   }
 
   String _statusAfterLocalEdit(String current) =>
       current == 'pendingCreate' ? 'pendingCreate' : 'pendingUpdate';
+
+  Future<bool> isMessageUploaded(
+    String conversationId,
+    String messageId,
+  ) async {
+    final table = database.messages;
+    final row =
+        await (database.selectOnly(table)
+              ..addColumns([table.syncStatus])
+              ..where(
+                table.conversationId.equals(conversationId) &
+                    table.id.equals(messageId),
+              ))
+            .getSingleOrNull();
+    return row?.read(table.syncStatus) == 'synced';
+  }
 
   Future<Message> sendMessage({
     required String conversationId,

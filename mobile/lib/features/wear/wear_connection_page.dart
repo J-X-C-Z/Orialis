@@ -5,6 +5,7 @@ import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show OrialisPageScaffold;
 import '../../pages/shared/page_parts.dart';
+import 'wear_protocol.dart';
 import 'wear_transport.dart';
 import 'wear_providers.dart';
 
@@ -171,7 +172,10 @@ class _WearConnectionPageState extends ConsumerState<WearConnectionPage>
                           '里程碑',
                           '${preview.included['milestones']} / ${preview.total['milestones']}',
                         ),
-                        _row('快照大小', '${preview.bytes} / 16384 字节'),
+                        _row(
+                          '快照大小',
+                          '${preview.bytes} / ${WearProtocol.maxSnapshotBytes} 字节',
+                        ),
                         _row('读取时间', preview.updatedAt.toLocal().toString()),
                         if (preview.truncated)
                           const QuietLabel('容量有限，当前为部分内容；未收入的记录没有删除或修改。'),

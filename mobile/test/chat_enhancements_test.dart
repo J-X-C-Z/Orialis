@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/features/chat/data/recent_hermes_models.dart';
 import 'package:orialis_mobile/features/chat/domain/hermes_shortcuts.dart';
@@ -9,6 +10,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'lumina_chat_flow_test.dart' show openChat, iconAction;
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({});
+  });
   testWidgets(
     'swipe reply keeps quote on saved message and supports original jump',
     (tester) async {

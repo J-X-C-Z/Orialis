@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import 'package:orialis_mobile/features/projects/data/project_repository.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
@@ -7,6 +9,10 @@ import 'package:orialis_mobile/features/events/data/event_repository.dart';
 import 'lumina_chat_flow_test.dart' show openChat, iconAction;
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({});
+  });
   testWidgets(
     'long press reorders adjacent tasks and empty quadrant accepts move with undo',
     (tester) async {

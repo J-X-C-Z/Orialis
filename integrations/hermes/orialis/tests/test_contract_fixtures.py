@@ -23,6 +23,8 @@ CASES = {
     "snapshot-v1.json": "domain/snapshot.schema.json",
     "mobile-realtime-v1.json": "realtime/mobile.schema.json",
     "agent-gateway-v1.json": "agent-gateway/schema-v1.schema.json",
+    "workspace-request-v1.json": "agent-gateway/schema-v1.schema.json",
+    "workspace-response-v1.json": "agent-gateway/schema-v1.schema.json",
 }
 
 

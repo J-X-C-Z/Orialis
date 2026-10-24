@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="memory_tile_label">记住屏幕</string>
+    <string name="memory_share_label">Orialis 记忆</string>
+    <string name="chat_share_label">Orialis 聊天</string>
+    <style name="MemoryCaptureTheme" parent="android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowDisablePreview">true</item>
+    </style>
+</resources>

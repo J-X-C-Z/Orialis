@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../../core/config/app_config.dart';
 import '../../../core/network/orialis_api_client.dart';
 
@@ -52,6 +54,10 @@ class AgentChatService {
       'ORIALIS_AZURE_CHAT_DEVICE_ID',
       defaultValue: 'JXCZ_AOZORA_Hermes',
     ),
+    this.windowsDeviceId = const String.fromEnvironment(
+      'ORIALIS_WINDOWS_CHAT_DEVICE_ID',
+      defaultValue: 'JXCZ_PC_Hermes',
+    ),
   }) {
     config.addIdentityListener(_resetDeviceNames);
   }
@@ -81,18 +87,24 @@ class AgentChatService {
 
   final String macDeviceId;
   final String azureDeviceId;
+  final String windowsDeviceId;
 
   bool isAllowedTarget(String? id) =>
       id != null &&
       id.isNotEmpty &&
       id.toLowerCase().endsWith('_hermes') &&
-      (id == macDeviceId || id == azureDeviceId);
+      (id == macDeviceId || id == azureDeviceId || id == windowsDeviceId);
 
   final _deviceNames = <String, String>{};
 
   String? targetLabel(String? id) => !isAllowedTarget(id)
       ? null
-      : _deviceNames[id] ?? (id == macDeviceId ? 'Mac 电脑' : 'Azure 服务器');
+      : _deviceNames[id] ??
+            (id == macDeviceId
+                ? 'Mac 电脑'
+                : id == windowsDeviceId
+                ? 'Windows 电脑'
+                : 'Azure 服务器');
 
   String _deviceNameKey(
     (String, String) scope,
@@ -110,7 +122,7 @@ class AgentChatService {
     final preferences = await SharedPreferences.getInstance();
     _deviceNames.clear();
     if (await identity() != scope) return;
-    for (final id in [macDeviceId, azureDeviceId]) {
+    for (final id in [macDeviceId, azureDeviceId, windowsDeviceId]) {
       final name = preferences.getString(_deviceNameKey(scope, id, username));
       if (name != null && name.isNotEmpty) _deviceNames[id] = name;
     }
@@ -166,10 +178,10 @@ class AgentChatService {
         _deviceNames.clear();
       }
     } on DioException {
-      // Keep both device cards visible while the gateway is unreachable.
+      // Keep configured device cards visible while the gateway is unreachable.
     } on StateError {
       _deviceNames.clear();
-      // Signed-out users can see the two supported devices, both unavailable.
+      // Signed-out users can see configured devices, all unavailable.
     }
     ChatAgentDevice slot(String id, String platform, String label) {
       final registered = registry.where((device) => device.id == id);
@@ -188,8 +200,26 @@ class AgentChatService {
     // fall back to a test/Codex gateway when Hermes is unavailable.
     return [
       slot(macDeviceId, 'macos', 'Mac 电脑'),
+      slot(windowsDeviceId, 'windows', 'Windows 电脑'),
       slot(azureDeviceId, 'linux', 'Azure 服务器'),
     ];
+  }
+
+  /// Null is unreported; transport/auth failures remain errors, never "offline".
+  Future<bool?> devicePresence(String deviceId) async {
+    if (!isAllowedTarget(deviceId)) return null;
+    final generation = _identityGeneration;
+    final scope = await identity();
+    final devices = await (await _clientFor(scope)).listAgentDevices();
+    if (!await _isCurrent(scope, generation)) {
+      throw StateError('登录或服务地址已改变，请重新读取状态');
+    }
+    for (final device in devices) {
+      if (device['deviceId'] == deviceId && device['online'] is bool) {
+        return device['online'] as bool;
+      }
+    }
+    return null;
   }
 
   String _bindingCacheKey((String, String) scope, String conversationId) =>
@@ -269,9 +299,8 @@ class AgentChatService {
       final preferences = await SharedPreferences.getInstance();
       final previous = preferences.getString(key);
       try {
-        final target = await (await _clientFor(
-          scope,
-        )).conversationAgentDevice(conversationId);
+        final target = await (await _clientFor(scope))
+            .conversationAgentDevice(conversationId);
         if (!await _isCurrent(scope, generation)) return null;
         // A concurrent authentication rejection invalidates all bindings for
         // this session, including successful requests already in flight.

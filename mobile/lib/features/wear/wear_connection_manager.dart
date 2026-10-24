@@ -52,6 +52,7 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
     this.transport, {
     this.responseTimeout = const Duration(seconds: 10),
     this.snapshotLoader,
+    this.taskCompletionHandler,
   }) : super(const WearConnectionState()) {
     _messages = transport.messages.listen(_receive, onError: _streamError);
     _diagnostics = transport.diagnostics.listen(
@@ -62,12 +63,17 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
   final WearTransport transport;
   final Duration responseTimeout;
   final Future<WearSnapshotPreview> Function()? snapshotLoader;
+  final Future<Map<String, Object?>> Function(Map<String, dynamic>)?
+  taskCompletionHandler;
   late final StreamSubscription<WearMessage> _messages;
   late final StreamSubscription<WearDiagnostics> _diagnostics;
   _Pending? _pending;
   int _generation = 0;
   int _operationSerial = 0;
   bool _acceptEvents = true;
+  final _taskMutations = <String, Future<Map<String, Object?>>>{};
+  final _taskMutationsInFlight = <String>{};
+  final _taskMutationRequests = <String, String>{};
 
   void _set({
     WearDiagnostics? diagnostics,
@@ -315,9 +321,12 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
     );
     _pending = pending;
     final generation = _generation;
+    final ackTimeout = kind == 'snapshot.ack'
+        ? const Duration(seconds: 90)
+        : responseTimeout;
     _set(busy: true, delivery: '发送中…');
     pending.timer = Timer(
-      responseTimeout,
+      ackTimeout,
       () => pending.complete('response_timeout'),
     );
     try {
@@ -368,6 +377,25 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
         unawaited(_replyPong(message, pingId, _generation));
         return;
       }
+      if (frame['type'] == 'task.complete.request') {
+        final mutationId = payload['mutationId'];
+        final taskId = payload['taskId'];
+        final completed = payload['completed'];
+        final baseVersion = payload['baseVersion'];
+        if (mutationId is! String ||
+            mutationId.isEmpty ||
+            mutationId.length > 96 ||
+            taskId is! String ||
+            taskId.isEmpty ||
+            taskId.length > 128 ||
+            completed is! bool ||
+            baseVersion is! int ||
+            baseVersion < 0) {
+          return;
+        }
+        unawaited(_handleTaskCompletion(message, payload, _generation));
+        return;
+      }
       final pending = _pending;
       if (pending == null ||
           pending.kind != frame['type'] ||
@@ -383,6 +411,87 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
       }
     } catch (_) {
       _set(error: 'invalid_message');
+    }
+  }
+
+  Future<void> _handleTaskCompletion(
+    WearMessage message,
+    Map<String, dynamic> request,
+    int generation,
+  ) async {
+    final handler = taskCompletionHandler;
+    final mutationId = request['mutationId'] as String;
+    final taskId = request['taskId'] as String;
+    final completed = request['completed'] as bool;
+    Map<String, Object?> result;
+    if (handler == null) {
+      result = {'status': 'rejected'};
+    } else {
+      try {
+        final signature =
+            '${request['taskId']}|${request['completed']}|${request['baseVersion']}';
+        final previous = _taskMutationRequests[mutationId];
+        if (previous != null && previous != signature) {
+          result = {'status': 'rejected'};
+        } else {
+          _taskMutationRequests[mutationId] = signature;
+          final future = _taskMutations.putIfAbsent(mutationId, () {
+            _taskMutationsInFlight.add(mutationId);
+            return handler(request)
+                .whenComplete(() => _taskMutationsInFlight.remove(mutationId));
+          });
+          result = await future;
+        }
+        while (_taskMutations.length > 128) {
+          final oldest = _taskMutations.keys.first;
+          if (_taskMutationsInFlight.contains(oldest)) break;
+          _taskMutations.remove(oldest);
+          _taskMutationRequests.remove(oldest);
+        }
+      } catch (_) {
+        result = {'status': 'rejected'};
+      }
+    }
+    if (!mounted ||
+        !_acceptEvents ||
+        generation != _generation ||
+        message.nodeId != state.selectedNode ||
+        message.session != state.diagnostics.session ||
+        !state.diagnostics.canMessageFor(state.selectedNode)) {
+      return;
+    }
+    final status = result['status'];
+    await _sendTaskCompletionResult(message, {
+      'mutationId': mutationId,
+      'taskId': taskId,
+      'completed': completed,
+      'status':
+          status == 'completed' || status == 'pending' || status == 'conflict'
+          ? status
+          : 'rejected',
+    }, generation);
+    if (status == 'completed' && generation == _generation) {
+      unawaited(sendCurrentSnapshot());
+    }
+  }
+
+  Future<void> _sendTaskCompletionResult(
+    WearMessage message,
+    Map<String, Object?> payload,
+    int generation,
+  ) async {
+    try {
+      await transport
+          .send(
+            message.nodeId,
+            message.session,
+            WearProtocol.encode('task.complete.result', payload),
+          )
+          .timeout(responseTimeout);
+    } catch (_) {
+      if (mounted && generation == _generation) {
+        _set(error: 'transport_error');
+      }
     }
   }
 

@@ -18,6 +18,7 @@ pub(crate) struct CapabilitiesResponse {
     api_version: &'static str,
     web: bool,
     capabilities: Vec<&'static str>,
+    response_ui: serde_json::Value,
 }
 
 pub(crate) async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
@@ -57,7 +58,18 @@ pub(crate) async fn capabilities() -> Json<CapabilitiesResponse> {
             "multidevice.v1",
             "cron_delivery",
             "proactive_delivery",
+            "response_ui.v1",
         ],
+        // UI is opaque assistant content: clients validate and fall back to text.
+        response_ui: serde_json::json!({
+            "format": "orialis-ui", "version": 1, "transport": "content_fence",
+            "block_types": ["metrics", "chart", "tabs", "checklist", "choices"],
+            "limits": {
+                "json_bytes": 32768, "blocks": 12, "items": 12, "title": 80,
+                "fallback": 4000, "label": 120, "value": 120, "detail": 240,
+                "content": 4000, "prompt": 1000, "unit": 32,
+            },
+        }),
     })
 }
 
@@ -73,5 +85,20 @@ mod tests {
         assert!(response.0.capabilities.contains(&"multidevice.v1"));
         assert!(response.0.capabilities.contains(&"cron_delivery"));
         assert!(response.0.capabilities.contains(&"proactive_delivery"));
+    }
+
+    #[tokio::test]
+    async fn response_ui_discovery_describes_bounded_content_format() {
+        let response = capabilities().await;
+        assert!(response.0.capabilities.contains(&"response_ui.v1"));
+        let ui = response.0.response_ui;
+        assert_eq!(ui["format"], "orialis-ui");
+        assert_eq!(ui["version"], 1);
+        assert_eq!(ui["transport"], "content_fence");
+        assert_eq!(ui["block_types"], serde_json::json!(["metrics", "chart", "tabs", "checklist", "choices"]));
+        assert_eq!(ui["limits"]["json_bytes"], 32768);
+        assert_eq!(ui["limits"]["blocks"], 12);
+        assert_eq!(ui["limits"]["items"], 12);
+        assert_eq!(ui["limits"]["fallback"], 4000);
     }
 }

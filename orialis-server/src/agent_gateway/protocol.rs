@@ -176,6 +176,36 @@ pub struct GatewayArtifact {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum GatewayMessage {
+    #[serde(rename = "session.info")]
+    SessionInfo {
+        version: u32,
+        request_id: String,
+        conversation_id: String,
+        session_id: String,
+    },
+    #[serde(rename = "session.reply")]
+    SessionReply {
+        version: u32,
+        request_id: String,
+        conversation_id: String,
+        status: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    #[serde(rename = "workspace.request")]
+    WorkspaceRequest {
+        version: u32,
+        request_id: String,
+        conversation_id: String,
+        payload: Value,
+    },
+    #[serde(rename = "workspace.response")]
+    WorkspaceResponse {
+        version: u32,
+        request_id: String,
+        conversation_id: String,
+        payload: Value,
+    },
     #[serde(rename = "hello")]
     Hello {
         version: u32,
@@ -306,6 +336,8 @@ pub enum GatewayMessage {
         session_id: String,
         run_id: String,
         content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_id: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         artifacts: Vec<GatewayArtifact>,
     },
@@ -534,6 +566,10 @@ pub enum GatewayMessage {
 impl GatewayMessage {
     pub fn message_id(&self) -> Option<&str> {
         match self {
+            Self::SessionInfo { request_id, .. }
+            | Self::WorkspaceRequest { request_id, .. }
+            | Self::ClarifyResolve { request_id, .. }
+            | Self::ApprovalResolve { request_id, .. } => Some(request_id),
             Self::MessageSend { message_id, .. }
             | Self::MessageReply { message_id, .. }
             | Self::MessageAck { message_id, .. } => Some(message_id),
@@ -543,6 +579,13 @@ impl GatewayMessage {
 
     pub fn reply_to(&self) -> Option<&str> {
         match self {
+            Self::SessionReply { request_id, .. }
+            | Self::WorkspaceResponse { request_id, .. }
+            | Self::ApprovalResolve { request_id, .. }
+            | Self::ClarifyResolve { request_id, .. } => Some(request_id),
+            Self::MessageAck {
+                message_id, status, ..
+            } if status == "resolved" => Some(message_id),
             Self::MessageReply { reply_to, .. }
             | Self::Error {
                 reply_to: Some(reply_to),
@@ -814,6 +857,10 @@ pub fn parse_message(input: &str) -> Result<GatewayMessage, ProtocolError> {
             | "message.send"
             | "message.reply"
             | "message.ack"
+            | "workspace.request"
+            | "workspace.response"
+            | "session.info"
+            | "session.reply"
             | "error"
             | "event"
             | "capabilities.hello"
@@ -925,6 +972,43 @@ fn validate_message_text_or_attachments(
 
 fn validate_message(message: &GatewayMessage) -> Result<(), ProtocolError> {
     match message {
+        GatewayMessage::SessionInfo { request_id, conversation_id, session_id, .. } => {
+            for value in [request_id, conversation_id, session_id] {
+                validate_text(value)?;
+                if value.len() > 160 { return Err(ProtocolError::InvalidMessage); }
+            }
+        }
+        GatewayMessage::SessionReply { request_id, conversation_id, status, message, .. } => {
+            for value in [request_id, conversation_id, status] {
+                validate_text(value)?;
+                if value.len() > 160 { return Err(ProtocolError::InvalidMessage); }
+            }
+            if message.as_ref().is_some_and(|text| text.len() > 4000) {
+                return Err(ProtocolError::InvalidMessage);
+            }
+        }
+        GatewayMessage::WorkspaceRequest {
+            request_id,
+            conversation_id,
+            payload,
+            ..
+        }
+        | GatewayMessage::WorkspaceResponse {
+            request_id,
+            conversation_id,
+            payload,
+            ..
+        } => {
+            validate_text(request_id)?;
+            validate_text(conversation_id)?;
+            if request_id.len() > 160
+                || conversation_id.len() > 160
+                || !payload.is_object()
+                || payload.to_string().len() > 1_500_000
+            {
+                return Err(ProtocolError::InvalidMessage);
+            }
+        }
         GatewayMessage::Hello {
             device_id,
             client,
@@ -1095,7 +1179,10 @@ fn validate_event(message: &GatewayMessage) -> Result<(), ProtocolError> {
                 return Err(ProtocolError::InvalidMessage);
             }
         }
-        GatewayMessage::AgentComplete { run_id, .. } => validate_text(run_id)?,
+        GatewayMessage::AgentComplete { run_id, message_id, .. } => {
+            validate_text(run_id)?;
+            if let Some(value) = message_id { validate_text(value)?; }
+        },
         GatewayMessage::AgentError {
             run_id,
             code,
@@ -1626,6 +1713,39 @@ pub fn extension_mobile_events(frame: &ExtensionFrame) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn server_interaction_resolves_match_adapter_wire_fixtures() {
+        let fixtures = [
+            include_str!("../../../integrations/hermes/orialis/tests/fixtures/server-approval-resolve-v1.json"),
+            include_str!("../../../integrations/hermes/orialis/tests/fixtures/server-clarify-resolve-v1.json"),
+        ];
+        let frames = [
+            super::GatewayMessage::ApprovalResolve {
+                version: 1,
+                event_id: "mobile-response".into(),
+                seq: 1,
+                session_id: "chat-1".into(),
+                request_id: "approval-1".into(),
+                decision: super::ApprovalDecision::Once,
+                reason: None,
+            },
+            super::GatewayMessage::ClarifyResolve {
+                version: 1,
+                event_id: "mobile-response".into(),
+                seq: 1,
+                session_id: "chat-1".into(),
+                request_id: "clarify-1".into(),
+                answer: serde_json::json!("Chosen answer"),
+            },
+        ];
+        for (frame, fixture) in frames.into_iter().zip(fixtures) {
+            assert_eq!(
+                serde_json::to_value(&frame).unwrap(),
+                serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+            );
+            assert_eq!(super::parse_message(fixture).unwrap(), frame);
+        }
+    }
     use super::*;
 
     // These integration-test scenarios used to compile this file through
@@ -1958,6 +2078,7 @@ mod tests {
             session_id: "session-1".into(),
             run_id: "run-1".into(),
             content: "done".into(),
+            message_id: Some("persisted-reply-1".into()),
             artifacts: vec![GatewayArtifact {
                 id: "artifact-1".into(),
                 kind: "document".into(),
@@ -1973,6 +2094,9 @@ mod tests {
         let wire = serde_json::to_string(&original).unwrap();
         assert_eq!(parse_message(&wire).unwrap(), original);
         assert_eq!(serde_json::from_str::<Value>(&wire).unwrap()["seq"], 7);
+        assert_eq!(serde_json::from_str::<Value>(&wire).unwrap()["message_id"], "persisted-reply-1");
+        let legacy = wire.replace(",\"message_id\":\"persisted-reply-1\"", "");
+        assert!(matches!(parse_message(&legacy).unwrap(), GatewayMessage::AgentComplete { message_id: None, .. }));
     }
 
     #[test]

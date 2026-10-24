@@ -14,6 +14,8 @@
     "platform": {"type": "string", "minLength": 1},
     "message_id": {"type": "string", "minLength": 1},
     "reply_to": {"type": "string", "minLength": 1},
+    "request_id": {"type": "string", "minLength": 1, "maxLength": 160},
+    "payload": {"type": "object"},
     "conversation_id": {"type": "string", "minLength": 1},
     "content": {"type": "string"},
     "attachments": {"type": "array", "items": {"$ref": "#/definitions/attachment"}},
@@ -27,6 +29,8 @@
     "resume_from": {"type": "integer", "minimum": 0},
     "next_seq": {"type": "integer", "minimum": 0}
   },
+  "allOf": [{"if": {"properties": {"type": {"enum": ["workspace.request", "workspace.response"]}}},
+             "then": {"required": ["request_id", "conversation_id", "payload"]}}],
   "definitions": {
     "attachment": {
       "type": "object",

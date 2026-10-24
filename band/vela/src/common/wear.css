@@ -6,18 +6,18 @@ div { flex-shrink: 0; }
 .content { flex-direction: column; width: 100%; height: 100%; padding-left: 20px; padding-right: 20px; }
 .block { width: 100%; flex-direction: column; padding-top: 12px; padding-bottom: 12px; }
 .header { width: 100%; height: 60px; flex-direction: row; align-items: center; }
-.title { color: #ffffff; font-size: 28px; font-weight: bold; flex-grow: 1; }
+.title { width: 0px; color: #ffffff; font-size: 28px; font-weight: bold; flex-grow: 1; flex-shrink: 1; lines: 1; text-overflow: ellipsis; }
 .brand { color: #ffffff; font-size: 27px; font-weight: bold; flex-grow: 1; }
 .source { color: #e3ad45; font-size: 16px; }
 .sourceLine { width: 100%; color: #e3ad45; font-size: 16px; margin-bottom: 12px; }
 .label { color: #a5adba; font-size: 17px; margin-bottom: 8px; }
-.body { color: #f2f4f8; font-size: 23px; }
-.meta { color: #b3bac5; font-size: 20px; margin-top: 6px; }
-.provenance { color: #e3ad45; font-size: 16px; margin-top: 6px; }
+.body { width: 100%; color: #f2f4f8; font-size: 23px; line-height: 31px; }
+.meta { width: 100%; color: #b3bac5; font-size: 20px; line-height: 28px; margin-top: 6px; }
+.provenance { width: 100%; color: #e3ad45; font-size: 18px; line-height: 26px; margin-top: 6px; }
 .target { color: #f2f4f8; font-size: 24px; font-weight: bold; margin-top: 8px; }
 .card { width: 100%; flex-direction: column; background-color: #191d22; border-radius: 20px; padding: 16px; margin-bottom: 12px; }
-.cardHead { width: 100%; height: 44px; flex-direction: row; align-items: center; }
-.cardTitle { color: #f2f4f8; font-size: 22px; font-weight: bold; flex-grow: 1; }
+.cardHead { width: 100%; min-height: 44px; flex-direction: row; align-items: center; }
+.cardTitle { width: 0px; color: #f2f4f8; font-size: 24px; font-weight: bold; flex-grow: 1; flex-shrink: 1; lines: 2; text-overflow: ellipsis; }
 .taskName { width: 100%; color: #ffffff; font-size: 23px; margin-top: 10px; lines: 2; text-overflow: ellipsis; }
 .glyphCircle { width: 44px; height: 44px; border-radius: 22px; margin-right: 12px; justify-content: center; align-items: center; }
 .blue { background-color: #265d9f; }
@@ -33,24 +33,24 @@ div { flex-shrink: 0; }
 .commandGlyph { border: 2px solid #ffffff; border-radius: 4px; }
 .commandLine { position: absolute; left: 4px; top: 5px; width: 10px; height: 2px; background-color: #ffffff; }
 .commandLineLow { position: absolute; left: 4px; top: 11px; width: 7px; height: 2px; background-color: #ffffff; }
-.gearGlyph { border: 3px dotted #ffffff; border-radius: 11px; }
+.gearGlyph { border: 3px solid #ffffff; border-radius: 11px; }
 .gearCore { position: absolute; left: 5px; top: 5px; width: 6px; height: 6px; border-radius: 3px; background-color: #ffffff; }
 .menuGlyph { width: 20px; height: 14px; border-top: 2px solid #ffffff; border-bottom: 2px solid #ffffff; }
 .menuLine { width: 20px; height: 2px; background-color: #ffffff; position: absolute; top: 4px; }
 .chevron { width: 20px; color: #a5adba; font-size: 34px; text-align: right; }
 .layers { width: 100%; flex-direction: column; background-color: #191d22; border-radius: 20px; padding: 16px; margin-bottom: 12px; }
 .layer { width: 100%; flex-direction: row; justify-content: space-between; margin-top: 4px; margin-bottom: 4px; }
-.layerName { color: #a5adba; font-size: 17px; }
-.layerState { color: #f2f4f8; font-size: 17px; }
+.layerName { width: 0px; flex-grow: 1; flex-shrink: 1; color: #a5adba; font-size: 19px; }
+.layerState { color: #f2f4f8; font-size: 19px; margin-left: 8px; }
 .connectionGrid { width: 100%; flex-direction: row; margin-top: 12px; }
 .connectionCell { width: 33.333%; flex-direction: column; }
 .connectionName { color: #979fae; font-size: 16px; }
 .connectionValue { color: #ffffff; font-size: 18px; margin-top: 3px; }
-.row { width: 100%; height: 82px; background-color: #1b1f24; border-radius: 18px; padding-left: 14px; padding-right: 14px; flex-direction: row; align-items: center; margin-bottom: 10px; }
-.rowTitle { color: #f2f4f8; font-size: 26px; font-weight: bold; lines: 1; text-overflow: ellipsis; }
-.rowHint { color: #b3bac5; font-size: 20px; margin-top: 4px; lines: 1; text-overflow: ellipsis; }
+.row { width: 100%; min-height: 88px; background-color: #191d22; border-radius: 18px; padding: 14px; flex-direction: row; align-items: center; margin-bottom: 10px; }
+.rowTitle { width: 100%; color: #f2f4f8; font-size: 26px; line-height: 32px; font-weight: bold; lines: 2; text-overflow: ellipsis; }
+.rowHint { width: 100%; color: #b3bac5; font-size: 18px; margin-top: 4px; lines: 1; text-overflow: ellipsis; }
 .copy { width: 0px; flex-grow: 1; flex-direction: column; flex-shrink: 1; }
-.listRow { width: 100%; min-height: 88px; padding-top: 14px; padding-bottom: 14px; flex-direction: row; align-items: center; border-bottom: 1px solid #252525; }
+.listRow { width: 100%; min-height: 88px; background-color: #191d22; border-radius: 18px; padding: 14px; flex-direction: row; align-items: center; margin-bottom: 10px; }
 .compactRow { min-height: 72px; padding-top: 10px; padding-bottom: 10px; }
 .statusLine { width: 72px; height: 3px; margin-top: 7px; border-radius: 2px; background-color: #58657b; }
 .running { background-color: #4e98ff; }
@@ -58,7 +58,7 @@ div { flex-shrink: 0; }
 .failed { background-color: #ff625c; }
 .done { background-color: #43d58d; }
 .selected { background-color: #25394c; }
-.button { width: 100%; height: 52px; border-radius: 18px; background-color: #265d9f; justify-content: center; align-items: center; padding: 12px; margin-top: 10px; }
+.button { width: 100%; min-height: 52px; border-radius: 16px; background-color: #265d9f; justify-content: center; align-items: center; padding: 12px; margin-top: 10px; }
 .buttonText { color: #ffffff; font-size: 21px; text-align: center; }
 .disabled { width: 100%; height: 52px; background-color: #1b1f24; border-radius: 18px; padding: 12px; margin-top: 10px; justify-content: center; align-items: center; }
 .disabledText { color: #838c9b; font-size: 18px; text-align: center; }
@@ -67,16 +67,16 @@ div { flex-shrink: 0; }
 .badge { width: 34px; height: 34px; border-radius: 17px; background-color: #265d9f; align-items: center; justify-content: center; margin-left: 8px; }
 .badgeText { color: #ffffff; font-size: 18px; font-weight: bold; }
 .stateBadge { color: #b7c7df; font-size: 16px; margin-top: 8px; }
-.emptyTitle { color: #f2f4f8; font-size: 24px; font-weight: bold; margin-top: 10px; }
-.emptyBody { color: #b3bac5; font-size: 22px; margin-top: 10px; }
+.emptyTitle { width: 100%; color: #f2f4f8; font-size: 24px; line-height: 32px; font-weight: bold; margin-top: 10px; }
+.emptyBody { width: 100%; color: #b3bac5; font-size: 22px; line-height: 30px; margin-top: 10px; }
 .progress { color: #4e98ff; font-size: 27px; margin-top: 10px; }
-.hint { width: 100%; color: #7a8391; font-size: 16px; text-align: center; margin-top: 12px; }
+.hint { width: 100%; color: #a5adba; font-size: 18px; line-height: 26px; text-align: center; margin-top: 12px; }
 .toggle { width: 48px; height: 28px; border-radius: 14px; background-color: #58657b; padding: 3px; align-items: center; }
 .toggleOn { background-color: #265d9f; justify-content: flex-end; }
 .toggleKnob { width: 22px; height: 22px; border-radius: 11px; background-color: #ffffff; }
 .unavailable { color: #838c9b; font-size: 16px; }
 @keyframes enterRight { 0% { transform: translateX(20px); opacity: 0.4; } 100% { transform: translateX(0px); opacity: 1; } }
-.notice { width: 100%; color: #e3ad45; font-size: 17px; margin-top: 8px; margin-bottom: 12px; }
+.notice { width: 100%; color: #e3ad45; font-size: 18px; line-height: 26px; margin-top: 8px; margin-bottom: 12px; }
 .controls { width: 100%; flex-direction: row; margin-top: 8px; margin-bottom: 12px; }
 .smallButton { flex-grow: 1; min-height: 48px; background-color: #1b1f24; border-radius: 14px; justify-content: center; align-items: center; margin-right: 4px; padding: 6px; }
 .controlText { font-size: 18px; }
@@ -94,8 +94,9 @@ div { flex-shrink: 0; }
 .calendarInner { width: 18px; height: 9px; border-top: 2px solid #ffffff; border-bottom: 2px dotted #ffffff; position: absolute; left: 0px; top: 5px; }
 .folderGlyph { width: 22px; height: 16px; border: 2px solid #ffffff; border-radius: 3px; }
 .folderInner { width: 10px; height: 4px; border: 2px solid #ffffff; position: absolute; left: 0px; top: -5px; }
-.personGlyph { width: 22px; height: 12px; border: 2px solid #ffffff; border-radius: 10px; margin-top: 10px; }
-.personInner { width: 10px; height: 10px; border: 2px solid #ffffff; border-radius: 5px; position: absolute; left: 4px; top: -12px; }
+.personGlyph { width: 24px; height: 28px; }
+.personInner { width: 10px; height: 10px; border: 2px solid #ffffff; border-radius: 5px; position: absolute; left: 7px; top: 0px; }
+.personBody { width: 24px; height: 12px; border: 2px solid #ffffff; border-radius: 8px; position: absolute; left: 0px; top: 14px; }
 
 .weekdays { width: 100%; flex-direction: row; margin-top: 12px; }
 .weekday { width: 14.285%; font-size: 16px; text-align: center; color: #979fae; }
@@ -109,16 +110,21 @@ div { flex-shrink: 0; }
 .dueTone { background-color: #ffd077; }
 .laterTone { background-color: #79dcb7; }
 .glanceHeading { width: 100%; flex-direction: row; align-items: center; }
-.glanceLabel { font-size: 20px; color: #c8ced7; flex-grow: 1; }
-.glanceCount { font-size: 20px; color: #c8ced7; }
+.glanceLabel { width: 0px; font-size: 18px; color: #b3bac5; flex-grow: 1; flex-shrink: 1; lines: 1; text-overflow: ellipsis; }
+.glanceCount { font-size: 18px; color: #c8ced7; margin-left: 8px; }
 .glanceValue { width: 100%; font-size: 26px; color: #ffffff; lines: 1; text-overflow: ellipsis; margin-top: 4px; }
 .glanceFooter { width: 100%; height: 40px; align-items: center; justify-content: center; flex-direction: row; }
 .hintText { color: #b3bac5; font-size: 18px; }
-.menuRow { height: 80px; }
+.homeMenu { width: 44px; height: 48px; justify-content: center; align-items: center; margin-left: 8px; }
+.menuStack { padding-bottom: 12px; }
+.menuHeader { height: 56px; }
+.menuRow { height: 68px; min-height: 68px; padding-top: 10px; padding-bottom: 10px; margin-bottom: 8px; }
 .menuTitle { font-size: 30px; flex-grow: 1; }
-.quadrantRow { height: 80px; padding-left: 12px; padding-right: 12px; }
-.quadrantTitle { font-size: 26px; lines: 1; text-overflow: ellipsis; }
-.quadCount { font-size: 24px; color: #c8ced7; margin-left: 4px; }
+.menuExit { width: 100%; height: 48px; background-color: #20343a; border-radius: 16px; justify-content: center; align-items: center; margin-top: 8px; }
+.menuHint { height: 26px; margin-top: 6px; color: #a5adba; }
+.quadrantRow { height: 80px; min-height: 80px; padding-left: 12px; padding-right: 12px; }
+.quadrantTitle { width: 100%; font-size: 24px; lines: 1; text-overflow: ellipsis; }
+.quadCount { width: 32px; font-size: 22px; color: #c8ced7; margin-left: 8px; text-align: right; }
 .enterBack { animation-name: enterLeft; animation-duration: 180ms; animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1); }
 @keyframes enterLeft { 0% { transform: translateX(-20px); opacity: 0.4; } 100% { transform: translateX(0px); opacity: 1; } }
 
@@ -140,10 +146,33 @@ div { flex-shrink: 0; }
 .calendarTime { width: 100%; color: #a9ccf4; font-size: 20px; lines: 1; text-overflow: ellipsis; margin-bottom: 5px; }
 .calendarItemTitle { width: 100%; color: #ffffff; font-size: 26px; font-weight: bold; lines: 2; text-overflow: ellipsis; }
 .calendarChevron { width: 16px; color: #9da8b6; font-size: 30px; margin-left: 6px; text-align: right; }
-.calendarDetailTitle { width: 100%; color: #ffffff; font-size: 26px; font-weight: bold; margin-top: 4px; }
+.calendarDetailTitle { width: 100%; color: #ffffff; font-size: 26px; line-height: 34px; font-weight: bold; margin-top: 4px; }
 .calendarEmpty { width: 100%; flex-direction: column; background-color: #12171c; border-radius: 18px; padding: 18px 16px; margin-bottom: 10px; }
 .calendarEmptyTitle { width: 100%; color: #e1e7ed; font-size: 24px; }
 .calendarEmptyBody { width: 100%; color: #b3bac5; font-size: 20px; margin-top: 8px; }
 .calendarFooter { width: 100%; flex-direction: column; padding-top: 12px; padding-bottom: 12px; }
 .calendarSource { width: 100%; color: #c8b88b; font-size: 18px; }
 .calendarFootnote { width: 100%; color: #a5adba; font-size: 18px; margin-top: 6px; }
+
+.homeStatus { width: 100%; flex-direction: column; background-color: #12171c; border-radius: 18px; padding: 14px; margin-top: 4px; margin-bottom: 8px; }
+.homeStatusText { width: 100%; color: #b3bac5; font-size: 18px; line-height: 26px; margin-top: 4px; }
+.homeDate { width: 100%; color: #a5adba; font-size: 18px; margin-bottom: 10px; }
+.sendingButton { background-color: #283944; }
+
+.sectionTitle { width: 100%; color: #a5adba; font-size: 20px; line-height: 28px; margin-top: 14px; margin-bottom: 8px; }
+.statusCard { width: 100%; flex-direction: column; background-color: #191d22; border-radius: 20px; padding: 16px; margin-bottom: 12px; }
+.statusHero { width: 100%; color: #f2f4f8; font-size: 28px; line-height: 36px; font-weight: bold; }
+.detailTitle { width: 100%; color: #ffffff; font-size: 26px; line-height: 34px; font-weight: bold; }
+.detailBody { width: 100%; color: #e1e7ed; font-size: 22px; line-height: 30px; }
+.caption { width: 100%; color: #b3bac5; font-size: 18px; line-height: 26px; margin-top: 6px; }
+.secondaryButton { width: 100%; min-height: 52px; background-color: #20272f; border-radius: 16px; justify-content: center; align-items: center; padding: 12px; margin-top: 10px; margin-bottom: 8px; }
+.dangerButton { width: 100%; min-height: 52px; background-color: #452529; border-radius: 16px; justify-content: center; align-items: center; padding: 12px; margin-top: 10px; }
+.settingCopy { width: 0px; flex-grow: 1; flex-shrink: 1; flex-direction: column; margin-right: 10px; }
+.settingTitle { width: 100%; color: #f2f4f8; font-size: 24px; font-weight: bold; lines: 1; text-overflow: ellipsis; }
+.settingHint { width: 100%; color: #b3bac5; font-size: 18px; margin-top: 5px; lines: 1; text-overflow: ellipsis; }
+.footerNote { width: 100%; color: #a5adba; font-size: 18px; line-height: 26px; margin-top: 6px; margin-bottom: 8px; }
+.identityName { width: 0px; flex-grow: 1; flex-shrink: 1; color: #f2f4f8; font-size: 26px; line-height: 34px; font-weight: bold; lines: 2; text-overflow: ellipsis; }
+.emptyCard { width: 100%; flex-direction: column; background-color: #12171c; border-radius: 20px; padding: 20px; margin-bottom: 12px; }
+.emptyIcon { width: 44px; height: 44px; background-color: #20343a; border-radius: 22px; justify-content: center; align-items: center; }
+.taskMarker { width: 26px; height: 26px; border: 2px solid #8796a8; border-radius: 13px; margin-right: 12px; justify-content: center; align-items: center; }
+.taskMarkerDone { border-color: #79dcb7; background-color: #205446; }

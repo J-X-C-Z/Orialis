@@ -3,9 +3,17 @@ const KINDS = ['tasks', 'schedules', 'projects', 'milestones']
 const LABELS = { tasks: '任务', schedules: '日程', projects: '项目', milestones: '里程碑' }
 let serial = 0
 function str(v) { return typeof v === 'string' ? v.slice(0, 600) : '' }
-function date(v) { return /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : '' }
+function date(v) {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return ''
+  const epoch = Date.parse(v + 'T12:00:00Z')
+  return isFinite(epoch) && new Date(epoch).toISOString().slice(0, 10) === v ? v : ''
+}
 function tri(v) { return v === true ? true : v === false ? false : null }
-function shift(d, n) { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10) }
+function shift(d, n) {
+  if (!date(d) || !Number.isInteger(n)) return ''
+  const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n)
+  return isFinite(x.getTime()) ? date(x.toISOString().slice(0, 10)) : ''
+}
 function dayOf(value, offset) {
   if (!value) return ''
   const epoch = Date.parse(value)
@@ -24,7 +32,7 @@ function normalize(raw) {
   const source = raw && raw.schemaVersion === 1 ? raw : {}
   const o = { schemaVersion: 1, present: raw && raw.schemaVersion === 1, today: date(source.today), utcOffsetMinutes: typeof source.utcOffsetMinutes === 'number' ? source.utcOffsetMinutes : null, profile: source.profile || {}, sync: source.sync || {}, coverage: {}, truncated: !!(source.truncated || source.coverage && source.coverage.truncated) }
   KINDS.forEach((kind) => {
-    o[kind] = (Array.isArray(source[kind]) ? source[kind] : []).slice(0, 80).filter((x) => x && typeof x.id === 'string' && typeof x[kind === 'projects' ? 'name' : 'title'] === 'string').map((x) => {
+    o[kind] = (Array.isArray(source[kind]) ? source[kind] : []).filter((x) => x && typeof x.id === 'string' && typeof x[kind === 'projects' ? 'name' : 'title'] === 'string').map((x) => {
       const a = Object.assign({}, x)
       a.id = str(x.id); a.title = str(x.title); a.name = str(x.name); a.notes = str(x.notes); a.description = str(x.description); a.goal = str(x.goal); a.location = str(x.location)
       a.due = date(x.due) || null; a.important = tri(x.important); a.urgent = tri(x.urgent); if (kind === 'tasks' || kind === 'milestones') a.completed = x.completed === true; else delete a.completed
@@ -67,12 +75,13 @@ function build(o, pageKind, selection, filter, calendarDate, calendarMode) {
     const now = Date.now(); model.nowSchedule = rows(o, 'schedules', o.schedules.filter((s) => overlaps(s, o.today, o.utcOffsetMinutes) && Date.parse(s.endAt) > now).sort((a, b) => a.startAt.localeCompare(b.startAt)))[0] || null
     model.later = rows(o, 'schedules', o.schedules.filter((s) => dayOf(s.startAt, o.utcOffsetMinutes) === o.today && Date.parse(s.startAt) > now && (!model.nowSchedule || s.id !== model.nowSchedule.id)).sort((a, b) => a.startAt.localeCompare(b.startAt)))
     const next = model.nowSchedule ? [model.nowSchedule] : []
+    const nextSchedule = model.nowSchedule && o.schedules.filter((s) => s.id === model.nowSchedule.id)[0]
     model.cards = [
       { key: 'focus', label: '现在关注', tone: 'focusTone', items: model.rows },
-      { key: 'next', label: '接下来', tone: 'nextTone', items: next },
+      { key: 'next', label: nextSchedule && !nextSchedule.allDay && Date.parse(nextSchedule.startAt) <= now ? '正在进行' : '接下来', tone: 'nextTone', items: next },
       { key: 'due', label: '最近截止', tone: 'dueTone', items: model.deadlines },
       { key: 'later', label: '稍后日程', tone: 'laterTone', items: model.later }
-    ].map((card) => Object.assign(card, { countLabel: o.present ? String(card.items.length) : '—', preview: card.items.length ? card.items[0].title : o.present ? '暂无安排' : '等待手机同步' }))
+    ].map((card) => Object.assign(card, { countLabel: o.present ? String(card.items.length) : '—', preview: card.items.length ? card.items[0].title : o.present ? '暂无安排' : '等待手机同步', timeLabel: card.items.length && (card.key === 'next' || card.key === 'later') ? card.items[0].subtitle.split(' · ')[0].split('–')[0] : '' }))
   } else if (pageKind === 'events') {
     const tasks = ordered(rootTasks.filter((t) => filter === '已完成' ? t.completed : !t.completed && (filter !== '无截止' || !t.due)), 'manualPosition')
     model.groups = QUADS.map((name, i) => ({ name, rows: rows(o, 'tasks', tasks.filter((t) => quadrant(t) === i)) }))

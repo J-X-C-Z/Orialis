@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/services.dart';
+import 'package:flutter/material.dart' show MaterialPageRoute;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/semantics.dart';
 
@@ -11,22 +13,33 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/app.dart';
+
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show LuminaConversationVisibility, OrialisPageScaffold;
+
 import '../../core/database/app_database.dart';
+import '../../core/config/app_config.dart';
 import '../../core/attachments/attachment_bridge.dart';
 import '../../core/realtime/mobile_realtime_client.dart';
 import '../../core/sync/sync_engine.dart';
 import '../../features/chat/data/chat_repository.dart';
+import '../../features/chat/data/chat_drafts.dart';
 import '../../features/chat/data/recent_hermes_models.dart';
 import '../../features/chat/data/agent_chat_service.dart';
+import '../../features/chat/data/workspace_client.dart';
+import '../../features/chat/presentation/workspace_page.dart';
+import '../../features/chat/presentation/chat_attachment.dart';
 import '../../features/chat/application/chat_controller.dart';
+import '../../features/chat/application/chat_share_coordinator.dart';
 import '../../features/chat/domain/agent_event_state.dart';
 import '../../features/chat/domain/hermes_shortcuts.dart';
+import '../../features/chat/domain/session_summary.dart';
 import '../../features/chat/presentation/agent_event_cards.dart';
+import '../../features/chat/presentation/chat_header_status.dart';
 import '../../features/chat/presentation/message_action_panel.dart';
 import '../../features/chat/presentation/safe_markdown.dart';
+import '../../features/chat/presentation/slash_command_suggestions.dart';
 
 final agentChatServiceProvider = Provider<AgentChatService>((ref) {
   final service = AgentChatService(ref.watch(appConfigProvider));
@@ -39,12 +52,14 @@ class ChatPage extends ConsumerStatefulWidget {
     required this.repository,
     this.conversationId = 'default',
     this.messageId,
+    this.shareId,
     super.key,
   });
 
   final ChatRepository repository;
   final String conversationId;
   final String? messageId;
+  final String? shareId;
 
   @override
   ConsumerState<ChatPage> createState() => _ChatPageState();
@@ -53,9 +68,131 @@ class ChatPage extends ConsumerStatefulWidget {
 class _ChatPageState extends ConsumerState<ChatPage>
     with WidgetsBindingObserver {
   final _controller = TextEditingController();
+  final _conversationSearch = TextEditingController();
+  String? _conversationDeviceFilter;
+  ChatSessionState? _conversationStateFilter;
+  late final AppConfig _draftConfig;
+  Future<ChatDrafts>? _drafts;
+  Future<void>? _draftInitialization;
+  bool _chatIdentityActive = true;
+  int _draftRevision = 0;
+  bool _changingDraft = false;
+  bool _draftWarningShown = false;
+  Timer? _draftSaveTimer;
+  String _observedDraftText = '';
+  String? _shareId;
+  bool _importingShare = false;
+  bool _shareImportFailed = false;
+  final _appliedShareIds = <String>{};
+
+  Future<void> _persistDraft() async {
+    _draftSaveTimer?.cancel();
+    final initialization = _draftInitialization;
+    if (initialization != null) {
+      await initialization;
+      if (!mounted) return;
+    }
+    final store = _drafts;
+    if (store == null || _changingDraft) return;
+    final conversationId = _conversationId;
+    final text = _controller.text;
+    final state = ChatDraftState(
+      text: text,
+      attachments: List.of(_attachments),
+      appliedShareIds: Set.of(_appliedShareIds),
+    );
+    try {
+      await (await store).saveState(conversationId, state);
+    } catch (_) {
+      if (mounted && !_draftWarningShown) {
+        _draftWarningShown = true;
+        showLuminaToast(context, '草稿未能保存到设备，请勿关闭应用。');
+      }
+    }
+  }
+
+  void _draftChanged() {
+    if (_changingDraft || _controller.text == _observedDraftText) return;
+    _observedDraftText = _controller.text;
+    _draftRevision++;
+    _draftSaveTimer?.cancel();
+    _draftSaveTimer = Timer(const Duration(milliseconds: 250), () {
+      unawaited(_persistDraft());
+    });
+  }
+
+  Future<void> _restoreDraft() async {
+    final store = _drafts;
+    if (store == null) return;
+    final revision = _draftRevision;
+    final conversationId = _conversationId;
+    try {
+      final state = await (await store).loadState(conversationId);
+      final text = state.text;
+      if (!mounted ||
+          store != _drafts ||
+          revision != _draftRevision ||
+          conversationId != _conversationId) {
+        return;
+      }
+      _changingDraft = true;
+      _observedDraftText = text;
+      _controller.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+      _attachments
+        ..clear()
+        ..addAll(state.attachments);
+      _appliedShareIds
+        ..clear()
+        ..addAll(state.appliedShareIds);
+      _changingDraft = false;
+      setState(() {});
+    } catch (_) {
+      // The composer remains usable when local preferences are unavailable.
+    }
+  }
+
+  Future<void> _revokeDraftIdentity() async {
+    _chatIdentityActive = false;
+    _pendingAgentEvents.clear();
+    _conversationEvents.clear();
+    _chatDeviceId = null;
+    for (final waiter in _commandWaiters.values) {
+      if (!waiter.isCompleted) waiter.complete(null);
+    }
+    _commandWaiters.clear();
+    _pendingModelSwitches.clear();
+    await _persistDraft();
+    _drafts = null;
+    _draftRevision++;
+    _shareId = null;
+    _attachments.clear();
+    _appliedShareIds.clear();
+    _changingDraft = true;
+    _observedDraftText = '';
+    _controller.clear();
+    _changingDraft = false;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openDraftIdentity() async {
+    _drafts = ChatDrafts.open(_draftConfig);
+    final initialization = _restoreDraft();
+    _draftInitialization = initialization;
+    try {
+      await initialization;
+      if (_draftInitialization == initialization) _chatIdentityActive = true;
+    } finally {
+      if (_draftInitialization == initialization) _draftInitialization = null;
+    }
+  }
+
   final _composerFocus = FocusNode();
   Message? _replyMessage;
   int _historyStart = 0;
+  int _historyLimit = 60;
   String? _highlightMessageId;
   String? _pendingNotificationMessageId;
   StreamSubscription<List<Conversation>>? _notificationConversationSubscription;
@@ -247,6 +384,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
       _alignRetries = 0;
       if (_positioningLatest) setState(() => _positioningLatest = false);
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   void _contentArrived() {
@@ -262,6 +400,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   void _enqueueAgentEvent(MobileEnvelope event) {
+    if (!_chatIdentityActive) return;
     _pendingAgentEvents.add(event);
     if (_agentFlushScheduled) return;
     _agentFlushScheduled = true;
@@ -270,25 +409,35 @@ class _ChatPageState extends ConsumerState<ChatPage>
 
   void _flushAgentEvents() {
     _agentFlushScheduled = false;
-    if (!mounted || _pendingAgentEvents.isEmpty) return;
+    if (!mounted || !_chatIdentityActive || _pendingAgentEvents.isEmpty) return;
     final batch = List<MobileEnvelope>.of(_pendingAgentEvents);
     _pendingAgentEvents.clear();
 
     var chromeDirty = _chromeDirty;
     _chromeDirty = false;
     var touchedCurrent = false;
-    var needsApproval = false;
     final touchedStores = <AgentEventStore>{};
 
     for (final event in batch) {
       final resolved = resolveAgentEnvelope(event);
-      final target = resolved.conversationId ?? _conversationId;
+      if (resolved.kind == 'workspace.response') continue;
+      final requestId = event.requestId;
+      final pendingOwner = requestId == null
+          ? null
+          : _conversationEvents.entries
+                .where((entry) => entry.value.actions.contains(requestId))
+                .firstOrNull
+                ?.key;
+      final target = resolved.conversationId ?? pendingOwner ?? _conversationId;
       final store = _conversationEvents.putIfAbsent(
         target,
         AgentEventStore.new,
       );
       final kind = resolved.kind;
-      store.applySilent(event);
+      store.applySilent(
+        event,
+        attributed: resolved.conversationId != null || pendingOwner != null,
+      );
       if (kind == 'hermes.command.result') {
         for (final id in {
           ..._commandWaiters.keys,
@@ -307,14 +456,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
       touchedStores.add(store);
       if (_terminalKinds.contains(kind)) {
         store.typing = false;
-        store.agentStatus = 'completed';
+        store.agentStatus = kind?.endsWith('error') == true
+            ? 'failed'
+            : 'completed';
         chromeDirty = true;
       } else if (kind != 'stream.delta' && kind != 'agent.delta') {
         // Structural events (tools, approvals, status) move the action bar.
         chromeDirty = true;
-      }
-      if (kind == 'approval.request' || kind == 'clarify.request') {
-        needsApproval = true;
       }
       if (target == _conversationId && _showingConversation) {
         touchedCurrent = true;
@@ -326,15 +474,18 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
     if (chromeDirty) setState(() {});
     if (touchedCurrent && _showingConversation) _contentArrived();
-    if (needsApproval) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _presentApproval());
-    }
   }
 
   void _closeConversation() {
+    unawaited(_persistDraft());
     FocusScope.of(context).unfocus();
     const LuminaConversationVisibility(false).dispatch(context);
     setState(() => _showingConversation = false);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) unawaited(_persistDraft());
   }
 
   @override
@@ -343,6 +494,11 @@ class _ChatPageState extends ConsumerState<ChatPage>
     WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_onScroll);
     _conversationId = widget.conversationId;
+    _draftConfig = ref.read(appConfigProvider);
+    _draftConfig.addIdentityListener(_revokeDraftIdentity);
+    _draftConfig.addIdentityCommittedListener(_openDraftIdentity);
+    _controller.addListener(_draftChanged);
+    unawaited(_openDraftIdentity());
     _highlightMessageId = widget.messageId;
     _chatController = ChatController(
       repository: widget.repository,
@@ -383,6 +539,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
               _conversationListController.addError(error, stack),
         );
     _openNotificationRoute();
+    _prepareShare();
   }
 
   @override
@@ -391,6 +548,89 @@ class _ChatPageState extends ConsumerState<ChatPage>
     if (oldWidget.conversationId != widget.conversationId ||
         oldWidget.messageId != widget.messageId) {
       _openNotificationRoute();
+    }
+    if (oldWidget.shareId != widget.shareId) _prepareShare();
+  }
+
+  void _prepareShare() {
+    final id = widget.shareId;
+    if (id == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || widget.shareId != id) return;
+      final shares = ref.read(chatShareCoordinatorProvider);
+      await shares?.open(id);
+      if (!mounted || widget.shareId != id || shares?.pending?.id != id) return;
+      unawaited(_persistDraft());
+      setState(() {
+        _shareId = id;
+        _shareImportFailed = false;
+        _showingConversation = false;
+      });
+      const LuminaConversationVisibility(false).dispatch(context);
+    });
+  }
+
+  Future<void> _importSharedDraft() async {
+    final id = _shareId;
+    final shares = ref.read(chatShareCoordinatorProvider);
+    if (id == null || shares == null || _importingShare) return;
+    final conversationId = _conversationId;
+    final drafts = _drafts;
+    setState(() {
+      _importingShare = true;
+      _shareImportFailed = false;
+    });
+    try {
+      final imported = await shares.importIntoDraft(
+        id: id,
+        alreadyApplied: _appliedShareIds.contains(id),
+        importFile: _attachmentBridge.importFile,
+        isCurrent: () =>
+            mounted &&
+            _conversationId == conversationId &&
+            _drafts == drafts &&
+            _shareId == id,
+        apply: (payload, files, isCurrent) async {
+          if (drafts == null || !isCurrent()) {
+            throw StateError('Account changed');
+          }
+          // Persist first: failed storage must leave the native share retryable.
+          late String text;
+          late int revision;
+          do {
+            revision = _draftRevision;
+            text = appendSharedText(_controller.text, payload.text);
+            await (await drafts).saveState(
+              conversationId,
+              ChatDraftState(
+                text: text,
+                attachments: [..._attachments, ...files],
+                appliedShareIds: {..._appliedShareIds, id},
+              ),
+            );
+            if (!isCurrent()) throw StateError('Account changed');
+          } while (_draftRevision != revision);
+          setState(() {
+            _controller.value = TextEditingValue(
+              text: text,
+              selection: TextSelection.collapsed(offset: text.length),
+            );
+            _attachments.addAll(files);
+            _appliedShareIds.add(id);
+          });
+        },
+      );
+      if (mounted && imported && _shareId == id) {
+        setState(() => _shareId = null);
+        showLuminaToast(context, '已加入草稿，确认后发送');
+      }
+    } catch (_) {
+      if (mounted && _shareId == id) {
+        setState(() => _shareImportFailed = true);
+        showLuminaToast(context, '分享未能导入，请重试；原内容仍已保留。');
+      }
+    } finally {
+      if (mounted) setState(() => _importingShare = false);
     }
   }
 
@@ -439,6 +679,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
 
   @override
   void dispose() {
+    unawaited(_persistDraft());
+    _draftConfig.removeIdentityListener(_revokeDraftIdentity);
+    _draftConfig.removeIdentityCommittedListener(_openDraftIdentity);
+    _controller.removeListener(_draftChanged);
     _conversationPositionTimer?.cancel();
     unawaited(_notificationConversationSubscription?.cancel());
     WidgetsBinding.instance.removeObserver(this);
@@ -452,6 +696,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
     unawaited(_conversationListController.close());
     _composerFocus.dispose();
     _controller.dispose();
+    _conversationSearch.dispose();
     _scrollController.dispose();
     _realtimeSubscription.cancel();
     super.dispose();
@@ -543,7 +788,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
         remote,
       );
       if (!mounted) return;
-      await _openConversation(conversation);
+      await _openConversation(conversation, receiveShare: _shareId != null);
       if (mounted) setState(() => _chatDeviceId = device.id);
     } catch (_) {
       if (mounted) showLuminaToast(context, '设备对话未能建立。请确认已登录、服务器已更新且设备在线，再重试。');
@@ -554,9 +799,6 @@ class _ChatPageState extends ConsumerState<ChatPage>
 
   bool get _hasHermesTarget =>
       ref.read(agentChatServiceProvider).isAllowedTarget(_chatDeviceId);
-
-  String get _chatDeviceLabel =>
-      ref.read(agentChatServiceProvider).targetLabel(_chatDeviceId) ?? '选择聊天设备';
 
   Future<bool> _requireHermesTarget() async {
     final conversationId = _conversationId;
@@ -575,14 +817,24 @@ class _ChatPageState extends ConsumerState<ChatPage>
     return false;
   }
 
-  Future<void> _openConversation(Conversation conversation) async {
+  Future<void> _openConversation(
+    Conversation conversation, {
+    bool receiveShare = false,
+  }) async {
+    await _persistDraft();
+    if (!mounted) return;
+    _draftRevision++;
+    _changingDraft = true;
     setState(() {
       if (_conversationId != conversation.id) {
+        _observedDraftText = '';
         _controller.clear();
         _attachments.clear();
+        _appliedShareIds.clear();
         _replyMessage = null;
       }
       _historyStart = 0;
+      _historyLimit = 60;
       _highlightMessageId = null;
       _conversationId = conversation.id;
       _conversationTitle = conversation.title;
@@ -596,6 +848,11 @@ class _ChatPageState extends ConsumerState<ChatPage>
       _userDragging = false;
       _alignRetries = 0;
     });
+    _changingDraft = false;
+    await _restoreDraft();
+    if (!mounted || _conversationId != conversation.id) return;
+    if (receiveShare) await _importSharedDraft();
+    if (!mounted || _conversationId != conversation.id) return;
     unawaited(_loadChatTarget(conversation.id));
     const LuminaConversationVisibility(true).dispatch(context);
     _queueLatest();
@@ -614,9 +871,96 @@ class _ChatPageState extends ConsumerState<ChatPage>
     await _chooseChatDevice();
   }
 
+  Future<void> _showConversationFilters(
+    Map<String, String> devices,
+    Map<String, ChatSessionSummary> summaries,
+    int total,
+  ) async {
+    FocusScope.of(context).unfocus();
+    await showLuminaSheet<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          void update(VoidCallback change) {
+            setState(change);
+            setSheetState(() {});
+          }
+
+          return LuminaStack(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('筛选会话', style: LuminaTheme.of(context).textTheme.titleSmall),
+              const Text('设备'),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  LuminaChip(
+                    key: const ValueKey('conversation-device-all'),
+                    label: const Text('全部设备'),
+                    selected: _conversationDeviceFilter == null,
+                    onSelected: (_) =>
+                        update(() => _conversationDeviceFilter = null),
+                  ),
+                  for (final device in devices.entries)
+                    LuminaChip(
+                      key: ValueKey('conversation-device-${device.key}'),
+                      label: Text(device.value),
+                      selected: _conversationDeviceFilter == device.key,
+                      onSelected: (_) =>
+                          update(() => _conversationDeviceFilter = device.key),
+                    ),
+                ],
+              ),
+              const Text('状态'),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final filter in <ChatSessionState?, String>{
+                    null: '全部',
+                    ChatSessionState.running: '运行中',
+                    ChatSessionState.pending: '待处理',
+                    ChatSessionState.failed: '失败',
+                  }.entries)
+                    LuminaChip(
+                      key: ValueKey(
+                        'conversation-state-${filter.key?.name ?? 'all'}',
+                      ),
+                      label: Text(
+                        '${filter.value} ${filter.key == null ? total : summaries.values.where((summary) => summary.state == filter.key).length}',
+                      ),
+                      selected: _conversationStateFilter == filter.key,
+                      onSelected: (_) =>
+                          update(() => _conversationStateFilter = filter.key),
+                    ),
+                ],
+              ),
+              Row(
+                children: [
+                  LuminaButton(
+                    onPressed: () => update(() {
+                      _conversationDeviceFilter = null;
+                      _conversationStateFilter = null;
+                    }),
+                    child: const Text('清除筛选'),
+                  ),
+                  const Spacer(),
+                  LuminaButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('完成'),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Widget _conversationList() => OrialisPageScaffold(
     title: '聊天',
-    subtitle: '想法在这里，慢慢成形。',
     actions: [
       LuminaIconButton(
         onPressed: _startingDeviceChat ? null : _chooseChatDevice,
@@ -636,8 +980,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
           return const LuminaEmptyState(text: '会话暂时无法加载，请稍后再试。');
         }
         if (!snapshot.hasData) return const Center(child: LuminaProgress());
-        final conversations = snapshot.data!;
-        if (conversations.isEmpty) {
+        final allConversations = snapshot.data!;
+        if (allConversations.isEmpty) {
           return Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -654,91 +998,227 @@ class _ChatPageState extends ConsumerState<ChatPage>
             ),
           );
         }
+        final service = ref.read(agentChatServiceProvider);
+        final devices = <String, String>{
+          for (final conversation in allConversations)
+            if (_visibleTargets[conversation.id] case final String deviceId)
+              deviceId: service.targetLabel(deviceId) ?? deviceId,
+        };
+        final summaries = {
+          for (final conversation in allConversations)
+            conversation.id: ChatSessionSummary.fromEvents(
+              _conversationEvents[conversation.id],
+            ),
+        };
+        final query = _conversationSearch.text.trim().toLowerCase();
+        final filtering =
+            query.isNotEmpty ||
+            _conversationDeviceFilter != null ||
+            _conversationStateFilter != null;
+        final conversations = allConversations.where((conversation) {
+          final deviceId = _visibleTargets[conversation.id];
+          final deviceLabel = devices[deviceId] ?? '本地历史';
+          return (_conversationDeviceFilter == null ||
+                  deviceId == _conversationDeviceFilter) &&
+              (_conversationStateFilter == null ||
+                  summaries[conversation.id]!.state ==
+                      _conversationStateFilter) &&
+              (query.isEmpty ||
+                  conversation.title.toLowerCase().contains(query) ||
+                  deviceLabel.toLowerCase().contains(query));
+        }).toList();
         final pinnedCount = conversations.where((item) => item.pinned).length;
-        return ReorderableList(
-          padding: EdgeInsets.only(
-            top: LuminaPageHeaderInset.of(context) + 12,
-            bottom: MediaQuery.paddingOf(context).bottom + 24,
-          ),
-          itemCount: conversations.length,
-          onReorderItem: (oldIndex, newIndex) async {
-            if (oldIndex >= pinnedCount || newIndex >= pinnedCount) return;
-            final ids = conversations
-                .take(pinnedCount)
-                .map((item) => item.id)
-                .toList();
-            ids.insert(newIndex, ids.removeAt(oldIndex));
-            try {
-              await widget.repository.reorderPinnedConversations(ids);
-            } on Object {
-              if (context.mounted) showLuminaToast(context, '排序未能保存，请重试');
-            }
-          },
-          itemBuilder: (context, index) {
-            final conversation = conversations[index];
-            final latest = ref
-                .watch(
-                  chatLatestMessageProvider((
-                    repository: widget.repository,
-                    conversationId: conversation.id,
-                  )),
-                )
-                .value;
-            final preview = latest?.content.replaceAll('\n', ' ').trim();
-            final row = LuminaListRow(
-              title: conversation.pinned
-                  ? '置顶 · ${conversation.title}'
-                  : conversation.title,
-              subtitle: preview != null && preview.isNotEmpty
-                  ? (preview.length > 48
-                        ? '${preview.substring(0, 48)}…'
-                        : preview)
-                  : conversation.type == 'main'
-                  ? '主会话 · 随时开始新的想法'
-                  : '轻触继续对话',
-              leading: Container(
-                width: 44,
-                height: 44,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: LuminaTheme.of(context).colors.accentSoft,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: LuminaIcon(
-                  conversation.type == 'main'
-                      ? LuminaIcons.sparkles
-                      : LuminaIcons.chat,
-                  color: LuminaTheme.of(context).colors.accent,
-                ),
+        return Column(
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                LuminaPageHeaderInset.of(context) + 8,
+                16,
+                6,
               ),
-              onTap: () => _openConversation(conversation),
-              trailing: Column(
-                mainAxisSize: MainAxisSize.min,
+              child: Row(
+                key: const ValueKey('conversation-toolbar'),
                 children: [
-                  if (latest != null)
-                    Text(
-                      _formatMessageTime(latest.createdAt),
-                      style: LuminaTheme.of(context).textTheme.labelSmall,
+                  Expanded(
+                    child: LuminaTextField(
+                      key: const ValueKey('conversation-search'),
+                      controller: _conversationSearch,
+                      hintText: '搜索会话或设备',
+                      onChanged: (_) => setState(() {}),
                     ),
-                  LuminaIconButton(
-                    tooltip: '会话选项',
-                    icon: const LuminaIcon(LuminaIcons.more),
-                    onPressed: () => _conversationOptions(conversation),
+                  ),
+                  const SizedBox(width: 8),
+                  LuminaButton(
+                    key: const ValueKey('conversation-filters'),
+                    onPressed: () => _showConversationFilters(
+                      devices,
+                      summaries,
+                      allConversations.length,
+                    ),
+                    child: Text(
+                      _conversationDeviceFilter == null &&
+                              _conversationStateFilter == null
+                          ? '筛选'
+                          : '筛选 ${(_conversationDeviceFilter != null ? 1 : 0) + (_conversationStateFilter != null ? 1 : 0)}',
+                    ),
                   ),
                 ],
               ),
-            );
-            return Padding(
-              key: ValueKey(conversation.id),
-              padding: const EdgeInsets.only(bottom: 8),
-              child: conversation.pinned
-                  ? ReorderableDelayedDragStartListener(
-                      index: index,
-                      child: row,
-                    )
-                  : row,
-            );
-          },
+            ),
+            Expanded(
+              child: conversations.isEmpty
+                  ? const LuminaEmptyState(text: '没有匹配的会话，试试其他搜索或筛选。')
+                  : ReorderableList(
+                      padding: EdgeInsets.only(
+                        bottom: MediaQuery.paddingOf(context).bottom + 24,
+                      ),
+                      itemCount: conversations.length,
+                      onReorderItem: (oldIndex, newIndex) async {
+                        if (filtering ||
+                            oldIndex >= pinnedCount ||
+                            newIndex >= pinnedCount) {
+                          return;
+                        }
+                        final ids = conversations
+                            .take(pinnedCount)
+                            .map((item) => item.id)
+                            .toList();
+                        ids.insert(newIndex, ids.removeAt(oldIndex));
+                        try {
+                          await widget.repository.reorderPinnedConversations(
+                            ids,
+                          );
+                        } on Object {
+                          if (context.mounted) {
+                            showLuminaToast(context, '排序未能保存，请重试');
+                          }
+                        }
+                      },
+                      itemBuilder: (context, index) {
+                        final conversation = conversations[index];
+                        final latest = ref
+                            .watch(
+                              chatLatestMessageProvider((
+                                repository: widget.repository,
+                                conversationId: conversation.id,
+                              )),
+                            )
+                            .value;
+                        final preview = latest == null
+                            ? null
+                            : _readableMessage(latest)
+                                  .replaceAll('\n', ' ')
+                                  .trim();
+                        final deviceLabel =
+                            devices[_visibleTargets[conversation.id]] ?? '本地历史';
+                        final status = summaries[conversation.id]!.label;
+                        final theme = LuminaTheme.of(context);
+                        final row = LuminaSurface(
+                          key: ValueKey('conversation-row-${conversation.id}'),
+                          radius: 18,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          onTap: _importingShare
+                              ? null
+                              : () => _openConversation(
+                                  conversation,
+                                  receiveShare: _shareId != null,
+                                ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            conversation.pinned
+                                                ? '置顶 · ${conversation.title}'
+                                                : conversation.title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.titleSmall
+                                                .copyWith(
+                                                  fontSize: 15,
+                                                  height: 1.3,
+                                                ),
+                                          ),
+                                        ),
+                                        if (latest != null) ...[
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            _formatMessageTime(
+                                              latest.createdAt,
+                                            ),
+                                            style: theme.textTheme.labelSmall
+                                                .copyWith(
+                                                  fontSize: 11,
+                                                  height: 1.3,
+                                                ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      summaries[conversation.id]!.state ==
+                                              ChatSessionState.ready
+                                          ? deviceLabel
+                                          : '$deviceLabel · $status',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall.copyWith(
+                                        fontSize: 11,
+                                        height: 1.3,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      preview != null && preview.isNotEmpty
+                                          ? preview
+                                          : conversation.type == 'main'
+                                          ? '主会话 · 随时开始新的想法'
+                                          : '轻触继续对话',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall.copyWith(
+                                        fontSize: 13,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              LuminaIconButton(
+                                tooltip: '会话选项',
+                                icon: const LuminaIcon(LuminaIcons.more),
+                                onPressed: () =>
+                                    _conversationOptions(conversation),
+                              ),
+                            ],
+                          ),
+                        );
+                        return Padding(
+                          key: ValueKey(conversation.id),
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: conversation.pinned && !filtering
+                              ? ReorderableDelayedDragStartListener(
+                                  index: index,
+                                  child: row,
+                                )
+                              : row,
+                        );
+                      },
+                    ),
+            ),
+          ],
         );
       },
     ),
@@ -865,8 +1345,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
     String requestId,
     Map<String, dynamic> payload,
   ) async {
-    if (!await _requireHermesTarget()) {
-      _agentEvents.actions.release(requestId);
+    final conversationId = _conversationId;
+    final store = _agentEvents;
+    if (!await _requireHermesTarget() || _conversationId != conversationId) {
+      store.actions.release(requestId);
       throw StateError('未绑定 Hermes 设备');
     }
     try {
@@ -875,15 +1357,55 @@ class _ChatPageState extends ConsumerState<ChatPage>
           .sendEvent(
             kind: type,
             requestId: requestId,
-            payload: {'conversationId': _conversationId, ...payload},
+            payload: {...payload, 'conversationId': conversationId},
           );
       if (mounted) setState(() {});
     } catch (error) {
       if (mounted) {
-        _agentEvents.actions.release(requestId);
+        store.actions.release(requestId);
         showLuminaToast(context, '操作暂时无法发送：$error');
       }
       rethrow;
+    }
+  }
+
+  Future<void> _refreshAgentStatus() async {
+    final conversationId = _conversationId;
+    final requestId = _requestId();
+    final response = Completer<void>();
+    final subscription = ref.read(realtimeClientProvider).events.listen((
+      event,
+    ) {
+      if (event.type == 'error' && event.requestId == requestId) {
+        if (!response.isCompleted) {
+          response.completeError(StateError('设备状态暂时不可用'));
+        }
+        return;
+      }
+      final payload = event.payload;
+      if (payload['requestId'] == requestId &&
+          payload['conversationId'] == conversationId &&
+          const {
+            'session.status',
+            'session.update',
+          }.contains(resolveAgentEnvelope(event).kind) &&
+          !response.isCompleted) {
+        response.complete();
+      }
+    });
+    final timeout = Timer(const Duration(seconds: 15), () {
+      if (!response.isCompleted) {
+        response.completeError(TimeoutException('设备状态刷新超时'));
+      }
+    });
+    try {
+      await Future.wait<void>([
+        _sendAgentAction('session.status', requestId, const {}),
+        response.future,
+      ], eagerError: true);
+    } finally {
+      timeout.cancel();
+      await subscription.cancel();
     }
   }
 
@@ -991,10 +1513,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   String _quoteText(Message message) {
-    final text = message.content.trim();
-    final attachmentNames = _decodeAttachments(
-      message.attachmentsJson,
-    ).map((item) => item['name'] as String? ?? '附件').join('、');
+    final text = _readableMessage(message).trim();
+    final attachmentNames = _decodeAttachments(message.attachmentsJson)
+        .map((item) => item['name'] as String? ?? '附件')
+        .join('、');
     final quote = [
       if (text.isNotEmpty) text,
       if (attachmentNames.isNotEmpty) '附件：$attachmentNames（仅引用名称）',
@@ -1009,14 +1531,16 @@ class _ChatPageState extends ConsumerState<ChatPage>
         context: anchor,
         onReply: () => _replyTo(message),
         onCopy: () async {
-          await Clipboard.setData(ClipboardData(text: message.content));
+          await Clipboard.setData(
+            ClipboardData(text: _readableMessage(message)),
+          );
           if (mounted) showLuminaToast(context, '已复制');
         },
         onSelectText: () {
           unawaited(
             showLuminaSheet<void>(
               context: context,
-              builder: (_) => LuminaSelectableText(message.content),
+              builder: (_) => LuminaSelectableText(_readableMessage(message)),
             ),
           );
         },
@@ -1026,10 +1550,35 @@ class _ChatPageState extends ConsumerState<ChatPage>
         },
       );
 
-  void _jumpToQuotedMessage(String? id, List<Message> messages) {
+  Future<void> _jumpToQuotedMessage(
+    String? id,
+    List<Message> messages, {
+    bool waitForSync = false,
+  }) async {
+    if (id == null) return;
     final index = messages.indexWhere((item) => item.id == id);
     if (index < 0) {
-      showLuminaToast(context, '原消息暂不可用，引用快照仍保留。');
+      final conversationId = _conversationId;
+      final required = await widget.repository.messageWindowSizeFor(
+        conversationId,
+        id,
+      );
+      if (!mounted || _conversationId != conversationId) return;
+      if (required == null) {
+        if (waitForSync) {
+          _pendingNotificationMessageId = id;
+          return;
+        }
+        showLuminaToast(context, '原消息暂不可用，引用快照仍保留。');
+        return;
+      }
+      setState(() {
+        _followLatest = false;
+        _positioningLatest = false;
+        _historyStart = 0;
+        if (required > _historyLimit) _historyLimit = required;
+        _pendingNotificationMessageId = id;
+      });
       return;
     }
     FocusScope.of(context).unfocus();
@@ -1378,6 +1927,45 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
   }
 
+  Future<void> _sendComposer() async {
+    if (_importingShare) return;
+    final text = _controller.text;
+    if (!text.trimLeft().startsWith('/')) {
+      return _send();
+    }
+    if (_sending) return;
+    if (_attachments.isNotEmpty) {
+      showLuminaToast(context, '指令不附带文件，请先移除附件。');
+      return;
+    }
+    final conversationId = _conversationId;
+    final drafts = _drafts;
+    setState(() => _sending = true);
+    try {
+      final sent = await _sendHermesCommand(text.trim());
+      if (sent &&
+          mounted &&
+          _conversationId == conversationId &&
+          _drafts == drafts &&
+          _controller.text == text) {
+        _controller.clear();
+      }
+      if (sent && drafts != null) {
+        unawaited(() async {
+          try {
+            await (await drafts).clearSubmitted(conversationId, text);
+          } catch (_) {
+            if (mounted) showLuminaToast(context, '指令已发送，但旧草稿未能清理。');
+          }
+        }());
+      }
+    } on Object {
+      // The existing command sender reports the error; keep the draft to retry.
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
   Future<void> _send() async {
     if (_sending || (_controller.text.trim().isEmpty && _attachments.isEmpty)) {
       return;
@@ -1389,10 +1977,11 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
     if (!mounted) return;
     final content = _controller.text;
+    final draftStore = _drafts;
+    final sentConversationId = _conversationId;
     final attachments = List<AttachmentRecord>.from(_attachments);
     final reply = _replyMessage;
     final previousMessageId = _chatController.lastMessageId;
-    _controller.clear();
     setState(() {
       _attachments.clear();
       _replyMessage = null;
@@ -1416,11 +2005,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
     } catch (_) {
       if (mounted) {
         if (_chatController.lastMessageId == previousMessageId) {
-          _controller.text = content;
-          setState(() {
-            _attachments.addAll(attachments);
-            _replyMessage = reply;
-          });
+          if (_conversationId == sentConversationId) {
+            setState(() {
+              _attachments.addAll(attachments);
+              _replyMessage = reply;
+            });
+          }
           showLuminaToast(context, '消息未能保存，内容已保留，请重试。');
         } else {
           _failedMessages.add(_chatController.lastMessageId!);
@@ -1428,6 +2018,28 @@ class _ChatPageState extends ConsumerState<ChatPage>
         }
       }
     } finally {
+      if (draftStore != null &&
+          _chatController.lastMessageId != previousMessageId) {
+        if (mounted &&
+            _conversationId == sentConversationId &&
+            _drafts == draftStore &&
+            _controller.text == content) {
+          _controller.clear();
+        }
+        unawaited(() async {
+          try {
+            await (await draftStore).clearSubmitted(
+              sentConversationId,
+              content,
+              attachmentPaths: attachments.map(
+                (attachment) => attachment.localPath,
+              ),
+            );
+          } catch (_) {
+            if (mounted) showLuminaToast(context, '消息已保存，但旧草稿未能清理。');
+          }
+        }());
+      }
       if (mounted) setState(() => _sending = false);
     }
   }
@@ -1444,7 +2056,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
       _failedMessages.remove(messageId);
     });
     try {
-      await _chatController.retry(messageId);
+      await _chatController.retry(messageId, conversationId: _conversationId);
     } on Object catch (error) {
       if (mounted) {
         _failedMessages.add(messageId);
@@ -1455,38 +2067,14 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
   }
 
-  String? get _currentAction {
-    final runningTools = _agentEvents.tools.values.where(
-      (item) => item.status == 'running',
-    );
-    if (runningTools.isNotEmpty) {
-      return runningTools.last.detail ?? '正在${runningTools.last.name}';
-    }
-    if (_agentEvents.agentStatus != null &&
-        !const {
-          'completed',
-          'idle',
-          'done',
-          'error',
-          'stopped',
-        }.contains(_agentEvents.agentStatus)) {
-      return _agentEvents.agentStatusDetail ?? '正在整理你的请求';
-    }
-    if (_agentEvents.typing ||
-        _agentEvents.streams.values.any((stream) => !stream.complete)) {
-      return '正在组织回复';
-    }
-    return null;
-  }
-
   /// `true` = turn fully unprocessed; `false` = partial tool run; `null` = healthy.
   /// Matches Hermes `turn_failure_copy` boundary notices that close a failed turn.
   bool? _lastFailedTurn(List<Message>? items) {
     if (items == null || items.isEmpty) return null;
     for (final message in items.reversed) {
-      if (message.role != 'assistant') continue;
       final text = message.content.trim();
       if (text.isEmpty) continue;
+      if (message.role != 'assistant') return null;
       if (text.contains('Your request was not processed')) return true;
       if (text.contains('This turn did not complete')) return false;
       return null;
@@ -1500,6 +2088,24 @@ class _ChatPageState extends ConsumerState<ChatPage>
       builder: (context) => LuminaStack(
         mainAxisSize: MainAxisSize.min,
         children: [
+          LuminaListRow(
+            title: '新建设备对话',
+            leading: const LuminaIcon(LuminaIcons.devices),
+            onTap: () =>
+                Navigator.of(context, rootNavigator: true).pop('device'),
+          ),
+          LuminaListRow(
+            title: '工作区文件与终端',
+            leading: const LuminaIcon(LuminaIcons.folder),
+            onTap: () =>
+                Navigator.of(context, rootNavigator: true).pop('workspace'),
+          ),
+          LuminaListRow(
+            title: '复制会话记录',
+            leading: const LuminaIcon(LuminaIcons.file),
+            onTap: () =>
+                Navigator.of(context, rootNavigator: true).pop('transcript'),
+          ),
           LuminaListRow(
             title: '修改会话名称',
             leading: const LuminaIcon(LuminaIcons.settings),
@@ -1536,6 +2142,30 @@ class _ChatPageState extends ConsumerState<ChatPage>
       ),
     );
     if (!mounted) return;
+    if (action == 'workspace') {
+      if (!await _requireHermesTarget() || !mounted) return;
+      final client = WorkspaceClient(
+        realtime: ref.read(realtimeClientProvider),
+        config: ref.read(appConfigProvider),
+        conversationId: _conversationId,
+      );
+      await Navigator.of(context, rootNavigator: true).push<void>(
+        MaterialPageRoute(builder: (_) => WorkspacePage(client: client)),
+      );
+    }
+    if (action == 'transcript') {
+      final messages = await widget.repository
+          .watchMessages(_conversationId)
+          .first;
+      final text = messages
+          .map(
+            (message) =>
+                '${message.role == 'user' ? '我' : 'Hermes'} · ${message.createdAt}\n${_readableMessage(message)}',
+          )
+          .join('\n\n');
+      await Clipboard.setData(ClipboardData(text: text));
+      if (mounted) showLuminaToast(context, '会话记录已复制');
+    }
     if (action == 'rename') {
       final conversations = await widget.repository.watchConversations().first;
       final current = conversations.where((item) => item.id == _conversationId);
@@ -1543,6 +2173,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
         await _renameConversation(current.first);
       }
     }
+    if (action == 'device') await _chooseChatDevice();
     if (action == 'model') await _showModelSettings();
     if (action == 'command') await _showHermesCommand();
     if (action == 'delivery') await _showDeliveryControls();
@@ -1597,108 +2228,81 @@ class _ChatPageState extends ConsumerState<ChatPage>
           _closeConversation();
         }
       },
-      child: LuminaBranchTransition(
-        index: _showingConversation ? 1 : 0,
+      child: Column(
         children: [
-          _conversationList(),
-          _hasOpenedConversation
-              ? _conversationDetail(context)
-              : const SizedBox.shrink(),
+          if (_shareId != null) _sharePreview(),
+          Expanded(
+            child: LuminaBranchTransition(
+              index: _showingConversation ? 1 : 0,
+              children: [
+                _conversationList(),
+                _hasOpenedConversation
+                    ? _conversationDetail(context)
+                    : const SizedBox.shrink(),
+              ],
+            ),
+          ),
         ],
       ),
     ),
   );
 
+  Widget _sharePreview() {
+    final payload = ref.read(chatShareCoordinatorProvider)?.pending;
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        child: LuminaSurface(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _importingShare
+                          ? '正在加入草稿…'
+                          : _shareImportFailed
+                          ? '导入未完成，原分享已保留'
+                          : '选择会话接收分享',
+                    ),
+                    Text(
+                      [
+                        if (payload?.text.isNotEmpty == true) payload!.text,
+                        if (payload?.files.isNotEmpty == true)
+                          '${payload!.files.length} 个附件',
+                      ].join(' · '),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const Text('加入草稿后，由你确认发送'),
+                  ],
+                ),
+              ),
+              if (_shareImportFailed && !_importingShare)
+                LuminaButton(
+                  onPressed: _importSharedDraft,
+                  child: const Text('重试'),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _conversationDetail(BuildContext context) {
     final colors = LuminaTheme.of(context).colors;
     final messages = ref.watch(
-      chatMessagesProvider((
+      chatMessageWindowProvider((
         repository: widget.repository,
         conversationId: _conversationId,
+        limit: _historyLimit + 1,
       )),
     );
-    final action = _currentAction;
-    final pendingApproval = _agentEvents.approvals.values.any(
-      (item) => !_agentEvents.actions.contains(item.id),
-    );
     const headerHeight = 64.0;
-    final statusBanner = Builder(
-      builder: (context) {
-        final lastFailedTurn = _lastFailedTurn(messages.valueOrNull);
-        final banner =
-            action == null && !pendingApproval && lastFailedTurn == null
-            ? const SizedBox(width: double.infinity)
-            : Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                child: LuminaSurface(
-                  radius: 12,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  child: lastFailedTurn != null
-                      ? Row(
-                          children: [
-                            const LuminaIcon(LuminaIcons.warning, size: 16),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                lastFailedTurn
-                                    ? '本轮未处理完成，可重试或重置会话'
-                                    : '上一轮部分执行，请确认后再继续',
-                                style: LuminaTheme.of(
-                                  context,
-                                ).textTheme.bodySmall,
-                              ),
-                            ),
-                            LuminaButton(
-                              onPressed: _sending
-                                  ? null
-                                  : () => _runSessionAction('session.retry'),
-                              child: const Text('重试'),
-                            ),
-                            const SizedBox(width: 8),
-                            LuminaButton(
-                              primary: false,
-                              onPressed: _sending
-                                  ? null
-                                  : () => _runSessionAction('session.reset'),
-                              child: const Text('重置'),
-                            ),
-                          ],
-                        )
-                      : Row(
-                          children: [
-                            const LuminaIcon(LuminaIcons.sparkles, size: 16),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                pendingApproval ? '有一项操作等待你确认' : action!,
-                                style: LuminaTheme.of(
-                                  context,
-                                ).textTheme.bodySmall,
-                              ),
-                            ),
-                            if (!pendingApproval && action != null)
-                              LuminaButton(
-                                primary: false,
-                                onPressed: _sending
-                                    ? null
-                                    : () => _runSessionAction('session.stop'),
-                                child: const Text('停止'),
-                              ),
-                            if (pendingApproval)
-                              LuminaButton(
-                                onPressed: _presentApproval,
-                                child: const Text('查看'),
-                              ),
-                          ],
-                        ),
-                ),
-              );
-        return LuminaResize(child: banner);
-      },
-    );
     return ColoredBox(
       color: colors.paper,
       child: SafeArea(
@@ -1714,164 +2318,221 @@ class _ChatPageState extends ConsumerState<ChatPage>
                         text: '消息暂时无法加载，请稍后再试。',
                         card: false,
                       ),
-                      data: (items) {
+                      data: (window) {
+                        final hasEarlier = window.length > _historyLimit;
+                        final items = hasEarlier ? window.sublist(1) : window;
                         final notificationMessage =
                             _pendingNotificationMessageId;
-                        if (notificationMessage != null &&
-                            items.any(
-                              (item) => item.id == notificationMessage,
-                            )) {
+                        if (notificationMessage != null) {
                           _pendingNotificationMessageId = null;
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             if (mounted) {
-                              _jumpToQuotedMessage(notificationMessage, items);
+                              _jumpToQuotedMessage(
+                                notificationMessage,
+                                items,
+                                waitForSync: true,
+                              );
                             }
                           });
                         }
-                        // Identity + length + content hash detects a new final
+                        // Latest identity + content hash detects a new final
                         // message without building a full-body signature string.
                         final last = items.isEmpty ? null : items.last;
                         final signature =
-                            '$_conversationId:${items.length}:${last?.id ?? ''}:${last?.content.hashCode ?? 0}:${last?.attachmentsJson.hashCode ?? 0}';
+                            '$_conversationId:${last?.id ?? ''}:${last?.content.hashCode ?? 0}:${last?.attachmentsJson.hashCode ?? 0}';
                         if (_messageSignature != signature) {
                           _messageSignature = signature;
                           _contentArrived();
                         }
-                        return items.isEmpty &&
-                                _agentEvents.streams.isEmpty &&
-                                !_agentEvents.typing
+                        return items.isEmpty
                             ? ListView(
                                 padding: const EdgeInsets.only(
                                   top: headerHeight + 12,
                                 ),
                                 children: [
-                                  statusBanner,
-                                  const LuminaEmptyState(
-                                    text: '从一句话开始。\n记录想法，或一起安排今天。',
-                                    card: false,
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 20,
+                                    ),
+                                    child: AgentEventsPanel(
+                                      key: ValueKey(
+                                        'agent-events-$_conversationId',
+                                      ),
+                                      store: _agentEvents,
+                                      showActivity: false,
+                                      showClarifications: false,
+                                      onRefresh: _chatDeviceId == null
+                                          ? null
+                                          : _refreshAgentStatus,
+                                      onPromptSelected: _fillPrompt,
+                                      onAction: _sendAgentAction,
+                                    ),
                                   ),
+                                  if (_agentEvents.streams.isEmpty &&
+                                      !_agentEvents.typing)
+                                    const LuminaEmptyState(
+                                      text: '从一句话开始。\n记录想法，或一起安排今天。',
+                                      card: false,
+                                    ),
                                 ],
                               )
-                            : NotificationListener<ScrollNotification>(
+                            : NotificationListener<ScrollMetricsNotification>(
                                 onNotification: (notification) {
-                                  if (notification.depth != 0) return false;
-                                  if (notification is ScrollStartNotification &&
-                                      notification.dragDetails != null) {
-                                    _userDragging = true;
-                                  } else if (notification
-                                      is ScrollEndNotification) {
-                                    if (_userDragging) {
-                                      _userDragging = false;
-                                      _syncFollowFromPosition();
-                                      if (_followLatest) _queueLatest();
-                                    }
-                                  } else if (notification
-                                          is ScrollUpdateNotification &&
-                                      _userDragging) {
-                                    _onScroll();
-                                  } else if (notification
-                                          is ScrollMetricsNotification &&
-                                      !_userDragging) {
-                                    if (_followLatest) _queueLatest();
+                                  if (notification.depth == 0 &&
+                                      !_userDragging &&
+                                      _followLatest) {
+                                    _queueLatest();
                                   }
                                   return false;
                                 },
-                                child: IgnorePointer(
-                                  // Only the first paint is hidden while we jump to
-                                  // the newest bubble; never trap the gesture.
-                                  ignoring:
-                                      _positioningLatest && _alignRetries < 3,
-                                  child: Opacity(
-                                    opacity: _positioningLatest ? 0 : 1,
-                                    child: ListView.builder(
-                                      key: ValueKey(_conversationId),
-                                      controller: _scrollController,
-                                      padding: const EdgeInsets.fromLTRB(
-                                        20,
-                                        headerHeight + 12,
-                                        20,
-                                        20,
-                                      ),
-                                      itemCount:
-                                          items.length -
-                                          _historyStart.clamp(0, items.length) +
-                                          3 +
-                                          (_historyStart > 0 ? 1 : 0),
-                                      itemBuilder: (context, index) {
-                                        if (index == 0) return statusBanner;
-                                        index -= 1;
-                                        final start = _historyStart.clamp(
-                                          0,
-                                          items.length,
-                                        );
-                                        if (start > 0 && index == 0) {
-                                          return LuminaButton(
-                                            primary: false,
-                                            onPressed: () => setState(() {
-                                              _historyStart = (start - 30)
-                                                  .clamp(0, items.length);
-                                            }),
-                                            child: const Text('查看更早消息'),
+                                child: NotificationListener<ScrollNotification>(
+                                  onNotification: (notification) {
+                                    if (notification.depth != 0) return false;
+                                    if (notification
+                                            is ScrollStartNotification &&
+                                        notification.dragDetails != null) {
+                                      _userDragging = true;
+                                    } else if (notification
+                                        is ScrollEndNotification) {
+                                      if (_userDragging) {
+                                        _userDragging = false;
+                                        _syncFollowFromPosition();
+                                        if (_followLatest) _queueLatest();
+                                      }
+                                    } else if (notification
+                                            is ScrollUpdateNotification &&
+                                        _userDragging) {
+                                      _onScroll();
+                                    }
+                                    return false;
+                                  },
+                                  child: IgnorePointer(
+                                    // Only the first paint is hidden while we jump to
+                                    // the newest bubble; never trap the gesture.
+                                    ignoring:
+                                        _positioningLatest && _alignRetries < 3,
+                                    child: Opacity(
+                                      opacity: _positioningLatest ? 0 : 1,
+                                      child: ListView.builder(
+                                        key: ValueKey(_conversationId),
+                                        controller: _scrollController,
+                                        padding: const EdgeInsets.fromLTRB(
+                                          20,
+                                          headerHeight + 12,
+                                          20,
+                                          20,
+                                        ),
+                                        itemCount:
+                                            items.length -
+                                            _historyStart.clamp(
+                                              0,
+                                              items.length,
+                                            ) +
+                                            2 +
+                                            (hasEarlier || _historyStart > 0
+                                                ? 1
+                                                : 0),
+                                        itemBuilder: (context, index) {
+                                          final start = _historyStart.clamp(
+                                            0,
+                                            items.length,
                                           );
-                                        }
-                                        final messageIndex =
-                                            index + start - (start > 0 ? 1 : 0);
-                                        if (messageIndex < items.length) {
-                                          final message = items[messageIndex];
-                                          return Builder(
-                                            builder: (messageContext) =>
-                                                _ReplyGesture(
-                                                  onReply: () =>
-                                                      _replyTo(message),
-                                                  onLongPress: () =>
-                                                      _messageOptions(
-                                                        messageContext,
-                                                        message,
-                                                      ),
-                                                  child: _MessageBubble(
-                                                    key: ValueKey(message.id),
-                                                    message: message,
-                                                    highlighted:
-                                                        _highlightMessageId ==
-                                                        message.id,
-                                                    onQuoteTap: () =>
-                                                        _jumpToQuotedMessage(
-                                                          message
-                                                              .replyToMessageId,
-                                                          items,
+                                          final showEarlier =
+                                              hasEarlier || start > 0;
+                                          if (showEarlier && index == 0) {
+                                            return LuminaButton(
+                                              primary: false,
+                                              onPressed: () => setState(() {
+                                                _followLatest = false;
+                                                _positioningLatest = false;
+                                                if (start > 0) {
+                                                  _historyStart = (start - 30)
+                                                      .clamp(0, items.length);
+                                                } else {
+                                                  _historyLimit += 30;
+                                                }
+                                              }),
+                                              child: const Text('查看更早消息'),
+                                            );
+                                          }
+                                          final messageIndex =
+                                              index +
+                                              start -
+                                              (showEarlier ? 1 : 0);
+                                          if (messageIndex < items.length) {
+                                            final message = items[messageIndex];
+                                            return Builder(
+                                              builder: (messageContext) =>
+                                                  _ReplyGesture(
+                                                    onReply: () =>
+                                                        _replyTo(message),
+                                                    onLongPress: () =>
+                                                        _messageOptions(
+                                                          messageContext,
+                                                          message,
                                                         ),
-                                                    pluginReceived: _agentEvents
-                                                        .receivedMessageIds
-                                                        .contains(message.id),
-                                                    failed: _failedMessages
-                                                        .contains(message.id),
-                                                    sending:
-                                                        _sending &&
-                                                        _chatController
-                                                                .lastMessageId ==
-                                                            message.id,
-                                                    onRetry:
-                                                        message.syncStatus ==
-                                                            'pendingCreate'
-                                                        ? () => _retryMessage(
-                                                            message.id,
-                                                          )
-                                                        : null,
+                                                    child: _MessageBubble(
+                                                      key: ValueKey(message.id),
+                                                      message: message,
+                                                      onPromptSelected:
+                                                          _fillPrompt,
+                                                      highlighted:
+                                                          _highlightMessageId ==
+                                                          message.id,
+                                                      onQuoteTap: () =>
+                                                          _jumpToQuotedMessage(
+                                                            message
+                                                                .replyToMessageId,
+                                                            items,
+                                                          ),
+                                                      pluginReceived:
+                                                          _agentEvents
+                                                              .receivedMessageIds
+                                                              .contains(
+                                                                message.id,
+                                                              ),
+                                                      failed: _failedMessages
+                                                          .contains(message.id),
+                                                      sending:
+                                                          _sending &&
+                                                          _chatController
+                                                                  .lastMessageId ==
+                                                              message.id,
+                                                      onRetry:
+                                                          message.syncStatus ==
+                                                              'pendingCreate'
+                                                          ? () => _retryMessage(
+                                                              message.id,
+                                                            )
+                                                          : null,
+                                                    ),
                                                   ),
-                                                ),
+                                            );
+                                          }
+                                          if (messageIndex == items.length) {
+                                            return AgentEventsPanel(
+                                              store: _agentEvents,
+                                              persistedMessageIds: {
+                                                for (final message in items)
+                                                  if (message.role ==
+                                                      'assistant')
+                                                    message.id,
+                                              },
+                                              showActivity: false,
+                                              showClarifications: false,
+                                              onRefresh: _chatDeviceId == null
+                                                  ? null
+                                                  : _refreshAgentStatus,
+                                              onPromptSelected: _fillPrompt,
+                                              onAction: _sendAgentAction,
+                                            );
+                                          }
+                                          return SizedBox(
+                                            key: _latestMessageAnchor,
+                                            height: 1,
                                           );
-                                        }
-                                        if (messageIndex == items.length) {
-                                          return AgentEventsPanel(
-                                            store: _agentEvents,
-                                            onAction: _sendAgentAction,
-                                          );
-                                        }
-                                        return SizedBox(
-                                          key: _latestMessageAnchor,
-                                          height: 1,
-                                        );
-                                      },
+                                        },
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -1885,21 +2546,25 @@ class _ChatPageState extends ConsumerState<ChatPage>
                     right: 0,
                     height: headerHeight,
                     child: LuminaTopBar(
-                      title: _chatDeviceId == null
-                          ? _conversationTitle
-                          : '$_conversationTitle · $_chatDeviceLabel',
+                      title: _conversationTitle,
                       leading: LuminaIconButton(
                         onPressed: _closeConversation,
                         icon: const LuminaIcon(LuminaIcons.back),
                         tooltip: '返回会话列表',
                       ),
                       actions: [
-                        LuminaIconButton(
-                          onPressed: _startingDeviceChat || _sending
+                        ChatHeaderStatus(
+                          key: ValueKey('header-status-$_conversationId'),
+                          store: _agentEvents,
+                          agents: ref.read(agentChatServiceProvider),
+                          deviceId: _chatDeviceId,
+                          sending: _sending,
+                          lastTurnFailed:
+                              _lastFailedTurn(messages.valueOrNull) != null,
+                          onRefresh: _chatDeviceId == null
                               ? null
-                              : _chooseChatDevice,
-                          icon: const LuminaIcon(LuminaIcons.devices),
-                          tooltip: _chatDeviceLabel,
+                              : _refreshAgentStatus,
+                          onSessionAction: _runSessionAction,
                         ),
                         LuminaIconButton(
                           onPressed: _showChatOptions,
@@ -1912,17 +2577,27 @@ class _ChatPageState extends ConsumerState<ChatPage>
                 ],
               ),
             ),
-            if (_hasNewMessages)
+            if (_hasNewMessages || _highlightMessageId != null)
               LuminaButton(
                 onPressed: () {
                   setState(() {
+                    _historyStart = 0;
+                    _highlightMessageId = null;
                     _followLatest = true;
                     _hasNewMessages = false;
                   });
                   _queueLatest();
                 },
-                child: const Text('新消息 ↓'),
+                child: Text(_hasNewMessages ? '新消息 ↓' : '回到最新 ↓'),
               ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: AgentRequestsPanel(
+                key: ValueKey('requests-$_conversationId'),
+                store: _agentEvents,
+                onAction: _sendAgentAction,
+              ),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               child: LuminaSurface(
@@ -1971,6 +2646,19 @@ class _ChatPageState extends ConsumerState<ChatPage>
                           ],
                         ),
                       ),
+                    SlashCommandSuggestions(
+                      controller: _controller,
+                      enabled: !_sending,
+                      onSelected: (shortcut) {
+                        _controller.value = TextEditingValue(
+                          text: shortcut.command,
+                          selection: TextSelection.collapsed(
+                            offset: shortcut.command.length,
+                          ),
+                        );
+                        _composerFocus.requestFocus();
+                      },
+                    ),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
@@ -1981,8 +2669,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
                             minLines: 1,
                             maxLines: 4,
                             hintText: '写消息…',
+                            readOnly: _importingShare,
                             textInputAction: TextInputAction.send,
-                            onSubmitted: (_) => _send(),
+                            onSubmitted: (_) => _sendComposer(),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -1993,7 +2682,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
                         ),
                         const SizedBox(width: 8),
                         LuminaIconButton(
-                          onPressed: _sending ? null : _send,
+                          onPressed: _sending || _importingShare
+                              ? null
+                              : _sendComposer,
                           icon: _sending
                               ? const LuminaProgress()
                               : const LuminaIcon(LuminaIcons.send),
@@ -2072,10 +2763,15 @@ class _ReplyGestureState extends State<_ReplyGesture> {
   );
 }
 
+String _readableMessage(Message message) => message.role == 'assistant'
+    ? responseUiPlainText(message.content)
+    : message.content;
+
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     super.key,
     required this.message,
+    this.onPromptSelected,
     this.onRetry,
     this.onQuoteTap,
     this.highlighted = false,
@@ -2084,6 +2780,7 @@ class _MessageBubble extends StatelessWidget {
     this.sending = false,
   });
   final Message message;
+  final ValueChanged<String>? onPromptSelected;
   final VoidCallback? onRetry;
   final VoidCallback? onQuoteTap;
   final bool highlighted;
@@ -2124,9 +2821,8 @@ class _MessageBubble extends StatelessWidget {
         children: [
           Text(
             '${_formatMessageTime(message.createdAt)}${sending && pending ? '' : '  $status'}',
-            style: LuminaTheme.of(
-              context,
-            ).textTheme.labelSmall.copyWith(color: colors.muted, fontSize: 11),
+            style: LuminaTheme.of(context).textTheme.labelSmall
+                .copyWith(color: colors.muted, fontSize: 11),
           ),
           if (sending && pending)
             const Padding(
@@ -2138,79 +2834,84 @@ class _MessageBubble extends StatelessWidget {
     );
     final inlineMetadata =
         isUser && !pending && attachments.isEmpty && message.content.isNotEmpty;
-    // Isolate each bubble's paint so a long thread's scroll/repaint stays local.
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (message.replyQuote case final quote?)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: LuminaQuotePreview(
+              title: message.replyRole == 'user' ? '自己' : 'Hermes',
+              text: quote,
+              onTap: onQuoteTap,
+            ),
+          ),
+        if (message.content.isNotEmpty)
+          inlineMetadata
+              ? Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.end,
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [Text(message.content), metadata],
+                )
+              : isUser
+              ? Text(message.content)
+              : SafeMarkdownView(
+                  source: message.content,
+                  allowResponseUi: message.role == 'assistant',
+                  onPromptSelected: onPromptSelected,
+                ),
+        for (final attachment in attachments)
+          ChatAttachmentTile(attachment: attachment),
+        if (!inlineMetadata) ...[
+          const SizedBox(height: 4),
+          Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              metadata,
+              if (isUser && pending) ...[
+                Semantics(
+                  button: true,
+                  label: '重试发送',
+                  child: LuminaTap(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: sending ? null : onRetry,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 10,
+                      ),
+                      child: Text(
+                        failed ? '重试' : '待发送 · 重试',
+                        style: LuminaTheme.of(context).textTheme.labelSmall,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ],
+    );
+    // Keep the assistant's reading surface open while isolating each message's paint.
     return RepaintBoundary(
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: highlighted ? colors.accentSoft : const Color(0x00000000),
           borderRadius: BorderRadius.circular(16),
         ),
-        child: LuminaChatBubble(
-          isUser: isUser,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (message.replyQuote case final quote?)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: LuminaQuotePreview(
-                    title: message.replyRole == 'user' ? '自己' : 'Hermes',
-                    text: quote,
-                    onTap: onQuoteTap,
-                  ),
-                ),
-              if (message.content.isNotEmpty)
-                inlineMetadata
-                    ? Wrap(
-                        alignment: WrapAlignment.end,
-                        crossAxisAlignment: WrapCrossAlignment.end,
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: [Text(message.content), metadata],
-                      )
-                    : isUser
-                    ? Text(message.content)
-                    : SafeMarkdownView(source: message.content),
-              for (final attachment in attachments)
-                _AttachmentPreview(attachment: attachment),
-              if (!inlineMetadata) ...[
-                const SizedBox(height: 4),
-                Wrap(
-                  alignment: WrapAlignment.end,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: [
-                    metadata,
-                    if (isUser && pending) ...[
-                      Semantics(
-                        button: true,
-                        label: '重试发送',
-                        child: LuminaTap(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: sending ? null : onRetry,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 10,
-                            ),
-                            child: Text(
-                              failed ? '重试' : '待发送 · 重试',
-                              style: LuminaTheme.of(
-                                context,
-                              ).textTheme.labelSmall,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ],
-          ),
-        ),
+        child: isUser
+            ? LuminaChatBubble(isUser: true, child: content)
+            : Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: SizedBox(width: double.infinity, child: content),
+              ),
       ),
     );
   }
@@ -2232,55 +2933,6 @@ List<Map<String, dynamic>> _decodeAttachments(String value) {
         .toList();
   } on Object {
     return const [];
-  }
-}
-
-class _AttachmentPreview extends StatelessWidget {
-  const _AttachmentPreview({required this.attachment});
-
-  final Map<String, dynamic> attachment;
-
-  @override
-  Widget build(BuildContext context) {
-    final name = attachment['name'] as String? ?? '附件';
-    final mimeType = attachment['mimeType'] as String? ?? '';
-    final url = attachment['downloadUrl'] as String?;
-    final isImage = mimeType.startsWith('image/') && url != null;
-    return Container(
-      margin: const EdgeInsets.only(top: LuminaChatMetrics.attachmentTopGap),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: LuminaTheme.of(context).colors.accentSoft,
-        borderRadius: BorderRadius.circular(LuminaRadius.attachment),
-      ),
-      child: isImage
-          ? Image.network(
-              url,
-              width: LuminaChatMetrics.imageWidth,
-              height: LuminaChatMetrics.imageHeight,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => _fileLabel(name, mimeType),
-            )
-          : _fileLabel(name, mimeType),
-    );
-  }
-
-  Widget _fileLabel(String name, String mimeType) {
-    return Padding(
-      padding: const EdgeInsets.all(LuminaSpacing.item),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          LuminaIcon(
-            mimeType.startsWith('image/')
-                ? LuminaIcons.image
-                : LuminaIcons.file,
-          ),
-          const SizedBox(width: LuminaSpacing.controlGap),
-          Flexible(child: Text(name, overflow: TextOverflow.ellipsis)),
-        ],
-      ),
-    );
   }
 }
 

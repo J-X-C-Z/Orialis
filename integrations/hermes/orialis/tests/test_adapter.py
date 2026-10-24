@@ -2,9 +2,11 @@ import asyncio
 import os
 import tempfile
 import json
+import base64
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
+from pathlib import Path
 
 from gateway.config import Platform
 import websockets
@@ -16,6 +18,104 @@ from ..conversation import chat_id_for_conversation, conversation_id_for_chat_id
 
 
 class AdapterTests(unittest.TestCase):
+    def test_full_size_workspace_upload_crosses_real_websocket(self):
+        Platform._add_pseudo_member("orialis")
+        with tempfile.TemporaryDirectory() as directory:
+            raw = b"x" * (1024 * 1024)
+
+            async def scenario():
+                complete = asyncio.get_running_loop().create_future()
+
+                async def fake_server(socket):
+                    await socket.recv()
+                    await socket.send(json.dumps({"version":1,"type":"hello_ack"}))
+                    await socket.send(json.dumps({"version":1,"type":"workspace.request","request_id":"large-file",
+                        "conversation_id":"chat-1","payload":{"op":"upload","workspaceId":"w0","path":"full.bin",
+                        "base64":base64.b64encode(raw).decode()}}))
+                    while True:
+                        message = json.loads(await socket.recv())
+                        if message["type"] == "workspace.response":
+                            complete.set_result(message)
+                            return
+
+                async with websockets.serve(fake_server, "127.0.0.1", 0) as server:
+                    port = server.sockets[0].getsockname()[1]
+                    adapter = OrialisAdapter(SimpleNamespace(extra={"server_url":f"ws://127.0.0.1:{port}",
+                        "device_id":"JXCZ_TEST_Hermes","workspaces":[{"path":directory}]}))
+                    try:
+                        self.assertTrue(await adapter.connect())
+                        response = await asyncio.wait_for(complete, timeout=10)
+                        self.assertTrue(response["payload"]["ok"], response)
+                        self.assertEqual(response["payload"]["data"]["size"], len(raw))
+                    finally:
+                        await adapter.disconnect()
+
+            asyncio.run(scenario())
+            self.assertEqual(Path(directory, "full.bin").read_bytes(), raw)
+
+    def test_actual_server_flat_resolves_keep_conversation_scope_and_ack_real_resolver(self):
+        Platform._add_pseudo_member("orialis")
+        adapter = OrialisAdapter(SimpleNamespace(extra={}))
+        adapter._ws = object()
+        sent = []
+
+        async def send_wire(frame):
+            sent.append(frame)
+
+        adapter._send_wire = send_wire
+        fixtures = Path(__file__).parent / "fixtures"
+        for kind in ("approval", "clarify"):
+            adapter._pending_interactions[f"{kind}-1"] = {"kind": kind, "session_key": "hermes-session",
+                "conversation_id": "chat-1", "expires_at": 10**20}
+        with patch("tools.approval.resolve_gateway_approval", return_value=True) as approval, \
+             patch("tools.clarify_gateway.resolve_gateway_clarify", return_value=True) as clarify:
+            for kind in ("approval", "clarify"):
+                frame = (fixtures / f"server-{kind}-resolve-v1.json").read_text()
+                asyncio.run(adapter._handle_wire(frame))
+        approval.assert_called_once_with("hermes-session", "once", reason=None, request_id="approval-1")
+        clarify.assert_called_once_with("clarify-1", "Chosen answer")
+        self.assertEqual([(f["type"], f.get("status")) for f in sent], [("message.ack", "resolved")] * 2)
+
+        adapter._pending_interactions["approval-2"] = {"kind": "approval", "session_key": "hermes-session",
+            "conversation_id": "chat-1", "expires_at": 10**20}
+        wrong = json.loads((fixtures / "server-approval-resolve-v1.json").read_text())
+        wrong.update(request_id="approval-2", session_id="other-chat")
+        with patch("tools.approval.resolve_gateway_approval") as approval:
+            asyncio.run(adapter._handle_wire(json.dumps(wrong)))
+        approval.assert_not_called()
+        self.assertEqual(sent[-1]["code"], "INTERACTION_SCOPE_MISMATCH")
+        self.assertIn("approval-2", adapter._pending_interactions)
+        wrong["session_id"] = "chat-1"
+        with patch("tools.approval.resolve_gateway_approval", side_effect=[False, True]) as approval:
+            asyncio.run(adapter._handle_wire(json.dumps(wrong)))
+            self.assertEqual(sent[-1]["type"], "error")
+            self.assertIn("approval-2", adapter._pending_interactions)
+            asyncio.run(adapter._handle_wire(json.dumps(wrong)))
+        self.assertEqual(approval.call_count, 2)
+        self.assertEqual(sent[-1]["status"], "resolved")
+
+    def test_workspace_requests_execute_without_prompting_agent(self):
+        Platform._add_pseudo_member("orialis")
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = OrialisAdapter(SimpleNamespace(extra={"workspaces": [{"path": directory}]}))
+            sent = []
+
+            async def send_wire(message):
+                sent.append(message)
+
+            async def must_not_prompt(event):
+                self.fail("workspace requests must never prompt a model")
+
+            adapter._send_wire = send_wire
+            adapter.handle_message = must_not_prompt
+            asyncio.run(adapter._handle_wire({"version": 1, "type": "workspace.request", "request_id": "req-1",
+                "conversation_id": "chat-1", "payload": {"op": "capabilities"}}))
+            self.assertEqual(sent[0]["type"], "workspace.response")
+            self.assertEqual(sent[0]["request_id"], "req-1")
+            self.assertEqual(sent[0]["conversation_id"], "chat-1")
+            self.assertTrue(sent[0]["payload"]["ok"])
+            self.assertFalse(sent[0]["payload"]["data"]["workspaces"][0]["terminalEnabled"])
+
     def setUp(self):
         home = tempfile.TemporaryDirectory()
         cache_type = adapter_module.AttachmentCache

@@ -83,6 +83,7 @@ class WearAccountSnapshotSource {
   static const _fields = {
     'tasks': [
       'id',
+        'version',
       'title',
       'notes',
       'due',

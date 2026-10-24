@@ -1,11 +1,12 @@
 {
   "name": "orialis-vela-w0",
-  "version": "1.0.0",
+  "version": "1.0.6",
   "private": true,
   "description": "Orialis Vela glance UI and W0 interconnect diagnostics",
   "scripts": {
-    "build": "aiot build",
-    "start": "aiot start --watch",
+    "setup:simulator": "node scripts/setup-simulator.js",
+    "build": "aiot build --enable-jsc",
+    "start": "aiot start --watch --enable-jsc",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {

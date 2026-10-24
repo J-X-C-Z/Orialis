@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 import '../config/app_config.dart';
@@ -98,6 +100,25 @@ class OrialisApiClient {
   final String deviceId;
   final AppConfig _config;
   final Dio _dio;
+
+  Future<Uint8List> downloadAttachment(String id) async {
+    if (id.isEmpty) throw ArgumentError('Attachment ID is required');
+    final cancel = CancelToken();
+    final response = await _dio.get<List<int>>(
+      '/api/v1/attachments/${Uri.encodeComponent(id)}/download',
+      options: Options(
+        responseType: ResponseType.bytes,
+        followRedirects: false,
+      ),
+      cancelToken: cancel,
+      onReceiveProgress: (received, total) {
+        if (received > 20 * 1024 * 1024 || total > 20 * 1024 * 1024) {
+          cancel.cancel('附件超过 20 MiB');
+        }
+      },
+    );
+    return Uint8List.fromList(response.data ?? const []);
+  }
 
   Future<SessionResponse> register({
     required String username,

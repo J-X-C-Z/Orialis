@@ -1,0 +1,17 @@
+{
+  "name": "orialis-dsh-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bridge DeepSeek Harness ACP into the Orialis Agent Gateway",
+  "scripts": {
+    "start": "node bridge.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

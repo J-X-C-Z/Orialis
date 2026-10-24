@@ -12,6 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
+from .response_ui import RESPONSE_UI
 
 logger = logging.getLogger(__name__)
 CAPABILITIES_PATH = "/api/v1/capabilities"
@@ -278,10 +279,12 @@ async def handle_create_schedule(args, **_kwargs):
 async def handle_capabilities(args, **_kwargs):
     del args; server=os.getenv("ORIALIS_SERVER_URL","").strip()
     discovery=await asyncio.to_thread(_fetch_server_capabilities,server) if server else {"ok":False,"error":"ORIALIS_SERVER_URL is not configured"}
-    result={"ok":True,"plugin":{"name":"orialis-hermes","version":"0.2.0","operations":list(PLUGIN_OPERATIONS),"tools":TOOL_NAMES,"domain_contracts":DOMAIN_CONTRACTS},"server":{"url":_display_server_url(server),"discovery":discovery}}
+    result={"ok":True,"plugin":{"name":"orialis-hermes","version":"0.2.0","operations":list(PLUGIN_OPERATIONS),"tools":TOOL_NAMES,"domain_contracts":DOMAIN_CONTRACTS,"response_ui":RESPONSE_UI},"server":{"url":_display_server_url(server),"discovery":discovery}}
     if discovery.get("ok"):
         payload=discovery.get("payload", discovery.get("data", {}))
         result["server"]["capabilities"]=payload.get("capabilities",[]); result["server"]["api_version"]=payload.get("api_version")
+        if "response_ui" in payload:
+            result["server"]["response_ui"] = payload["response_ui"]
     return json.dumps(result,ensure_ascii=False,separators=(",",":"))
 
 async def _tool(args, method, path, **kwargs): return json.dumps(await _handle_request(args,method,path,**kwargs),ensure_ascii=False,separators=(",",":"))

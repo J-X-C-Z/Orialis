@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <application
         android:label="${appLabel}"
         android:name="${applicationName}"
@@ -33,7 +35,49 @@
             </intent-filter>
         </activity>
         <meta-data android:name="com.xiaomi.xms.APP_ID" android:value="${xiaomiAppId}" />
+        <service android:name=".MemoryProjectionService" android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+        <service android:name=".MemoryTileService" android:exported="true"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:icon="@drawable/ic_memory" android:label="@string/memory_tile_label">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
+        </service>
+        <activity android:name=".MemoryCaptureActivity" android:exported="false"
+            android:theme="@style/MemoryCaptureTheme" android:taskAffinity=""
+            android:configChanges="orientation|screenSize"
+            android:excludeFromRecents="true" />
+        <activity android:name=".MemoryShareActivity" android:exported="true"
+            android:label="@string/memory_share_label" android:theme="@style/MemoryCaptureTheme"
+            android:excludeFromRecents="true" android:taskAffinity="">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
         <meta-data android:name="com.xiaomi.xms.BUILD_TYPE_DEBUG" android:value="${xiaomiDebugBuild}" />
+        <activity android:name=".ChatShareActivity" android:exported="true"
+            android:label="@string/chat_share_label" android:theme="@style/MemoryCaptureTheme"
+            android:excludeFromRecents="true" android:taskAffinity="">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
         <meta-data android:name="top.jxcz.orialis.FOCUS_BUSINESS" android:value="${xiaomiFocusBusiness}" />
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <receiver android:name=".SystemRestoreReceiver" android:exported="true">
