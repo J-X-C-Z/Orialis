@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync curated Hermes profile files
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=REPLACE_WITH_LOCAL_USER
+UMask=0077
+ExecStart=/usr/bin/python3 /absolute/path/to/profile_sync.py sync --config /absolute/path/to/private/config.json

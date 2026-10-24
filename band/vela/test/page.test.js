@@ -75,3 +75,18 @@ test('demo never sends task actions; destroyed detail ignores late phone replies
   assert.equal(calls, 0); assert.match(demo.page.taskMutationStatus, /演示/)
   demo.page.onDestroy()
 })
+
+test('opening another page renders the shared cache immediately', () => {
+  const { store, page } = harness()
+  store.acceptSnapshot(snapshot(3, 'cached task'), { restored: true })
+  page.onDestroy()
+  const reopened = pages.createPage('tasks')
+  Object.assign(reopened, reopened.data, { $app: { $def: { wearStore: store, wearTransport: {} } } })
+  reopened.onInit()
+  assert.equal(reopened.vm.cacheLoading, false)
+  assert.equal(reopened.vm.tasks[0].title, 'cached task')
+  assert.equal(reopened.vm.stale, true)
+  reopened.onShow()
+  assert.equal(reopened.vm.tasks[0].title, 'cached task')
+  reopened.onDestroy()
+})

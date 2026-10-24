@@ -23,7 +23,6 @@ import '../../core/database/app_database.dart';
 import '../../core/config/app_config.dart';
 import '../../core/attachments/attachment_bridge.dart';
 import '../../core/realtime/mobile_realtime_client.dart';
-import '../../core/sync/sync_engine.dart';
 import '../../features/chat/data/chat_repository.dart';
 import '../../features/chat/data/chat_drafts.dart';
 import '../../features/chat/data/recent_hermes_models.dart';
@@ -36,8 +35,11 @@ import '../../features/chat/application/chat_share_coordinator.dart';
 import '../../features/chat/domain/agent_event_state.dart';
 import '../../features/chat/domain/hermes_shortcuts.dart';
 import '../../features/chat/domain/session_summary.dart';
+import '../../features/chat/domain/chat_transcript.dart';
 import '../../features/chat/presentation/agent_event_cards.dart';
 import '../../features/chat/presentation/chat_header_status.dart';
+import '../../features/chat/presentation/chat_device_picker.dart';
+import '../../features/chat/presentation/chat_thinking_indicator.dart';
 import '../../features/chat/presentation/message_action_panel.dart';
 import '../../features/chat/presentation/safe_markdown.dart';
 import '../../features/chat/presentation/slash_command_suggestions.dart';
@@ -517,15 +519,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
     _draftConfig.addIdentityCommittedListener(_openDraftIdentity);
     _controller.addListener(_draftChanged);
     unawaited(_openDraftIdentity());
-    _highlightMessageId = widget.messageId;
     _chatController = ChatController(
       repository: widget.repository,
-      flush: () async {
-        final state = await ref.read(syncCoordinatorProvider).requestSync();
-        if (state == SyncState.error || state == SyncState.authRequired) {
-          throw StateError('消息未能上传');
-        }
-      },
+      flush: ref.read(syncCoordinatorProvider).flushMessage,
     );
     final realtime = ref.read(realtimeClientProvider);
     _realtimeSubscription = realtime.events.listen((event) {
@@ -681,17 +677,6 @@ class _ChatPageState extends ConsumerState<ChatPage>
           unawaited(_notificationConversationSubscription?.cancel());
           _notificationConversationSubscription = null;
           await _openConversation(conversation);
-          if (!mounted ||
-              widget.conversationId != conversationId ||
-              widget.messageId != messageId) {
-            return;
-          }
-          setState(() {
-            _highlightMessageId = messageId;
-            _pendingNotificationMessageId = messageId;
-            _followLatest = false;
-            _positioningLatest = false;
-          });
         });
   }
 
@@ -744,60 +729,26 @@ class _ChatPageState extends ConsumerState<ChatPage>
     setState(() => _startingDeviceChat = true);
     try {
       final service = ref.read(agentChatServiceProvider);
-      var devices = await service.devices();
-      if (!mounted) return;
       final device = await showLuminaSheet<ChatAgentDevice>(
         context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, updateDevices) => SafeArea(
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('与设备对话'),
-                    const SizedBox(height: 12),
-                    if (devices.isEmpty) const Text('请先连接已配置的设备。'),
-                    for (final device in devices)
-                      LuminaListRow(
-                        title: device.label,
-                        subtitle:
-                            '${device.online ? "在线" : "离线"} · ${service.agentLabel(device.id)}',
-                        trailing: LuminaIconButton(
-                          tooltip: '修改设备名称',
-                          icon: const LuminaIcon(LuminaIcons.settings),
-                          onPressed: () async {
-                            final name = await _askChatName(
-                              title: '修改设备名称',
-                              initial: device.label,
-                              hint: '设备名称（仅本机）',
-                            );
-                            if (name == null || !mounted) return;
-                            try {
-                              await service.renameDevice(device.id, name);
-                              devices = await service.devices();
-                              if (context.mounted) updateDevices(() {});
-                              if (mounted) setState(() {});
-                            } catch (_) {
-                              if (mounted) {
-                                showLuminaToast(this.context, '设备名称未能保存，请重试。');
-                              }
-                            }
-                          },
-                        ),
-                        onTap: device.online
-                            ? () => Navigator.of(
-                                context,
-                                rootNavigator: true,
-                              ).pop(device)
-                            : null,
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+        builder: (context) => ChatDevicePicker(
+          agents: service,
+          onRename: (device) async {
+            final name = await _askChatName(
+              title: '修改设备名称',
+              initial: device.label,
+              hint: '设备名称（仅本机）',
+            );
+            if (name == null || !mounted) return null;
+            try {
+              await service.renameDevice(device.id, name);
+              if (mounted) setState(() {});
+              return name;
+            } catch (_) {
+              if (mounted) showLuminaToast(this.context, '设备名称未能保存，请重试。');
+              return null;
+            }
+          },
         ),
       );
       if (device == null || !mounted) return;
@@ -857,6 +808,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
       _historyStart = 0;
       _historyLimit = 60;
       _highlightMessageId = null;
+      _pendingNotificationMessageId = null;
       _conversationId = conversation.id;
       _conversationTitle = conversation.title;
       _chatDeviceId = null;
@@ -987,11 +939,6 @@ class _ChatPageState extends ConsumerState<ChatPage>
         onPressed: _startingDeviceChat ? null : _chooseChatDevice,
         icon: const LuminaIcon(LuminaIcons.devices),
         tooltip: '与设备对话',
-      ),
-      LuminaIconButton(
-        onPressed: _createConversation,
-        icon: const LuminaIcon(LuminaIcons.add),
-        tooltip: '新建会话',
       ),
     ],
     body: StreamBuilder<List<Conversation>>(
@@ -1130,7 +1077,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                   )),
                                 )
                                 .value;
-                            final preview = latest == null
+                            final preview =
+                                latest == null || !isVisibleChatMessage(latest)
                                 ? null
                                 : _readableMessage(latest)
                                       .replaceAll('\n', ' ')
@@ -1140,25 +1088,29 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                 '本地历史';
                             final status = summaries[conversation.id]!.label;
                             final theme = LuminaTheme.of(context);
-                            final dark = theme.colors.dark;
+                            final colors = theme.colors;
                             final deviceId = _visibleTargets[conversation.id];
                             final deviceColor =
                                 deviceId == service.azureDeviceId
-                                ? (dark
-                                      ? const Color(0xFF8AB4F8)
-                                      : const Color(0xFF245EAB))
+                                ? colors.tone(
+                                    const Color(0xFF245EAB),
+                                    const Color(0xFF8AB4F8),
+                                  )
                                 : deviceId == service.macDeviceId
-                                ? (dark
-                                      ? const Color(0xFFC4A7F0)
-                                      : const Color(0xFF7950A6))
+                                ? colors.tone(
+                                    const Color(0xFF7950A6),
+                                    const Color(0xFFC4A7F0),
+                                  )
                                 : deviceId == service.windowsDeviceId
-                                ? (dark
-                                      ? const Color(0xFF7CD5C4)
-                                      : const Color(0xFF167568))
+                                ? colors.tone(
+                                    const Color(0xFF167568),
+                                    const Color(0xFF7CD5C4),
+                                  )
                                 : deviceId == service.hakariDeviceId
-                                ? (dark
-                                      ? const Color(0xFFF6BE77)
-                                      : const Color(0xFF995A16))
+                                ? colors.tone(
+                                    const Color(0xFF995A16),
+                                    const Color(0xFFF6BE77),
+                                  )
                                 : theme.colors.muted;
                             final row = LuminaSurface(
                               key: ValueKey(
@@ -1925,41 +1877,6 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   Future<void> _pickAttachment(String action) async {
-    if (action == 'camera' || action == 'photos') {
-      final allowed = await showLuminaSheet<bool>(
-        context: context,
-        builder: (context) => LuminaStack(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              action == 'camera' ? '允许访问相机？' : '选择要分享的照片',
-              style: LuminaTheme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              action == 'camera'
-                  ? '用于拍摄并发送照片。继续后由系统确认访问权限。'
-                  : '仅将你选择的照片加入当前消息。',
-            ),
-            const SizedBox(height: 20),
-            LuminaButton(
-              onPressed: () =>
-                  Navigator.of(context, rootNavigator: true).pop(true),
-              child: const Text('继续'),
-            ),
-            const SizedBox(height: 12),
-            LuminaButton(
-              primary: false,
-              onPressed: () =>
-                  Navigator.of(context, rootNavigator: true).pop(false),
-              child: const Text('暂不允许'),
-            ),
-          ],
-        ),
-      );
-      if (allowed != true || !mounted) return;
-    }
     try {
       if (action == 'camera') {
         final photo = await _imagePicker.pickImage(source: ImageSource.camera);
@@ -2414,7 +2331,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
                       ),
                       data: (window) {
                         final hasEarlier = window.length > _historyLimit;
-                        final items = hasEarlier ? window.sublist(1) : window;
+                        final items = (hasEarlier ? window.sublist(1) : window)
+                            .where(isVisibleChatMessage)
+                            .toList();
                         final notificationMessage =
                             _pendingNotificationMessageId;
                         if (notificationMessage != null) {
@@ -2444,6 +2363,14 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                   top: headerHeight + 12,
                                 ),
                                 children: [
+                                  if (hasEarlier)
+                                    LuminaButton(
+                                      primary: false,
+                                      onPressed: () => setState(() {
+                                        _historyLimit += 30;
+                                      }),
+                                      child: const Text('查看更早消息'),
+                                    ),
                                   Padding(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 20,
@@ -2454,6 +2381,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                       ),
                                       store: _agentEvents,
                                       showActivity: false,
+                                      showThinking: true,
                                       showClarifications: false,
                                       onRefresh: _chatDeviceId == null
                                           ? null
@@ -2463,7 +2391,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                     ),
                                   ),
                                   if (_agentEvents.streams.isEmpty &&
-                                      !_agentEvents.typing)
+                                      !_agentEvents.typing &&
+                                      chatThinkingLabel(_agentEvents) == null)
                                     const LuminaEmptyState(
                                       text: '从一句话开始。\n记录想法，或一起安排今天。',
                                       card: false,
@@ -2613,6 +2542,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                                     message.id,
                                               },
                                               showActivity: false,
+                                              showThinking: true,
                                               showClarifications: false,
                                               onRefresh: _chatDeviceId == null
                                                   ? null
@@ -2910,28 +2840,46 @@ class _MessageBubble extends StatelessWidget {
         ? '发送失败，点击重试'
         : sending
         ? '发送中'
-        : '等待上传';
+        : '等待上传，点击重试';
+    final canRetry = isUser && pending && !sending && onRetry != null;
     final metadata = Semantics(
+      key: ValueKey('message-status-${message.id}'),
       label: '${_formatMessageTime(message.createdAt)} $statusLabel',
+      button: canRetry,
       excludeSemantics: true,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '${_formatMessageTime(message.createdAt)}${sending && pending ? '' : '  $status'}',
-            style: LuminaTheme.of(context).textTheme.labelSmall
-                .copyWith(color: colors.muted, fontSize: 11),
-          ),
-          if (sending && pending)
-            const Padding(
-              padding: EdgeInsets.only(left: 4),
-              child: SizedBox(width: 12, height: 12, child: LuminaProgress()),
+      child: LuminaTap(
+        behavior: HitTestBehavior.opaque,
+        onTap: canRetry ? onRetry : null,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _formatMessageTime(message.createdAt),
+              style: LuminaTheme.of(context).textTheme.labelSmall
+                  .copyWith(color: colors.muted, fontSize: 11),
             ),
-        ],
+            if (isUser) ...[
+              const SizedBox(width: 4),
+              SizedBox(
+                width: 12,
+                height: 12,
+                child: sending && pending
+                    ? const LuminaProgress()
+                    : Center(
+                        child: Text(
+                          status,
+                          style: LuminaTheme.of(context).textTheme.labelSmall
+                              .copyWith(color: colors.muted, fontSize: 11),
+                        ),
+                      ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
     final inlineMetadata =
-        isUser && !pending && attachments.isEmpty && message.content.isNotEmpty;
+        isUser && attachments.isEmpty && message.content.isNotEmpty;
     final content = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2960,40 +2908,13 @@ class _MessageBubble extends StatelessWidget {
                   source: message.content,
                   allowResponseUi: message.role == 'assistant',
                   onPromptSelected: onPromptSelected,
+                  actionScope: message.id,
                 ),
         for (final attachment in attachments)
           ChatAttachmentTile(attachment: attachment),
         if (!inlineMetadata) ...[
           const SizedBox(height: 4),
-          Wrap(
-            alignment: WrapAlignment.end,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              metadata,
-              if (isUser && pending) ...[
-                Semantics(
-                  button: true,
-                  label: '重试发送',
-                  child: LuminaTap(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: sending ? null : onRetry,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 10,
-                      ),
-                      child: Text(
-                        failed ? '重试' : '待发送 · 重试',
-                        style: LuminaTheme.of(context).textTheme.labelSmall,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
+          Align(alignment: Alignment.centerRight, child: metadata),
         ],
       ],
     );

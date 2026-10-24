@@ -15,6 +15,7 @@ import time
 import uuid
 from collections import OrderedDict
 from contextvars import ContextVar
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,6 +39,7 @@ from .attachment_cache import AttachmentCache
 from .conversation import chat_id_for_conversation, conversation_id_for_chat_id
 from . import protocol
 from .response_ui import PLATFORM_HINT
+from .initial_response import generate_initial_response
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +77,8 @@ ATTACHMENT_DOWNLOAD_TIMEOUT_SECONDS = 15
 ATTACHMENT_UPLOAD_TIMEOUT_SECONDS = 30
 _SAFE_NAME = re.compile(r"[^\w. ()\-\u4e00-\u9fff]+", re.UNICODE)
 _EXCLUDED_MIME_PREFIXES = ("audio/", "video/")
+_LONG_RUNNING_HEARTBEAT = re.compile(r"^\s*⏳\s*Working\s+—\s+\d+\s+min(?:\s|$)", re.IGNORECASE)
+_BACKGROUND_REVIEW_NOTICE = re.compile(r"^\s*💾\s*Self-improvement review:\s+\S[\s\S]*$", re.IGNORECASE)
 
 
 def _safe_filename(name: str, fallback: str = "attachment") -> str:
@@ -214,7 +218,7 @@ class OrialisAdapter(BasePlatformAdapter):
         self._orialis = OrialisConfig.from_platform_config(config)
         from .workspace import WorkspaceService
         self._workspace = WorkspaceService(self._orialis.workspaces)
-        self._host_capabilities = set(protocol.SUPPORTED_CAPABILITIES) | {"workspace.request", "session.status"}
+        self._host_capabilities = set(protocol.SUPPORTED_CAPABILITIES) | {"workspace.request", "session.status", "memory.analyze"}
         self._ws = None
         self._reader_task: Optional[asyncio.Task] = None
         self._send_lock = asyncio.Lock()
@@ -461,7 +465,7 @@ class OrialisAdapter(BasePlatformAdapter):
                 except protocol.ProtocolError:
                     kind = None
                 if kind in {"message.send", "command.request", "slash.command", "delivery.send",
-                            "cron.delivery", "proactive.delivery", "workspace.request",
+                            "cron.delivery", "proactive.delivery", "workspace.request", "memory.analyze",
                             "session.open", "session.close", "session.reset", "session.list", "session.info"}:
                     # Native slash handlers can await send() receipts; keep this reader free to receive them.
                     task = asyncio.create_task(self._handle_wire(raw), name="orialis-inbound-dispatch")
@@ -503,7 +507,19 @@ class OrialisAdapter(BasePlatformAdapter):
                 await self._send_wire(protocol.error(exc.code, str(exc)))
             return
         message_type = message["type"]
-        if message_type == "workspace.request":
+        if message_type == "memory.analyze":
+            from .memory_analysis import analyze_memory
+            result = {"version": 1, "type": "memory.result", "request_id": message["request_id"]}
+            try:
+                result.update(await asyncio.wait_for(
+                    analyze_memory(message["content"], message.get("image_base64"), message.get("source_urls", [])), timeout=285,
+                ))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                result["error"] = "Azure Hermes 暂未完成理解，请稍后重试"
+            await self._send_wire(result)
+        elif message_type == "workspace.request":
             result = await self._workspace.handle(message["conversation_id"], message["payload"])
             await self._send_wire({"version": 1, "type": "workspace.response", "request_id": message["request_id"],
                                    "conversation_id": message["conversation_id"], "payload": result})
@@ -560,6 +576,9 @@ class OrialisAdapter(BasePlatformAdapter):
             logger.debug("[%s] received Orialis event %s", self.name, message_type)
         elif message_type == "error":
             logger.error("[%s] Orialis Server error %s: %s", self.name, message["code"], message["message"])
+            waiter = self._ack_waiters.get(message.get("reply_to"))
+            if waiter is not None and not waiter.done():
+                waiter.set_result("rejected")
         elif message_type in {"hello_ack", "pong"}:
             logger.debug("[%s] received %s", self.name, message_type)
         else:
@@ -985,6 +1004,22 @@ class OrialisAdapter(BasePlatformAdapter):
             return SendResult(success=False, error="Orialis Server connection is not available", retryable=True)
         reply_to = reply_to or self._reply_anchor(chat_id)
         metadata = metadata or {}
+        # Hermes marks gateway-generated progress and review notices as
+        # non-conversational. Keep that distinction at the adapter boundary:
+        # progress is a transient status event, and background review summaries
+        # are intentionally not persisted as assistant replies. Match only these
+        # known formats; other non-conversational sends still use the normal path.
+        if metadata.get("non_conversational") and not metadata.get("attachments"):
+            if _LONG_RUNNING_HEARTBEAT.match(str(content or "")):
+                snapshot = self._processing_status.get(chat_id)
+                run_id = snapshot.get("run_id") if snapshot else None
+                await self.send_agent_state(
+                    chat_id, "working", run_id=run_id, message=str(content),
+                )
+                # A status event is best-effort and has no persisted message ID.
+                return SendResult(success=True)
+            if _BACKGROUND_REVIEW_NOTICE.match(str(content or "")):
+                return SendResult(success=True)
         if metadata.get("force_proactive_send") or metadata.get("proactive"):
             if self.supports_feature("proactive_delivery") or self.supports_feature("cron_delivery"):
                 return await self._send_delivery(
@@ -1128,6 +1163,10 @@ class OrialisAdapter(BasePlatformAdapter):
             return False
         turn_id = turn_id or uuid.uuid4().hex
         context = self._active_streams.get(turn_id)
+        # Decline Hermes' ambiguous empty-stream sentinel. Real literal checkmark
+        # answers still use the native consumer's regular send() fallback.
+        if finalize and content == "✅" and (context is None or not context["content"]):
+            return False
         if context is None:
             context = {
                 "stream_id": f"stream_{uuid.uuid4().hex[:16]}",
@@ -1543,8 +1582,36 @@ class OrialisAdapter(BasePlatformAdapter):
                 self._reply_scope.set((chat_id, event.message_id, None))
                 self._active_turn_events[event.message_id] = event
             await self.send_agent_state(chat_id, "started", run_id=getattr(event, "message_id", None))
+            if (getattr(event, "message_id", None)
+                    and (getattr(event, "raw_message", None) or {}).get("type") == "message.send"
+                    and not event.is_command() and self.supports_feature("reply_followups")):
+                conversation_id = conversation_id_for_chat_id(chat_id)
+                # The same accepted input keeps one initial reply across reconnects.
+                initial_id = "initial_" + hashlib.sha256(
+                    f"{conversation_id}\0{event.message_id}".encode()
+                ).hexdigest()[:24]
+                directory = self._attachment_cache.acquire(conversation_id, event.message_id)
+                scope = getattr(self.gateway_runner, "_media_delivery_scope_for_source", None)
+                with scope(event.source) if callable(scope) else nullcontext():
+                    content = await generate_initial_response(event, directory / "initial-response.json")
+                initial = protocol.reply(
+                    message_id=initial_id, reply_to=event.message_id,
+                    conversation_id=conversation_id, content=content,
+                )
+                for attempt in range(2):
+                    if attempt:
+                        await asyncio.sleep(0.05)
+                    result = await self._send_feature_request(initial, initial_id)
+                    if result.success or not str(result.error).startswith("Orialis request rejected:"):
+                        break
+                if not result.success:
+                    logger.warning("[%s] initial response not confirmed for %s: %s",
+                                   self.name, event.message_id, result.error)
 
     async def on_processing_complete(self, event: MessageEvent, outcome: Any) -> None:
+        # Hermes returns None when startup parks this event; replay still owns completion.
+        if any(queued is event for queued in getattr(self.gateway_runner, "_startup_restore_queue", ())):
+            return
         await super().on_processing_complete(event, outcome)
         await self._finish_processing(event, getattr(outcome, "value", str(outcome)).lower())
 

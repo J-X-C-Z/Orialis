@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show DesktopLayoutScope, OrialisPageScaffold;
+
 import '../core/config/app_config.dart';
 import '../core/network/orialis_api_client.dart';
 import '../pages/shared/mobile_navigation.dart';
@@ -77,41 +78,47 @@ class OrialisNewsApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final mode = ref.watch(newsAppearanceProvider);
-    final brightness = switch (mode) {
-      ThemeMode.light => Brightness.light,
-      ThemeMode.dark => Brightness.dark,
-      ThemeMode.system =>
-        WidgetsBinding.instance.platformDispatcher.platformBrightness,
-    };
-    return LuminaTheme(
-      brightness: brightness,
-      highPerformanceMode: ref.watch(newsHighPerformanceModeProvider),
-      data: const LuminaThemeData(),
-      child: MaterialApp(
-        title: 'Orialis 资讯',
-        debugShowCheckedModeBanner: false,
-        localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
-        themeMode: mode,
-        builder: (context, child) => LuminaMaterialBridge(
-          child: DefaultTextStyle(
-            style: LuminaTheme.of(context).textTheme.bodyMedium,
-            child: IconTheme(
-              data: IconThemeData(color: LuminaTheme.of(context).colors.muted),
-              child: AnnotatedRegion<SystemUiOverlayStyle>(
-                value: brightness == Brightness.dark
-                    ? SystemUiOverlayStyle.light
-                    : SystemUiOverlayStyle.dark,
-                child: Material(
-                  color: LuminaTheme.of(context).colors.paper,
-                  child: child ?? const SizedBox.shrink(),
+    final highPerformanceMode = ref.watch(newsHighPerformanceModeProvider);
+    return MaterialApp(
+      title: 'Orialis 资讯',
+      debugShowCheckedModeBanner: false,
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
+      themeMode: mode,
+      builder: (context, child) {
+        final brightness = switch (mode) {
+          ThemeMode.light => Brightness.light,
+          ThemeMode.dark => Brightness.dark,
+          ThemeMode.system => MediaQuery.platformBrightnessOf(context),
+        };
+        return AnimatedLuminaTheme(
+          brightness: brightness,
+          highPerformanceMode: highPerformanceMode,
+          child: Builder(
+            builder: (context) => LuminaMaterialBridge(
+              child: DefaultTextStyle(
+                style: LuminaTheme.of(context).textTheme.bodyMedium,
+                child: IconTheme(
+                  data: IconThemeData(
+                    color: LuminaTheme.of(context).colors.muted,
+                  ),
+                  child: AnnotatedRegion<SystemUiOverlayStyle>(
+                    value: brightness == Brightness.dark
+                        ? SystemUiOverlayStyle.light
+                        : SystemUiOverlayStyle.dark,
+                    child: Material(
+                      animationDuration: Duration.zero,
+                      color: LuminaTheme.of(context).colors.paper,
+                      child: child ?? const SizedBox.shrink(),
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-        home: const NewsHomePage(),
-      ),
+        );
+      },
+      home: const NewsHomePage(),
     );
   }
 }
@@ -509,9 +516,9 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
                                 child: Text(
                                   _error!,
                                   style: TextStyle(
-                                    color: LuminaTheme.of(
-                                      context,
-                                    ).colors.danger,
+                                    color: LuminaTheme.of(context)
+                                        .colors
+                                        .danger,
                                   ),
                                 ),
                               ),

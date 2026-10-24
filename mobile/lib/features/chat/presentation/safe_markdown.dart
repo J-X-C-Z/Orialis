@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
@@ -70,26 +73,90 @@ String responseUiPlainText(String source) {
   return result.toString();
 }
 
-/// Completed chat bubbles re-parse on every parent rebuild. Keep a tiny LRU so
-/// long conversations do not pay full Markdown cost on each stream tick or
-/// scroll-driven rebuild of neighboring rows.
-final Map<String, List<MarkdownBlock>> _markdownBlockCache = {};
-const int _markdownBlockCacheLimit = 48;
+/// Keeps completed Markdown sections intact while a stream grows its tail.
+/// Sections split only at blank lines outside code fences, so every section is
+/// parsed with the same rules as the original whole-message parser.
+final Map<String, List<MarkdownBlock>> _markdownSectionCache = {};
+const int _markdownSectionCacheLimit = 48;
 
-List<MarkdownBlock> _parseMarkdownCached(String source) {
-  final cached = _markdownBlockCache.remove(source);
-  if (cached != null) {
-    _markdownBlockCache[source] = cached;
-    return cached;
-  }
-  final blocks = MarkdownBlock.parse(source);
-  if (source.length <= 8000) {
-    _markdownBlockCache[source] = blocks;
-    if (_markdownBlockCache.length > _markdownBlockCacheLimit) {
-      _markdownBlockCache.remove(_markdownBlockCache.keys.first);
+class MarkdownBlockStreamParser {
+  String? _source;
+  List<String> _sections = const [];
+  List<List<MarkdownBlock>> _blocks = const [];
+  int lastParseCount = 0;
+  List<String> get sections => _sections;
+
+  List<List<MarkdownBlock>> update(String source) {
+    if (source == _source) {
+      lastParseCount = 0;
+      return _blocks;
     }
+    final sections = _splitMarkdownSections(source);
+    var stablePrefix = 0;
+    while (stablePrefix < _sections.length &&
+        stablePrefix < sections.length &&
+        _sections[stablePrefix] == sections[stablePrefix]) {
+      stablePrefix++;
+    }
+
+    final blocks = <List<MarkdownBlock>>[..._blocks.take(stablePrefix)];
+    lastParseCount = 0;
+    for (final section in sections.skip(stablePrefix)) {
+      final cached = _markdownSectionCache.remove(section);
+      if (cached != null) {
+        _markdownSectionCache[section] = cached;
+        blocks.add(cached);
+      } else {
+        final parsed = MarkdownBlock.parse(section);
+        blocks.add(parsed);
+        if (section.length <= 8000) {
+          _markdownSectionCache[section] = parsed;
+          if (_markdownSectionCache.length > _markdownSectionCacheLimit) {
+            _markdownSectionCache.remove(_markdownSectionCache.keys.first);
+          }
+        }
+        lastParseCount++;
+      }
+    }
+    _sections = sections;
+    _blocks = blocks;
+    _source = source;
+    return blocks;
   }
-  return blocks;
+}
+
+List<String> _splitMarkdownSections(String source) {
+  final lines = source.replaceAll('\r\n', '\n').split('\n');
+  final sections = <String>[];
+  final current = <String>[];
+  var fenceOpen = false;
+  var fenceLanguage = '';
+
+  void flush() {
+    if (current.isNotEmpty) sections.add(current.join('\n'));
+    current.clear();
+  }
+
+  for (final line in lines) {
+    if (!fenceOpen) {
+      final fence = _fencePattern.firstMatch(line);
+      if (fence != null) {
+        fenceOpen = true;
+        fenceLanguage = fence.group(1) ?? '';
+      } else if (line.trim().isEmpty) {
+        flush();
+        continue;
+      }
+    } else if (fenceLanguage == 'orialis-ui'
+        ? line.trim() == '```'
+        : line.trimLeft().startsWith('```')) {
+      fenceOpen = false;
+      fenceLanguage = '';
+    }
+    current.add(line);
+  }
+  flush();
+  return sections;
 }
 
 class MarkdownBlock {
@@ -248,38 +315,105 @@ class MarkdownBlock {
 /// widgets. Malformed input is rendered as selectable plain text, which is a
 /// safe and useful fallback for older or experimental agent messages.
 /// Authored HTTP(S) links open externally only when tapped.
-class SafeMarkdownView extends StatelessWidget {
+class SafeMarkdownView extends StatefulWidget {
   const SafeMarkdownView({
     required this.source,
     this.fallback = false,
     this.allowResponseUi = false,
     this.onPromptSelected,
+    this.actionScope,
     super.key,
   });
   final String source;
   final bool fallback;
   final bool allowResponseUi;
   final ValueChanged<String>? onPromptSelected;
+  final String? actionScope;
+
+  @override
+  State<SafeMarkdownView> createState() => _SafeMarkdownViewState();
+}
+
+class _SafeMarkdownViewState extends State<SafeMarkdownView> {
+  final _parser = MarkdownBlockStreamParser();
+  List<String> _renderedSections = const [];
+  List<Widget> _sectionWidgets = const [];
+  bool _lastFallback = false;
+  bool _lastAllowResponseUi = false;
+  ValueChanged<String>? _lastOnPromptSelected;
+  String? _lastActionScope;
 
   @override
   Widget build(BuildContext context) {
+    final source = widget.source;
     if (source.trim().isEmpty) return const SizedBox.shrink();
-    final blocks = fallback
-        ? const <MarkdownBlock>[]
-        : _parseMarkdownCached(source);
-    if (fallback || blocks.isEmpty) return LuminaSelectableText(source);
+    if (widget.fallback) return LuminaSelectableText(source);
+
+    final parsedSections = _parser.update(source);
+    final sections = _parser.sections;
+    final canReuseWidgets =
+        _lastFallback == widget.fallback &&
+        _lastAllowResponseUi == widget.allowResponseUi &&
+        _lastOnPromptSelected == widget.onPromptSelected &&
+        _lastActionScope == widget.actionScope;
+    var stablePrefix = 0;
+    if (canReuseWidgets) {
+      while (stablePrefix < _renderedSections.length &&
+          stablePrefix < sections.length &&
+          _renderedSections[stablePrefix] == sections[stablePrefix]) {
+        stablePrefix++;
+      }
+    }
+    final sectionWidgets = <Widget>[
+      ..._sectionWidgets.take(stablePrefix),
+      for (var index = stablePrefix; index < sections.length; index++)
+        _MarkdownSectionView(
+          blocks: parsedSections[index],
+          allowResponseUi: widget.allowResponseUi,
+          onPromptSelected: widget.onPromptSelected,
+          actionScope: widget.actionScope,
+        ),
+    ];
+    _renderedSections = sections;
+    _sectionWidgets = sectionWidgets;
+    _lastFallback = widget.fallback;
+    _lastAllowResponseUi = widget.allowResponseUi;
+    _lastOnPromptSelected = widget.onPromptSelected;
+    _lastActionScope = widget.actionScope;
+
+    if (sectionWidgets.isEmpty) return LuminaSelectableText(source);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (final block in blocks)
-          _BlockView(
-            block: block,
-            allowResponseUi: allowResponseUi,
-            onPromptSelected: onPromptSelected,
-          ),
-      ],
+      children: sectionWidgets,
     );
   }
+}
+
+class _MarkdownSectionView extends StatelessWidget {
+  const _MarkdownSectionView({
+    required this.blocks,
+    required this.allowResponseUi,
+    this.onPromptSelected,
+    this.actionScope,
+  });
+  final List<MarkdownBlock> blocks;
+  final bool allowResponseUi;
+  final ValueChanged<String>? onPromptSelected;
+  final String? actionScope;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      for (final block in blocks)
+        _BlockView(
+          block: block,
+          allowResponseUi: allowResponseUi,
+          onPromptSelected: onPromptSelected,
+          actionScope: actionScope,
+        ),
+    ],
+  );
 }
 
 class _BlockView extends StatelessWidget {
@@ -287,10 +421,12 @@ class _BlockView extends StatelessWidget {
     required this.block,
     required this.allowResponseUi,
     this.onPromptSelected,
+    this.actionScope,
   });
   final MarkdownBlock block;
   final bool allowResponseUi;
   final ValueChanged<String>? onPromptSelected;
+  final String? actionScope;
 
   @override
   Widget build(BuildContext context) {
@@ -323,6 +459,9 @@ class _BlockView extends StatelessWidget {
               key: ValueKey(source),
               document: document,
               onPromptSelected: onPromptSelected,
+              actionScope: actionScope == null
+                  ? null
+                  : '$actionScope:${sha256.convert(utf8.encode(source))}',
             );
           }
         }

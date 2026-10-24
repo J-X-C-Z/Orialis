@@ -1,0 +1,5 @@
+config.json
+client-state/
+hub-store/
+*.log
+.profile-sync.json

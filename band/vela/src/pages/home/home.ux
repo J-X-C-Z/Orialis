@@ -1,6 +1,7 @@
 <template>
 <div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd">
-<scroll class="content" scroll-y="true">
+<div class="stack" if="{{ vm.cacheLoading }}"><text class="body">正在读取本地缓存…</text></div>
+<scroll if="{{ !vm.cacheLoading }}" class="content" scroll-y="true">
 <div class="stack">
 <div class="header">
 <div class="back" if="{{ selection || homeSection }}" onclick="goBack">

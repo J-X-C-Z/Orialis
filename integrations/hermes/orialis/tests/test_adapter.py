@@ -157,6 +157,128 @@ class AdapterTests(unittest.TestCase):
         self.assertTrue(config.server_url.endswith("/api/v1/agent/ws"))
         self.assertEqual(config.device_id, "JXCZ_MBA_Hermes")
 
+    def test_nonconversational_heartbeat_becomes_transient_working_status(self):
+        Platform._add_pseudo_member("orialis")
+        adapter = OrialisAdapter(SimpleNamespace(extra={}))
+        adapter._ws = object()
+        adapter._running = True
+        chat_id = chat_id_for_conversation("chat-1")
+        adapter._processing_status[chat_id] = {"status": "running", "message": "正在处理请求", "run_id": "user-42"}
+        calls = []
+
+        async def send_status(*args, **kwargs):
+            calls.append((args, kwargs))
+            return True
+
+        adapter.send_agent_state = send_status
+        result = asyncio.run(adapter.send(
+            chat_id, "⏳ Working — 3 min — iteration 1/60, research_market",
+            metadata={"non_conversational": True},
+        ))
+
+        self.assertTrue(result.success)
+        self.assertIsNone(result.message_id)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0][:2], (chat_id, "working"))
+        self.assertEqual(calls[0][1], {
+            "run_id": "user-42", "message": "⏳ Working — 3 min — iteration 1/60, research_market",
+        })
+
+    def test_nonconversational_background_review_notice_is_suppressed(self):
+        Platform._add_pseudo_member("orialis")
+        adapter = OrialisAdapter(SimpleNamespace(extra={}))
+        adapter._ws = object()
+        adapter._running = True
+        sent = []
+
+        async def send_wire(frame):
+            sent.append(frame)
+
+        adapter._send_wire = send_wire
+        result = asyncio.run(adapter.send(
+            chat_id_for_conversation("chat-1"),
+            "💾 Self-improvement review: Memory updated",
+            metadata={"non_conversational": True},
+        ))
+
+        self.assertTrue(result.success)
+        self.assertIsNone(result.message_id)
+        self.assertEqual(sent, [])
+
+    def test_unrecognized_nonconversational_notice_still_persists_as_reply(self):
+        Platform._add_pseudo_member("orialis")
+        adapter = OrialisAdapter(SimpleNamespace(extra={}))
+        adapter._ws = object()
+        adapter._running = True
+        adapter._reply_anchors[chat_id_for_conversation("chat-1")] = "user-42"
+        sent = []
+
+        async def send_wire(frame):
+            sent.append(frame)
+            if frame["type"] == "message.reply":
+                await adapter._handle_wire({
+                    "version": 1, "type": "message.ack", "message_id": frame["message_id"], "status": "received",
+                })
+
+        adapter._send_wire = send_wire
+        result = asyncio.run(adapter.send(
+            chat_id_for_conversation("chat-1"), "普通的后台通知",
+            metadata={"non_conversational": True},
+        ))
+
+        self.assertTrue(result.success)
+        self.assertEqual(sent[0]["type"], "message.reply")
+        self.assertEqual(sent[0]["content"], "普通的后台通知")
+
+    def test_review_looking_assistant_reply_without_internal_marker_is_preserved(self):
+        Platform._add_pseudo_member("orialis")
+        adapter = OrialisAdapter(SimpleNamespace(extra={}))
+        adapter._ws = object()
+        adapter._running = True
+        chat_id = chat_id_for_conversation("chat-1")
+        adapter._reply_anchors[chat_id] = "user-42"
+        sent = []
+
+        async def send_wire(frame):
+            sent.append(frame)
+            if frame["type"] == "message.reply":
+                await adapter._handle_wire({
+                    "version": 1, "type": "message.ack", "message_id": frame["message_id"], "status": "received",
+                })
+
+        adapter._send_wire = send_wire
+        result = asyncio.run(adapter.send(chat_id, "💾 Self-improvement review: Memory updated"))
+
+        self.assertTrue(result.success)
+        self.assertEqual(sent[0]["type"], "message.reply")
+
+    def test_recognized_review_notice_with_attachment_uses_normal_delivery(self):
+        Platform._add_pseudo_member("orialis")
+        adapter = OrialisAdapter(SimpleNamespace(extra={}))
+        adapter._ws = object()
+        adapter._running = True
+        chat_id = chat_id_for_conversation("chat-1")
+        adapter._reply_anchors[chat_id] = "user-42"
+        sent = []
+
+        async def send_wire(frame):
+            sent.append(frame)
+            if frame["type"] == "message.reply":
+                await adapter._handle_wire({
+                    "version": 1, "type": "message.ack", "message_id": frame["message_id"], "status": "received",
+                })
+
+        adapter._send_wire = send_wire
+        attachment = {"id": "file-1", "name": "review.txt", "mime_type": "text/plain"}
+        result = asyncio.run(adapter.send(
+            chat_id, "💾 Self-improvement review: Memory updated",
+            metadata={"non_conversational": True, "attachments": [attachment]},
+        ))
+
+        self.assertTrue(result.success)
+        self.assertEqual(sent[0]["type"], "message.reply")
+        self.assertEqual(sent[0]["attachments"], [attachment])
+
     def test_hello_and_message_reply_builders(self):
         from ..protocol import ack, hello, parse_message, reply
 

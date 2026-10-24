@@ -252,6 +252,7 @@ final realtimeClientProvider = Provider<MobileRealtimeClient>((ref) {
 final syncCoordinatorProvider = Provider<SyncCoordinator>((ref) {
   final coordinator = SyncCoordinator(
     sync: ref.watch(syncEngineProvider).syncOnce,
+    flushChatMessage: ref.watch(syncEngineProvider).flushChatMessage,
     realtime: ref.watch(realtimeClientProvider),
     chatRepository: ref.watch(desktopModeProvider)
         ? null
@@ -359,6 +360,7 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      unawaited(ref.read(realtimeClientProvider).connect().catchError((_) {}));
       unawaited(ref.read(syncCoordinatorProvider).requestSync());
       final system = ref.read(systemIntegrationProvider);
       if (system != null) unawaited(system.refresh());
@@ -387,11 +389,6 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
     });
     final highPerformanceMode = ref.watch(highPerformanceModeProvider);
     final appearanceMode = ref.watch(appearanceModeProvider);
-    final brightness = switch (appearanceMode) {
-      ThemeMode.light => Brightness.light,
-      ThemeMode.dark => Brightness.dark,
-      ThemeMode.system => MediaQuery.platformBrightnessOf(context),
-    };
     LuminaBlurPolicy.instance.ensureFrameWatcher();
     if (_lastPerformanceMode != highPerformanceMode) {
       _lastPerformanceMode = highPerformanceMode;
@@ -407,34 +404,44 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
       color: const Color(0xFF476F82),
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
-      builder: (context, child) => LuminaTheme(
-        brightness: brightness,
-        highPerformanceMode: highPerformanceMode,
-        data: LuminaThemeData(liquidGlass: ref.watch(desktopModeProvider)),
-        child: Builder(
-          builder: (context) => DefaultTextStyle(
-            style: LuminaTheme.of(context).textTheme.bodyMedium,
-            child: AnnotatedRegion<SystemUiOverlayStyle>(
-              value: brightness == Brightness.dark
-                  ? SystemUiOverlayStyle.light
-                  : SystemUiOverlayStyle.dark,
-              child: Material(
-                color: LuminaTheme.of(context).colors.paper,
-                textStyle: LuminaTheme.of(context).textTheme.bodyMedium,
-                child: SafeArea(
-                  bottom: false,
-                  child: Column(
-                    children: [
-                      const LegacyRecoveryNotice(),
-                      Expanded(child: child ?? const SizedBox.shrink()),
-                    ],
+      builder: (context, child) {
+        final brightness = switch (appearanceMode) {
+          ThemeMode.light => Brightness.light,
+          ThemeMode.dark => Brightness.dark,
+          ThemeMode.system => MediaQuery.platformBrightnessOf(context),
+        };
+        return AnimatedLuminaTheme(
+          brightness: brightness,
+          highPerformanceMode: highPerformanceMode,
+          data: LuminaThemeData(liquidGlass: ref.watch(desktopModeProvider)),
+          child: LuminaMaterialBridge(
+            child: Builder(
+              builder: (context) => DefaultTextStyle(
+                style: LuminaTheme.of(context).textTheme.bodyMedium,
+                child: AnnotatedRegion<SystemUiOverlayStyle>(
+                  value: brightness == Brightness.dark
+                      ? SystemUiOverlayStyle.light
+                      : SystemUiOverlayStyle.dark,
+                  child: Material(
+                    animationDuration: Duration.zero,
+                    color: LuminaTheme.of(context).colors.paper,
+                    textStyle: LuminaTheme.of(context).textTheme.bodyMedium,
+                    child: SafeArea(
+                      bottom: false,
+                      child: Column(
+                        children: [
+                          const LegacyRecoveryNotice(),
+                          Expanded(child: child ?? const SizedBox.shrink()),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
       routerConfig: _router,
     );
   }

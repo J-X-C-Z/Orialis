@@ -73,7 +73,7 @@ internal object MemoryStore {
     @Synchronized fun update(context: Context, id: String, fields: Map<*, *>): JSONObject {
         val scope = scope(context) ?: error("请先登录并打开记忆页面")
         val record = read(context, id) ?: error("记忆不存在")
-        val allowed = setOf("title", "summary", "analysisStatus", "analysisConversationId", "analysisMessageId", "analysisError", "note", "notes")
+        val allowed = setOf("title", "summary", "analysisStatus", "analysisConversationId", "analysisMessageId", "analysisError", "analysisRequestId", "category", "sourceUrl", "videoStatus", "videoSummary", "videoError", "note", "notes")
         for ((key, value) in fields) {
             require(key is String && key in allowed) { "Unsupported memory field" }
             require(value == null || value is String && value.length <= 64000)

@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart' show Theme, ThemeMode;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -34,6 +36,9 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
+      SharedPreferences.setMockInitialValues({
+        'orialis.appearanceMode': 'dark',
+      });
       final database = AppDatabase(executor: NativeDatabase.memory());
       await tester.pumpWidget(
         ProviderScope(
@@ -52,6 +57,19 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      final themeContext = tester.element(find.byType(LuminaTopBar).first);
+      expect(LuminaTheme.of(themeContext).brightness, Brightness.dark);
+      expect(Theme.of(themeContext).brightness, Brightness.dark);
+      expect(
+        Theme.of(themeContext).colorScheme.onSurface,
+        LuminaTheme.of(themeContext).colors.ink,
+      );
+      await ProviderScope.containerOf(themeContext)
+          .read(appearanceModeProvider.notifier)
+          .setMode(ThemeMode.light);
+      await tester.pumpAndSettle();
+      expect(Theme.of(themeContext).brightness, Brightness.light);
+
       await tester.tap(find.text('事件').last);
       await tester.pumpAndSettle();
       expect(find.text('四象限'), findsOneWidget);

@@ -36,40 +36,41 @@ enum LuminaCardPalette {
 
   const LuminaCardPalette(this.tint);
   final Color tint;
-  LuminaColors colors({bool dark = false}) =>
-      LuminaColors(dark: dark, tint: tint);
+  LuminaColors colors({bool dark = false, double? darkProgress}) =>
+      LuminaColors(dark: dark, tint: tint, darkProgress: darkProgress);
 }
 
 class LuminaColors {
-  const LuminaColors({this.dark = false, this.tint});
+  const LuminaColors({this.dark = false, this.tint, double? darkProgress})
+    : darkProgress = darkProgress ?? (dark ? 1 : 0);
   final bool dark;
   final Color? tint;
+  final double darkProgress;
+  Color tone(Color light, Color dark) => Color.lerp(light, dark, darkProgress)!;
+  double toneValue(double light, double dark) =>
+      light + (dark - light) * darkProgress;
   Color _tone(Color base, double amount) =>
       tint == null ? base : Color.lerp(base, tint, amount)!;
-  Color get ink => dark ? LuminaTokenDark.ink : LuminaBaseColors.ink;
-  Color get paper => dark ? LuminaTokenDark.paper : LuminaBaseColors.paper;
+  Color get ink => tone(LuminaBaseColors.ink, LuminaTokenDark.ink);
+  Color get paper => tone(LuminaBaseColors.paper, LuminaTokenDark.paper);
   Color get canvas => paper;
   Color get surface =>
-      _tone(dark ? LuminaTokenDark.surface : LuminaBaseColors.surface, .10);
+      _tone(tone(LuminaBaseColors.surface, LuminaTokenDark.surface), .10);
   Color get raisedSurface =>
-      _tone(dark ? const Color(0xFF283746) : const Color(0xFFEDF2F7), .13);
+      _tone(tone(const Color(0xFFEDF2F7), const Color(0xFF283746)), .13);
   Color get recessedSurface =>
-      _tone(dark ? const Color(0xFF141E2A) : const Color(0xFFE1E8F1), .23);
+      _tone(tone(const Color(0xFFE1E8F1), const Color(0xFF141E2A)), .23);
   Color get accent => tint == null
-      ? (dark ? LuminaTokenDark.accent : LuminaBaseColors.accent)
-      : Color.lerp(
-          tint,
-          dark ? const Color(0xFFFFFFFF) : LuminaBaseColors.ink,
-          dark ? .40 : .25,
-        )!;
-  Color get accentSoft => _tone(
-    dark ? LuminaTokenDark.accentSoft : LuminaBaseColors.accentSoft,
-    .30,
-  );
-  Color get muted => dark ? LuminaTokenDark.muted : LuminaBaseColors.muted;
-  Color get danger => dark ? LuminaTokenDark.danger : LuminaBaseColors.danger;
-  Color get outline =>
-      dark ? LuminaTokenDark.outline : LuminaBaseColors.outline;
+      ? tone(LuminaBaseColors.accent, LuminaTokenDark.accent)
+      : tone(
+          Color.lerp(tint, LuminaBaseColors.ink, .25)!,
+          Color.lerp(tint, const Color(0xFFFFFFFF), .40)!,
+        );
+  Color get accentSoft =>
+      _tone(tone(LuminaBaseColors.accentSoft, LuminaTokenDark.accentSoft), .30);
+  Color get muted => tone(LuminaBaseColors.muted, LuminaTokenDark.muted);
+  Color get danger => tone(LuminaBaseColors.danger, LuminaTokenDark.danger);
+  Color get outline => tone(LuminaBaseColors.outline, LuminaTokenDark.outline);
 }
 
 class LuminaTextTheme {
@@ -86,9 +87,10 @@ class LuminaTextTheme {
       ? const []
       : [
           Shadow(
-            color: colors.dark
-                ? const Color(0x33000000)
-                : const Color(0x66FFFFFF),
+            color: colors.tone(
+              const Color(0x66FFFFFF),
+              const Color(0x33000000),
+            ),
             offset: const Offset(0, 1),
             blurRadius: .35,
           ),
@@ -154,6 +156,7 @@ class LuminaTheme extends InheritedWidget {
     this.reduceTransparency = false,
     this.highPerformanceMode = true,
     this.brightness = Brightness.light,
+    this.darkProgress,
     this.tint,
     this.data = const LuminaThemeData(),
     super.key,
@@ -161,10 +164,14 @@ class LuminaTheme extends InheritedWidget {
   final bool reduceTransparency;
   final bool highPerformanceMode;
   final Brightness brightness;
+  final double? darkProgress;
   final Color? tint;
   final LuminaThemeData data;
-  LuminaColors get colors =>
-      LuminaColors(dark: brightness == Brightness.dark, tint: tint);
+  LuminaColors get colors => LuminaColors(
+    dark: brightness == Brightness.dark,
+    tint: tint,
+    darkProgress: darkProgress,
+  );
   LuminaTextTheme get textTheme => LuminaTextTheme(colors, data);
   static bool motionReducedOf(BuildContext context) =>
       (MediaQuery.maybeOf(context)?.disableAnimations ?? false) ||
@@ -181,6 +188,49 @@ class LuminaTheme extends InheritedWidget {
       reduceTransparency != oldWidget.reduceTransparency ||
       highPerformanceMode != oldWidget.highPerformanceMode ||
       brightness != oldWidget.brightness ||
+      darkProgress != oldWidget.darkProgress ||
       tint != oldWidget.tint ||
       data != oldWidget.data;
+}
+
+/// A single interruptible color transition shared by text, surfaces and rims.
+class AnimatedLuminaTheme extends StatelessWidget {
+  const AnimatedLuminaTheme({
+    required this.brightness,
+    required this.child,
+    this.highPerformanceMode = true,
+    this.data = const LuminaThemeData(),
+    super.key,
+  });
+
+  final Brightness brightness;
+  final bool highPerformanceMode;
+  final LuminaThemeData data;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final target = brightness == Brightness.dark ? 1.0 : 0.0;
+    final reduced =
+        MediaQuery.disableAnimationsOf(context) || data.motionScale == 0;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: target, end: target),
+      duration: reduced
+          ? Duration.zero
+          : Duration(
+              microseconds:
+                  (LuminaMotion.standard.inMicroseconds * data.motionScale)
+                      .round(),
+            ),
+      curve: Curves.ease,
+      child: child,
+      builder: (context, progress, child) => LuminaTheme(
+        brightness: brightness,
+        darkProgress: progress,
+        highPerformanceMode: highPerformanceMode,
+        data: data,
+        child: child!,
+      ),
+    );
+  }
 }

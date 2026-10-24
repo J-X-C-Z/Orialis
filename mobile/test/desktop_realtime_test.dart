@@ -53,6 +53,34 @@ class _GatedConfig extends _LocalConfig {
 }
 
 void main() {
+  test('foreground connect bypasses a scheduled reconnect backoff', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final hello = Completer<void>();
+    WebSocket? socket;
+    final subscription = server.listen((request) async {
+      socket = await WebSocketTransformer.upgrade(request);
+      socket!.listen((raw) {
+        if (jsonDecode(raw as String)['type'] == 'hello' &&
+            !hello.isCompleted) {
+          hello.complete();
+        }
+      });
+    });
+    final client = MobileRealtimeClient(config: _LocalConfig(server.port));
+    addTearDown(() async {
+      await client.dispose();
+      await socket?.close();
+      await subscription.cancel();
+      await server.close(force: true);
+    });
+    client.simulateDisconnectForTest();
+    expect(client.reconnectScheduled, isTrue);
+    await client.connect();
+    expect(client.reconnectScheduled, isFalse);
+    await hello.future.timeout(const Duration(seconds: 2));
+    expect(client.isConnected, isTrue);
+  });
+
   for (final read in _ConfigRead.values) {
     test('dispose cancels a pending ${read.name} read permanently', () async {
       final config = _GatedConfig(1, read);

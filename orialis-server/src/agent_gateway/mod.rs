@@ -17,6 +17,7 @@ const DEFAULT_APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_APPROVAL_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 pub(crate) const SERVER_CAPABILITIES: &[&str] = &[
     "reply_followups",
+    "memory.analyze",
     "workspace.request",
     "session.status",
     "agent.typing",
@@ -152,16 +153,34 @@ impl std::error::Error for RegistryError {}
 
 impl AgentRegistry {
     pub(crate) async fn set_peer_capabilities(&self, device_id: &str, capabilities: Vec<String>) {
-        if let Some(connection) = self.state.lock().await.connections.values_mut()
-            .find(|connection| connection.device_id == device_id) {
+        if let Some(connection) = self
+            .state
+            .lock()
+            .await
+            .connections
+            .values_mut()
+            .find(|connection| connection.device_id == device_id)
+        {
             connection.capabilities = capabilities.into_iter().collect();
         }
     }
 
-    pub(crate) async fn supports_for_user(&self, user_id: &str, device_id: &str, capability: &str) -> bool {
-        self.state.lock().await.connections.values().any(|connection|
-            connection.user_id == user_id && connection.device_id == device_id
-            && connection.capabilities.contains(capability))
+    pub(crate) async fn supports_for_user(
+        &self,
+        user_id: &str,
+        device_id: &str,
+        capability: &str,
+    ) -> bool {
+        self.state
+            .lock()
+            .await
+            .connections
+            .values()
+            .any(|connection| {
+                connection.user_id == user_id
+                    && connection.device_id == device_id
+                    && connection.capabilities.contains(capability)
+            })
     }
 
     pub(crate) async fn register_connection(
@@ -321,7 +340,9 @@ impl AgentRegistry {
                     device_id,
                     interaction,
                     conversation_id: match &message {
-                        GatewayMessage::MessageSend { conversation_id, .. } => Some(conversation_id.clone()),
+                        GatewayMessage::MessageSend {
+                            conversation_id, ..
+                        } => Some(conversation_id.clone()),
                         _ => None,
                     },
                     last_activity: Instant::now(),
@@ -372,12 +393,29 @@ impl AgentRegistry {
     }
 
     pub(crate) async fn message_activity_age(&self, message_id: &str) -> Option<Duration> {
-        self.state.lock().await.pending.get(message_id).map(|p| p.last_activity.elapsed())
+        self.state
+            .lock()
+            .await
+            .pending
+            .get(message_id)
+            .map(|p| p.last_activity.elapsed())
     }
 
-    pub(crate) async fn pending_message_matches(&self, message_id: &str, device_id: &str, conversation_id: &str) -> bool {
-        self.state.lock().await.pending.get(message_id).is_some_and(|pending|
-            pending.device_id == device_id && pending.conversation_id.as_deref() == Some(conversation_id))
+    pub(crate) async fn pending_message_matches(
+        &self,
+        message_id: &str,
+        device_id: &str,
+        conversation_id: &str,
+    ) -> bool {
+        self.state
+            .lock()
+            .await
+            .pending
+            .get(message_id)
+            .is_some_and(|pending| {
+                pending.device_id == device_id
+                    && pending.conversation_id.as_deref() == Some(conversation_id)
+            })
     }
 
     #[cfg(test)]
@@ -610,9 +648,8 @@ impl AgentRegistry {
         Some(event)
     }
 
-    /// Queue a structured event for a device and assign its server sequence.
-    /// Current callers may still use the durable message queue; this method is
-    /// the transport hook for future server-originated session/tool events.
+    /// Test transport hook for structured server-originated event sequencing.
+    #[cfg(test)]
     pub(crate) async fn send_event_for_user(
         &self,
         user_id: &str,
@@ -727,26 +764,86 @@ mod tests {
 
     #[tokio::test]
     async fn event_sequence_recovers_plugin_and_server_restart_but_rejects_retired_epoch() {
-        let registry=AgentRegistry::default();
-        let event=|id:&str, session:&str, seq| GatewayMessage::AgentStatus {
-            version:1,event_id:id.into(),seq,session_id:session.into(),status:"running".into(),message:None,
+        let registry = AgentRegistry::default();
+        let event = |id: &str, session: &str, seq| GatewayMessage::AgentStatus {
+            version: 1,
+            event_id: id.into(),
+            seq,
+            session_id: session.into(),
+            status: "running".into(),
+            message: None,
         };
         // A server restart can first observe any positive seq from an already
         // running plugin. Subsequent gaps in that epoch remain errors.
-        assert_eq!(registry.accept_event("device",event("old-91","old-process",91)).await,EventDisposition::Accepted);
-        assert_eq!(registry.accept_event("device",event("old-93","old-process",93)).await,EventDisposition::Gap {expected_seq:92});
-        assert_eq!(registry.accept_event("device",event("old-92","old-process",92)).await,EventDisposition::Accepted);
+        assert_eq!(
+            registry
+                .accept_event("device", event("old-91", "old-process", 91))
+                .await,
+            EventDisposition::Accepted
+        );
+        assert_eq!(
+            registry
+                .accept_event("device", event("old-93", "old-process", 93))
+                .await,
+            EventDisposition::Gap { expected_seq: 92 }
+        );
+        assert_eq!(
+            registry
+                .accept_event("device", event("old-92", "old-process", 92))
+                .await,
+            EventDisposition::Accepted
+        );
         // Socket reconnect uses the same session and does not reset sequence.
-        assert_eq!(registry.accept_event("device",event("old-repeat","old-process",92)).await,EventDisposition::Duplicate);
+        assert_eq!(
+            registry
+                .accept_event("device", event("old-repeat", "old-process", 92))
+                .await,
+            EventDisposition::Duplicate
+        );
         // A restarted plugin uses a new process session and can start from 1.
-        assert_eq!(registry.accept_event("device",event("new-1","new-process",1)).await,EventDisposition::Accepted);
-        assert_eq!(registry.accept_event("device",event("late-old","old-process",94)).await,EventDisposition::StaleSession);
-        assert_eq!(registry.accept_event("device",event("new-3","new-process",3)).await,EventDisposition::Gap {expected_seq:2});
-        assert_eq!(registry.accept_event("device",event("new-2","new-process",2)).await,EventDisposition::Accepted);
+        assert_eq!(
+            registry
+                .accept_event("device", event("new-1", "new-process", 1))
+                .await,
+            EventDisposition::Accepted
+        );
+        assert_eq!(
+            registry
+                .accept_event("device", event("late-old", "old-process", 94))
+                .await,
+            EventDisposition::StaleSession
+        );
+        assert_eq!(
+            registry
+                .accept_event("device", event("new-3", "new-process", 3))
+                .await,
+            EventDisposition::Gap { expected_seq: 2 }
+        );
+        assert_eq!(
+            registry
+                .accept_event("device", event("new-2", "new-process", 2))
+                .await,
+            EventDisposition::Accepted
+        );
         // Device isolation and event-ID idempotency survive epoch changes.
-        assert_eq!(registry.accept_event("other-device",event("other-20","other",20)).await,EventDisposition::Accepted);
-        assert_eq!(registry.accept_event("device",event("old-91","third-process",1)).await,EventDisposition::Duplicate);
-        assert_eq!(registry.accept_event("device",event("new-3-ok","new-process",3)).await,EventDisposition::Accepted);
+        assert_eq!(
+            registry
+                .accept_event("other-device", event("other-20", "other", 20))
+                .await,
+            EventDisposition::Accepted
+        );
+        assert_eq!(
+            registry
+                .accept_event("device", event("old-91", "third-process", 1))
+                .await,
+            EventDisposition::Duplicate
+        );
+        assert_eq!(
+            registry
+                .accept_event("device", event("new-3-ok", "new-process", 3))
+                .await,
+            EventDisposition::Accepted
+        );
     }
 
     #[tokio::test]

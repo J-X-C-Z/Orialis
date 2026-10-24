@@ -157,6 +157,8 @@ internal class SystemBridge(private val activity: MainActivity, messenger: Binar
     }
 
     private fun notifyChatMessage(payload: Map<*, *>): Boolean {
+        // Only messages authored by the assistant may produce a system notification.
+        if ((payload["role"] as? String)?.trim()?.lowercase() != "assistant") return false
         if (!notificationsEnabled()) return false
         val snapshot = SystemSnapshot.read(activity) ?: return false
         val scope = snapshot.optString("scope").takeIf { it.isNotBlank() } ?: return false

@@ -15,13 +15,42 @@ class MemoryRecord {
     this.analysisError,
     this.analysisConversationId,
     this.analysisMessageId,
+    this.analysisRequestId,
+    this.category,
+    this.sourceUrl,
+    this.videoStatus,
+    this.videoSummary,
+    this.videoError,
   });
 
   final String id, sourcePackage, sourceLabel, visibleText, title, notes;
   final DateTime createdAt;
   final List<String> urls;
   final String? imagePath, sharedText, summary, analysisStatus, analysisError;
-  final String? analysisConversationId, analysisMessageId;
+  final String? analysisConversationId, analysisMessageId, analysisRequestId;
+  final String? category, sourceUrl, videoStatus, videoSummary, videoError;
+
+  static bool isVideoUrl(String value) {
+    final uri = Uri.tryParse(value);
+    if (!isWebUrl(value) || uri == null) return false;
+    final host = uri.host.toLowerCase();
+    bool domain(String name) => host == name || host.endsWith('.$name');
+    return domain('b23.tv') ||
+        (domain('bilibili.com') && uri.path.startsWith('/video/')) ||
+        domain('douyin.com') ||
+        domain('kuaishou.com') ||
+        domain('youtu.be') ||
+        (domain('youtube.com') &&
+            (uri.path == '/watch' || uri.path.startsWith('/shorts/')));
+  }
+
+  String? get primarySourceUrl {
+    if (sourceUrl != null && isWebUrl(sourceUrl!)) return sourceUrl;
+    return urls.where(isVideoUrl).firstOrNull ?? urls.firstOrNull;
+  }
+
+  bool get hasVideoSource =>
+      primarySourceUrl != null && isVideoUrl(primarySourceUrl!);
 
   factory MemoryRecord.fromMap(Map<Object?, Object?> map) {
     final id = map['id'];
@@ -50,6 +79,17 @@ class MemoryRecord {
       analysisError: optional('analysisError'),
       analysisConversationId: optional('analysisConversationId'),
       analysisMessageId: optional('analysisMessageId'),
+      analysisRequestId: optional('analysisRequestId'),
+      category: ['ai', 'other'].contains(optional('category'))
+          ? optional('category')
+          : null,
+      sourceUrl:
+          optional('sourceUrl') != null && isWebUrl(optional('sourceUrl')!)
+          ? optional('sourceUrl')
+          : null,
+      videoStatus: optional('videoStatus'),
+      videoSummary: optional('videoSummary'),
+      videoError: optional('videoError'),
     );
   }
 
@@ -71,6 +111,8 @@ class MemoryRecord {
       sharedText ?? '',
       sourceLabel,
       sourcePackage,
+      videoSummary ?? '',
+      sourceUrl ?? '',
       ...urls,
     ].any((value) => value.toLowerCase().contains(needle));
   }
@@ -91,5 +133,11 @@ class MemoryRecord {
     'analysisError': analysisError,
     'analysisConversationId': analysisConversationId,
     'analysisMessageId': analysisMessageId,
+    'analysisRequestId': analysisRequestId,
+    'category': category,
+    'sourceUrl': sourceUrl,
+    'videoStatus': videoStatus,
+    'videoSummary': videoSummary,
+    'videoError': videoError,
   };
 }

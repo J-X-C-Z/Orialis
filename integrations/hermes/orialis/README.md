@@ -7,7 +7,39 @@
 - Agent Gateway 协议版本 `1`：基础消息、能力协商、带序列 Agent/工具/澄清/审批/会话/产物事件，以及可恢复错误。
 - Orialis → Hermes：文本消息，以及图片、文本、文档和源文件附件。
 - Hermes → Orialis：文本回复，以及通过 Server HTTP 文件 API 上传的图片或文档附件。
+- 简短回应后继续处理：协商 `reply_followups` 的服务端上，普通用户消息开始处理时，使用 `orialis_initial_response` 辅助模型按本次消息内容自然回应一两句，随后由 Hermes 正常发送完整回复。当前部署使用 Westlake DeepSeek 非思考模式（Qwen 后备），主处理默认低档思考。辅助调用在线程中执行，避免 SDK 同步初始化或锁阻塞网关事件循环；调用预算为 12 秒；调用失败或返回思考内容时，仅本次降级为“我先看看你发来的内容，接着给你完整回复。”。首条回应的内容保存在既有私有附件缓存中，重试或重启后沿用相同内容与稳定消息 ID，可随历史回读；它不发送完成事件，不替代最终回复。命令、后台任务和旧版服务端不插入这条回应。
 - 多 Agent 设备：每个 Hermes 安装使用独立、稳定的设备 ID；服务端可将账号消息路由到当前选中的在线设备。
+- 屏幕记忆：协商 `memory.analyze` 后，以独立 `memory.analyze` / `memory.result` 后台请求处理内容。使用 Hermes 的 `vision` 辅助模型配置，无聊天会话或聊天消息；支持不超过 900 KiB 的 JPEG 截图、100000 UTF-8 字节文本和最多 32 个原始来源链接。模型按结构化结果返回 `category: ai|other`。
+- 视频理解：当前支持哔哩哔哩公开视频，先读取平台字幕，没有可读字幕时使用故事板抽样 JPEG 画面。字幕时间必须与原视频分段时长匹配；出现负值、非有限值、倒序区间或超过舍入容差时弃用整条轨道，改用抽样画面；字幕仅含音乐标记时也改用画面。保留原始完整链接（含签名和 `p` 分段参数），只核验原始链接或截图中清晰完整的 BV 编号，不按标题搜索或猜测隐藏链接。字幕或画面均不可用时，`video_status: unavailable`，保留截图摘要与可重试原因。其他视频平台保留原始链接并明确暂不支持内容理解。故事板抽样不等于完整观看，也不包含未提供的音频理解。
+- 视频 HTTP 只读取固定哔哩哔哩 API、来源及 CDN 域名；每个重定向均验证目标，连接到已核验的公共 IP，限制读取时长和大小。仅读取用户专门授权的服务器凭据文件，不导入其他应用的登录态、不下载完整视频、不执行 ASR。整个后台请求最多等待 285 秒，断线取消等待；服务端保留失败状态供重试。
+
+### 可选的服务器 B站扫码授权
+
+匿名请求持续返回412时，可按参考项目使用正常B站扫码登录。登录工具只在显式运行时启动，手机端代码和安装包不需要修改；账号会话只写到服务器的专用文件，不导入其他应用的Cookie。
+
+在隔离的 `bilibili-api-python==17.4.1` 环境运行：
+
+```sh
+<isolated-sdk-python> bili_login.py \
+  --credential-file /home/hermes/.hermes/orialis-memory/bili_credential.json \
+  --qr-file /home/hermes/.hermes/orialis-memory/login.png \
+  --timeout 180
+```
+
+用户在B站App扫码确认后，工具原子写入权限600的凭据文件。读取默认位置为 `$HERMES_HOME/orialis-memory/bili_credential.json`（未设置HERMES_HOME时使用 `~/.hermes`）；也可显式设置 `ORIALIS_BILI_CREDENTIAL_FILE` 绝对路径。登录Cookie只发送给B站域名，不发给短链或图床。默认文件缺失时保留匿名行为；显式指定的文件缺失或不可读时返回可处理的授权错误；无B站来源的普通截图整理不读取该文件。登录态是否能解决特定出口的限制，必须在授权后通过真实视频获取和模型结果验收。
+
+### 视频理解依赖
+
+使用 Hermes 已安装的 `agent.auxiliary_client.async_call_llm` 和 `vision` 辅助模型配置；
+故事板裁图需要 **Pillow**（本次本机验收为 12.3.0）。部署到新的 Hermes 环境前运行：
+
+```sh
+/path/to/hermes/venv/bin/python -c 'from PIL import Image; from agent.auxiliary_client import async_call_llm'
+```
+
+若缺少 Pillow，在该环境安装 `Pillow>=10`；没有该依赖时不会将标题当作视频内容，
+字幕仍可使用，故事板读取会返回可重试的未完成状态。参考实现及许可证见
+[`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)。
 - 聊天创建日程：Hermes 提供 `create_schedule`，接收标题、RFC 3339 起止时间，以及可选描述、地点、全天、重要程度和提醒设置。插件通过配置的 Agent Bearer token 调用 `/api/v1/schedules`；服务端将新日程写入既有同步流。
 - 资讯发布：Hermes 注册单一 `news.publish` 工具，通过受限 dataset 枚举发布 AIHOT 热点/条目/事件/报告、GitHub 每周或每日榜单，以及 Orialis 项目报告。插件只将 dataset 映射到固定 REST 路由；source、taskId 和 idempotencyKey 由插件生成，调用方不能提供 URL、路径、用户 ID 或任务 ID。项目报告可选传入 `projectId`，服务端仍会验证该项目归属。
 - 用户域 HTTP 工具：插件提供经过显式输入校验、全部使用 `Authorization: Bearer $ORIALIS_DEVICE_TOKEN` 的异步工具，覆盖任务 CRUD、项目 CRUD/summary、里程碑 CRUD、`/schedules` 与 `/calendar-events` CRUD、会话 CRUD，以及会话消息的 list/create。PATCH 和 DELETE 始终要求 `baseVersion`；消息附件仍由既有 adapter/HTTP 附件 API 处理。
@@ -75,11 +107,13 @@ Windows PowerShell：
 
 ```powershell
 $env:ORIALIS_SERVER_URL = 'ws://127.0.0.1:18443/api/v1/agent/ws'
-$env:ORIALIS_DEVICE_ID = 'JXCZ_WIN_Hermes'
-$env:ORIALIS_ALLOWED_USERS = 'JXCZ_WIN_Hermes'
+$env:ORIALIS_DEVICE_ID = 'JXCZ_PC_Hermes'
+$env:ORIALIS_ALLOWED_USERS = 'JXCZ_PC_Hermes'
 $env:ORIALIS_DEVICE_TOKEN = '替换为服务端设备 token'
 $env:ORIALIS_NEWS_PUBLISHER_TOKEN = '替换为服务端资讯 publisher token'
 ```
+
+Orialis 移动端聊天设备列表默认将 `JXCZ_PC_Hermes` 作为 Windows 目标。Windows Hermes 以此 ID 连接并在线后，可从移动端新建绑定到该设备的聊天；发送内容经 Orialis Gateway 转发，回复回到同一会话。若更换设备 ID，移动端构建时设置 `ORIALIS_WINDOWS_CHAT_DEVICE_ID` 为相同值。
 
 本地服务使用 `ws://`；启用 TLS 的服务使用 `wss://`。Windows 的路径会被插件转换为安全的文件名，不能通过附件名称写入任意目录；macOS 同样适用。
 
@@ -125,7 +159,7 @@ $env:ORIALIS_NEWS_PUBLISHER_TOKEN = '替换为服务端资讯 publisher token'
 - 不支持语音、音频或视频附件（包括 `audio/*`、`video/*`）。它们不会通过 WebSocket 或 HTTP 文件 API 桥接。
 - 单个附件必须大于 0 且不超过 20 MiB；下载和上传分别有 15 秒和 30 秒超时。
 - 下载 URL 必须属于配置的 Orialis Server；响应 MIME 必须与元数据匹配。临时下载文件只在本次处理期间存在。
-- WebSocket 只承载 JSON 文本帧，不承载附件字节。
+- WebSocket 承载 JSON 文本帧；聊天附件仍通过 HTTP 上传下载，屏幕记忆的压缩 JPEG 在独立后台请求中以 Base64 传输。
 - 连接断开后插件自动重连，延迟从 1 秒逐步增加至最多 30 秒。
 - v0.10 Voice 是未实现且有意排除的范围：语音、音频、视频和任何 `voice.*` 事件
   不会通过本插件、Orialis Agent Gateway 或 HTTP 附件 API 传输。
@@ -182,6 +216,13 @@ The plugin checks are intentionally split into three layers:
    `test_*.py` module under this plugin.
 
 Local Hermes-runtime validation is an optional fourth layer using `scripts/validate-hermes-plugin.sh`; it validates the manifest and repeats full discovery with the Hermes Python runtime.
+
+The plugin test dependencies are listed in `tests/requirements.txt` (`pytest`,
+`jsonschema`, and the storyboard crop dependency Pillow). Install them into an
+isolated test environment or a temporary `--target` directory, and include that
+directory in `PYTHONPATH` when running full discovery. The contract fixture module
+also uses pytest parametrization; run it with `python -m pytest` to execute its
+12 schema cases rather than only importing it through unittest discovery.
 
 ## 批量创建
 

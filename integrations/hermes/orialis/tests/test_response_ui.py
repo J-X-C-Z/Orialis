@@ -6,6 +6,7 @@ import re
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
+from xml.etree import ElementTree
 
 from ..adapter import register
 from ..response_ui import PLATFORM_HINT, RESPONSE_UI
@@ -32,9 +33,11 @@ class ResponseUiTests(unittest.TestCase):
 
     def test_generation_examples_and_shared_mobile_fixture_match_advertised_format(self):
         examples = re.findall(r'```orialis-ui\n(.*?)\n```', PLATFORM_HINT, re.S)
-        self.assertEqual(len(examples), 2)
+        self.assertEqual(len(examples), 5)
         fixture = Path(__file__).resolve().parents[4] / 'docs/contracts/response-ui-v1.example.json'
         examples.append(fixture.read_text(encoding='utf-8'))
+        extended_fixture = fixture.with_name('response-ui-v1.extended.example.json')
+        examples.append(extended_fixture.read_text(encoding='utf-8'))
         for raw in examples:
             doc = json.loads(raw)
             self.assertEqual(doc['version'], RESPONSE_UI['version'])
@@ -44,7 +47,26 @@ class ResponseUiTests(unittest.TestCase):
             for block in doc['blocks']:
                 self.assertIn(block['type'], RESPONSE_UI['block_types'])
                 self.assertTrue(1 <= len(block['items']) <= RESPONSE_UI['limits']['items'])
-        self.assertEqual({b['type'] for b in json.loads(examples[-1])['blocks']}, set(RESPONSE_UI['block_types']))
+        svg_items = [item for raw in examples for block in json.loads(raw)['blocks']
+                     if block['type'] == 'svg' for item in block['items']]
+        self.assertTrue(svg_items)
+        for item in svg_items:
+            self.assertTrue(item['label'].strip())
+            self.assertLessEqual(len(item['source']), RESPONSE_UI['limits']['source'])
+            root = ElementTree.fromstring(item['source'])
+            self.assertEqual(root.tag, '{http://www.w3.org/2000/svg}svg')
+            view_box = list(map(float, root.attrib['viewBox'].split()))
+            self.assertEqual(len(view_box), 4)
+            self.assertTrue(0 < view_box[2] <= 10000 and 0 < view_box[3] <= 10000)
+        self.assertEqual({b['type'] for raw in examples for b in json.loads(raw)['blocks']}, set(RESPONSE_UI['block_types']))
+        for raw in examples:
+            for block in json.loads(raw)['blocks']:
+                for item in block['items']:
+                    self.assertTrue(item['label'].strip())
+                    if block['type'] == 'plot':
+                        self.assertLessEqual(len(item['points']), RESPONSE_UI['limits']['points'])
+                    if block['type'] == 'math':
+                        self.assertLessEqual(len(item['source']), RESPONSE_UI['limits']['math_source'])
 
     def test_capabilities_distinguish_plugin_format_from_server_discovery(self):
         with patch.dict('os.environ', {'ORIALIS_SERVER_URL': 'https://example.test'}), \

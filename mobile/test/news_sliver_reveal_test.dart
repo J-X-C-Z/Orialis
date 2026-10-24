@@ -123,6 +123,40 @@ void main() {
     visible.dispose();
   });
 
+  testWidgets('folded sliver can rebuild layout-dependent rows and reopen', (
+    tester,
+  ) async {
+    final visible = ValueNotifier(true);
+    final revision = ValueNotifier(0);
+    await mount(
+      tester,
+      visible,
+      sliver: SliverFixedExtentList(
+        itemExtent: 56,
+        delegate: SliverChildBuilderDelegate(
+          (context, index) => ValueListenableBuilder<int>(
+            valueListenable: revision,
+            builder: (context, value, _) => LayoutBuilder(
+              builder: (context, constraints) => Text('row $index rev $value'),
+            ),
+          ),
+          childCount: 1000,
+        ),
+      ),
+    );
+    visible.value = false;
+    await tester.pumpAndSettle();
+    revision.value++;
+    await tester.pump();
+    visible.value = true;
+    await tester.pumpAndSettle();
+    expect(find.text('row 0 rev 1'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    visible.dispose();
+    revision.dispose();
+  });
+
   testWidgets(
     'long lists stay lazy, with no rows built while initially collapsed',
     (tester) async {

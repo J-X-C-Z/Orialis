@@ -22,8 +22,11 @@ class TodayPage extends ConsumerStatefulWidget {
   ConsumerState<TodayPage> createState() => _TodayPageState();
 }
 
-class _TodayPageState extends ConsumerState<TodayPage> {
-  late final Timer _clock;
+class _TodayPageState extends ConsumerState<TodayPage>
+    with WidgetsBindingObserver {
+  Timer? _clock;
+  bool _visible = false;
+  bool _foreground = true;
   late final Stream<List<Task>> _tasksStream;
   Stream<List<CalendarEvent>>? _schedulesStream;
   String? _schedulesDay;
@@ -31,21 +34,47 @@ class _TodayPageState extends ConsumerState<TodayPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _foreground =
+        WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
     // Hold one long-lived stream: rebuilding the page must not resubscribe
     // Drift watches every minute tick.
     _tasksStream = ref
         .read(taskRepositoryProvider)
         .watchTasksByFilters(completed: false);
-    // Minute ticks refresh the "next schedule" window; stream resubscription
-    // is avoided by caching the watch above and the day-scoped schedule watch.
-    _clock = Timer.periodic(const Duration(minutes: 1), (_) {
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _visible = TickerMode.valuesOf(context).enabled;
+    _updateClock();
+  }
+
+  void _updateClock() {
+    if (!_visible || !_foreground) {
+      _clock?.cancel();
+      _clock = null;
+      return;
+    }
+    // Hidden branches keep their state; only the visible page needs time ticks.
+    _clock ??= Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    _updateClock();
+    if (_foreground && _visible) setState(() {});
+  }
+
+  @override
   void dispose() {
-    _clock.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _clock?.cancel();
     super.dispose();
   }
 

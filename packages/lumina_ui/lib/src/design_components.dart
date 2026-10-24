@@ -12,6 +12,7 @@ import 'app_theme.dart';
 import 'lumina_motion.dart';
 import 'lumina_blur.dart';
 export 'lumina_motion.dart';
+export 'lumina_sliver_reveal.dart';
 export 'lumina_blur.dart';
 
 export 'package:flutter/widgets.dart';
@@ -549,7 +550,7 @@ class _ProgressPainter extends CustomPainter {
   bool shouldRepaint(_ProgressPainter old) =>
       old.phase != phase ||
       old.value != value ||
-      old.colors.dark != colors.dark;
+      old.colors.darkProgress != colors.darkProgress;
 }
 
 class LuminaPageScaffold extends StatelessWidget {

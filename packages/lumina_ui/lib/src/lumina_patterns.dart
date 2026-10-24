@@ -75,6 +75,7 @@ class LuminaTint extends StatelessWidget {
     final theme = LuminaTheme.of(context);
     return LuminaTheme(
       brightness: theme.brightness,
+      darkProgress: theme.colors.darkProgress,
       tint: color,
       highPerformanceMode: theme.highPerformanceMode,
       reduceTransparency: theme.reduceTransparency,
@@ -158,7 +159,10 @@ class LuminaReveal extends StatelessWidget {
             child: Align(
               alignment: Alignment.topCenter,
               heightFactor: value,
-              child: Opacity(opacity: value, child: child),
+              child: TickerMode(
+                enabled: value > 0,
+                child: Opacity(opacity: value, child: child),
+              ),
             ),
           ),
         ),

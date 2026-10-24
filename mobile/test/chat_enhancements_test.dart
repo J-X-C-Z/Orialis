@@ -50,6 +50,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('先处理重要且紧急的任务。', findRichText: true), findsWidgets);
       expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 4));
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
     },

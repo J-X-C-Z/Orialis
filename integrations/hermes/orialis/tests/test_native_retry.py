@@ -35,7 +35,7 @@ class NativeRetryTests(unittest.IsolatedAsyncioTestCase):
         self.authority = SimpleNamespace(db=self.db, epoch=self.epoch)
         self.runner = SimpleNamespace(config=SimpleNamespace(multiplex_profiles=False),
             session_authority=self.authority, adapters={self.adapter.platform:self.adapter},
-            _native_transport_homes={None:Path(self.home.name)},
+            _native_transport_homes={None:Path(self.home.name).resolve()},
             session_store=SimpleNamespace(_generate_session_key=lambda s:'route:'+s.chat_id,
                 lookup_by_session_key=lambda route:SimpleNamespace(session_id='owned' if route=='route:orialis:chat' else 'other')),
             _adapter_profile_for_source=lambda source:None,

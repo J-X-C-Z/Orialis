@@ -1,0 +1,20 @@
+[Unit]
+Description=Orialis DSH Agent Gateway bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/orialis-dsh-bridge
+EnvironmentFile=/etc/orialis-dsh-bridge.env
+ExecStart=/usr/local/bin/node /opt/orialis-dsh-bridge/bridge.mjs
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

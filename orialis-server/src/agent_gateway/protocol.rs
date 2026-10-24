@@ -176,6 +176,35 @@ pub struct GatewayArtifact {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum GatewayMessage {
+    #[serde(rename = "memory.analyze")]
+    MemoryAnalyze {
+        version: u32,
+        request_id: String,
+        content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image_base64: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        source_urls: Vec<String>,
+    },
+    #[serde(rename = "memory.result")]
+    MemoryResult {
+        version: u32,
+        request_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        category: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        video_status: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        video_summary: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        video_error: Option<String>,
+    },
     #[serde(rename = "session.info")]
     SessionInfo {
         version: u32,
@@ -566,7 +595,8 @@ pub enum GatewayMessage {
 impl GatewayMessage {
     pub fn message_id(&self) -> Option<&str> {
         match self {
-            Self::SessionInfo { request_id, .. }
+            Self::MemoryAnalyze { request_id, .. }
+            | Self::SessionInfo { request_id, .. }
             | Self::WorkspaceRequest { request_id, .. }
             | Self::ClarifyResolve { request_id, .. }
             | Self::ApprovalResolve { request_id, .. } => Some(request_id),
@@ -579,7 +609,8 @@ impl GatewayMessage {
 
     pub fn reply_to(&self) -> Option<&str> {
         match self {
-            Self::SessionReply { request_id, .. }
+            Self::MemoryResult { request_id, .. }
+            | Self::SessionReply { request_id, .. }
             | Self::WorkspaceResponse { request_id, .. }
             | Self::ApprovalResolve { request_id, .. }
             | Self::ClarifyResolve { request_id, .. } => Some(request_id),
@@ -857,6 +888,8 @@ pub fn parse_message(input: &str) -> Result<GatewayMessage, ProtocolError> {
             | "message.send"
             | "message.reply"
             | "message.ack"
+            | "memory.analyze"
+            | "memory.result"
             | "workspace.request"
             | "workspace.response"
             | "session.info"
@@ -972,16 +1005,77 @@ fn validate_message_text_or_attachments(
 
 fn validate_message(message: &GatewayMessage) -> Result<(), ProtocolError> {
     match message {
-        GatewayMessage::SessionInfo { request_id, conversation_id, session_id, .. } => {
-            for value in [request_id, conversation_id, session_id] {
-                validate_text(value)?;
-                if value.len() > 160 { return Err(ProtocolError::InvalidMessage); }
+        GatewayMessage::MemoryAnalyze {
+            request_id,
+            content,
+            image_base64,
+            source_urls,
+            ..
+        } => {
+            if request_id.trim().is_empty()
+                || request_id.len() > 160
+                || crate::memory_analysis::validate_input(content, image_base64.as_deref()).is_err()
+                || crate::memory_analysis::validate_source_urls(source_urls).is_err()
+            {
+                return Err(ProtocolError::InvalidMessage);
             }
         }
-        GatewayMessage::SessionReply { request_id, conversation_id, status, message, .. } => {
+        GatewayMessage::MemoryResult {
+            request_id,
+            content,
+            error,
+            category,
+            source_url,
+            video_status,
+            video_summary,
+            video_error,
+            ..
+        } => {
+            validate_text(request_id)?;
+            if request_id.len() > 160
+                || content
+                    .as_ref()
+                    .is_some_and(|text| text.trim().is_empty() || text.len() > 100_000)
+                || error
+                    .as_ref()
+                    .is_some_and(|text| text.trim().is_empty() || text.len() > 4000)
+                || content.is_some() == error.is_some()
+                || !crate::memory_analysis::valid_metadata(
+                    category.as_deref(),
+                    source_url.as_deref(),
+                    video_status.as_deref(),
+                    video_summary.as_deref(),
+                    video_error.as_deref(),
+                )
+            {
+                return Err(ProtocolError::InvalidMessage);
+            }
+        }
+        GatewayMessage::SessionInfo {
+            request_id,
+            conversation_id,
+            session_id,
+            ..
+        } => {
+            for value in [request_id, conversation_id, session_id] {
+                validate_text(value)?;
+                if value.len() > 160 {
+                    return Err(ProtocolError::InvalidMessage);
+                }
+            }
+        }
+        GatewayMessage::SessionReply {
+            request_id,
+            conversation_id,
+            status,
+            message,
+            ..
+        } => {
             for value in [request_id, conversation_id, status] {
                 validate_text(value)?;
-                if value.len() > 160 { return Err(ProtocolError::InvalidMessage); }
+                if value.len() > 160 {
+                    return Err(ProtocolError::InvalidMessage);
+                }
             }
             if message.as_ref().is_some_and(|text| text.len() > 4000) {
                 return Err(ProtocolError::InvalidMessage);
@@ -1179,10 +1273,14 @@ fn validate_event(message: &GatewayMessage) -> Result<(), ProtocolError> {
                 return Err(ProtocolError::InvalidMessage);
             }
         }
-        GatewayMessage::AgentComplete { run_id, message_id, .. } => {
+        GatewayMessage::AgentComplete {
+            run_id, message_id, ..
+        } => {
             validate_text(run_id)?;
-            if let Some(value) = message_id { validate_text(value)?; }
-        },
+            if let Some(value) = message_id {
+                validate_text(value)?;
+            }
+        }
         GatewayMessage::AgentError {
             run_id,
             code,
@@ -2094,9 +2192,18 @@ mod tests {
         let wire = serde_json::to_string(&original).unwrap();
         assert_eq!(parse_message(&wire).unwrap(), original);
         assert_eq!(serde_json::from_str::<Value>(&wire).unwrap()["seq"], 7);
-        assert_eq!(serde_json::from_str::<Value>(&wire).unwrap()["message_id"], "persisted-reply-1");
+        assert_eq!(
+            serde_json::from_str::<Value>(&wire).unwrap()["message_id"],
+            "persisted-reply-1"
+        );
         let legacy = wire.replace(",\"message_id\":\"persisted-reply-1\"", "");
-        assert!(matches!(parse_message(&legacy).unwrap(), GatewayMessage::AgentComplete { message_id: None, .. }));
+        assert!(matches!(
+            parse_message(&legacy).unwrap(),
+            GatewayMessage::AgentComplete {
+                message_id: None,
+                ..
+            }
+        ));
     }
 
     #[test]

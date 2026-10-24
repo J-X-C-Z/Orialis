@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import websockets
 
 from gateway.config import Platform
@@ -20,6 +20,10 @@ from ..adapter import OrialisAdapter
 
 class NativeTransportTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        initial_response = patch.object(adapter_module, 'generate_initial_response',
+            new=AsyncMock(return_value='收到，我先处理一下。'))
+        initial_response.start()
+        self.addCleanup(initial_response.stop)
         self.home = tempfile.TemporaryDirectory()
         self.env = patch.dict(os.environ, {'HERMES_HOME': self.home.name})
         self.env.start()
@@ -425,7 +429,8 @@ class NativeTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(finished.is_set())
         replies = [f for f in self.frames if f['type']=='message.reply']
         self.assertEqual([(f['reply_to'], f['content']) for f in replies],
-            [('base-stop','Native stop confirmed'), ('base-original','已停止本次任务。')])
+            [('base-original','收到，我先处理一下。'),
+             ('base-stop','Native stop confirmed'), ('base-original','已停止本次任务。')])
         self.assertFalse(self.adapter._stop_receipts)
 
     async def test_native_shared_stream_without_processing_hook_finishes_from_late_reply_ack(self):

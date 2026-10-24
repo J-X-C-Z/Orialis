@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orialis_mobile/core/config/app_config.dart';
 import 'package:orialis_mobile/news/news_data.dart';
+import 'package:orialis_mobile/news/news_motion.dart';
 import 'package:orialis_mobile/news/news_pages.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -85,6 +86,14 @@ class _VisibleRepository extends NewsRepository {
   final changes = StreamController<List<NewsLoadResult>>.broadcast();
   int starts = 0;
   int cancels = 0;
+  int gets = 0;
+
+  @override
+  Future<NewsLoadResult> get(String path, {bool requireSession = true}) async {
+    gets++;
+    return const NewsLoadResult(NewsLoadKind.empty);
+  }
+
   @override
   Stream<List<NewsLoadResult>> watch(
     List<String> paths, {
@@ -247,4 +256,90 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await repo.changes.close();
   });
+
+  testWidgets(
+    'hidden feeds cancel and resume only when foreground and visible',
+    (tester) async {
+      final config = _Config();
+      final repo = _VisibleRepository(config);
+      Widget host({required bool visible, int refreshGeneration = 0}) =>
+          ProviderScope(
+            overrides: [
+              newsConfigProvider.overrideWithValue(config),
+              newsRepositoryProvider.overrideWithValue(repo),
+            ],
+            child: MaterialApp(
+              home: Scaffold(
+                body: TickerMode(
+                  enabled: visible,
+                  child: NewsRefreshScope(
+                    generation: refreshGeneration,
+                    child: const AihotPage(),
+                  ),
+                ),
+              ),
+            ),
+          );
+      List<NewsLoadResult> publication(String title) => List.generate(
+        3,
+        (_) => NewsLoadResult(
+          NewsLoadKind.data,
+          payload: NewsPayload(
+            data: [
+              {'title': title},
+            ],
+            updatedAt: null,
+            stale: false,
+            source: 'test',
+            error: null,
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(host(visible: false));
+      expect(repo.starts, 0);
+      await tester.pumpWidget(host(visible: true));
+      expect(repo.starts, 1);
+      repo.changes.add(publication('cached publication'));
+      await tester.pumpAndSettle();
+      final refresh = tester
+          .widget<RefreshIndicator>(find.byType(RefreshIndicator))
+          .onRefresh;
+
+      await tester.pumpWidget(host(visible: false, refreshGeneration: 1));
+      expect(repo.cancels, 1);
+      expect(repo.gets, 0);
+      await refresh();
+      expect(repo.gets, 0);
+      repo.changes.add(publication('hidden publication'));
+      await tester.pump();
+      expect(find.text('cached publication'), findsWidgets);
+      expect(find.text('hidden publication'), findsNothing);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(repo.starts, 1);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pumpWidget(host(visible: true, refreshGeneration: 1));
+      expect(repo.starts, 1);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(repo.starts, 2);
+      expect(find.text('cached publication'), findsWidgets);
+      repo.changes.add(publication('resumed publication'));
+      await tester.pumpAndSettle();
+      expect(find.text('resumed publication'), findsWidgets);
+
+      await refresh();
+      await tester.pumpAndSettle();
+      expect(repo.gets, 3);
+      await tester.pumpWidget(host(visible: true, refreshGeneration: 2));
+      await tester.pumpAndSettle();
+      expect(repo.gets, 6);
+      await tester.pumpWidget(const SizedBox());
+      expect(repo.cancels, 2);
+      await repo.changes.close();
+    },
+  );
 }

@@ -333,9 +333,10 @@ void main() {
     (tester) async {
       final prompts = <String>[];
       final source = _fence(_document());
+      var streamedTail = '';
       Widget view() => _host(
         SafeMarkdownView(
-          source: source,
+          source: '$source$streamedTail',
           allowResponseUi: true,
           onPromptSelected: prompts.add,
         ),
@@ -348,6 +349,10 @@ void main() {
       await tester.pump();
       await tester.pumpWidget(view());
       expect(find.text('下午留出半小时复习。'), findsOneWidget);
+      streamedTail = '\n\n追加的 **实时回复**';
+      await tester.pumpWidget(view());
+      expect(find.text('下午留出半小时复习。'), findsOneWidget);
+      expect(find.text('追加的 实时回复', findRichText: true), findsOneWidget);
       expect(
         tester.widget<LuminaCheck>(find.byType(LuminaCheck).first).value,
         isTrue,

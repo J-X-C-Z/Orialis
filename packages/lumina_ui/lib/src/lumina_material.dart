@@ -227,12 +227,8 @@ class _LuminaMaterial extends CustomPainter {
       return;
     }
     final inset = depth == LuminaSurfaceDepth.recessed;
-    final light = colors.dark
-        ? const Color(0xFF4B5E6D)
-        : const Color(0xFFFFFFFF);
-    final shade = colors.dark
-        ? const Color(0xFF070F18)
-        : const Color(0xFFA6B7CD);
+    final light = colors.tone(const Color(0xFFFFFFFF), const Color(0xFF4B5E6D));
+    final shade = colors.tone(const Color(0xFFA6B7CD), const Color(0xFF070F18));
     if (!inset && !contrast) {
       canvas.save();
       if (glass) {
@@ -250,11 +246,7 @@ class _LuminaMaterial extends CustomPainter {
       // MaskFilter.blur forces an offscreen layer per surface.
       final shadowPaint = Paint()
         ..color = shade.withValues(
-          alpha: glass
-              ? .14
-              : colors.dark
-              ? .28
-              : .22,
+          alpha: glass ? .14 : colors.toneValue(.22, .28),
         );
       if (!cheapShadow) {
         shadowPaint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
@@ -278,11 +270,11 @@ class _LuminaMaterial extends CustomPainter {
       // A narrow solid lower edge adds material thickness without another blur.
       canvas.drawPath(
         path.shift(Offset(0, pressed ? 1 : 3)),
-        Paint()..color = Color.lerp(tint, shade, colors.dark ? .42 : .24)!,
+        Paint()..color = Color.lerp(tint, shade, colors.toneValue(.24, .42))!,
       );
     }
     final bodyKey =
-        '${colors.dark}|$glass|$diffuseGlass|$inset|$contrast|${tint.toARGB32()}|${colors.surface.toARGB32()}|${colors.accent.toARGB32()}|${rect.width.toStringAsFixed(1)}x${rect.height.toStringAsFixed(1)}';
+        '${colors.darkProgress}|$glass|$diffuseGlass|$inset|$contrast|${tint.toARGB32()}|${colors.surface.toARGB32()}|${colors.accent.toARGB32()}|${rect.width.toStringAsFixed(1)}x${rect.height.toStringAsFixed(1)}';
     canvas.drawPath(
       path,
       Paint()
@@ -301,7 +293,7 @@ class _LuminaMaterial extends CustomPainter {
                   Color.lerp(frost, light.withValues(alpha: frost.a), .36)!,
                   frost,
                   Color.lerp(frost, light.withValues(alpha: frost.a), .18)!,
-                  light.withValues(alpha: colors.dark ? .09 : .30),
+                  light.withValues(alpha: colors.toneValue(.30, .09)),
                 ],
                 [0, .36, .78, 1],
               );
@@ -313,7 +305,7 @@ class _LuminaMaterial extends CustomPainter {
                 Color.lerp(tint, light.withValues(alpha: .78), .55)!,
                 tint.withValues(alpha: tint.a * .65),
                 Color.lerp(tint, colors.accent.withValues(alpha: .12), .35)!,
-                light.withValues(alpha: colors.dark ? .10 : .42),
+                light.withValues(alpha: colors.toneValue(.42, .10)),
               ],
               [0, .40, .74, 1],
             );
@@ -331,7 +323,7 @@ class _LuminaMaterial extends CustomPainter {
         rect,
         Paint()
           ..shader = _grainShader
-          ..color = Color.fromRGBO(255, 255, 255, colors.dark ? .28 : 1),
+          ..color = Color.fromRGBO(255, 255, 255, colors.toneValue(1, .28)),
       );
       if (!inset) {
         canvas.drawPath(
@@ -341,7 +333,7 @@ class _LuminaMaterial extends CustomPainter {
             ..strokeWidth = 3
             ..shader = _cachedGradient(
               _rimGradientCache,
-              'card|${colors.dark}|${rect.height}',
+              'card|${colors.darkProgress}|${rect.height}',
               () => ui.Gradient.linear(
                 rect.topCenter,
                 rect.bottomCenter,
@@ -356,7 +348,7 @@ class _LuminaMaterial extends CustomPainter {
       // A refractive inner rim, not a card's left-hand highlight stripe.
       // Gradient strokes add lens depth without another blur or offscreen layer.
       final rimKey =
-          '${colors.dark}|$diffuseGlass|${pressed ? 1 : 0}|${colors.accent.toARGB32()}|${rect.height}';
+          '${colors.darkProgress}|$diffuseGlass|${pressed ? 1 : 0}|${colors.accent.toARGB32()}|${rect.height}';
       final rimShiftKey = '$rimKey|shift';
       canvas.drawPath(
         path.shift(Offset(0, pressed ? 1 : 2.5)),
@@ -405,7 +397,7 @@ class _LuminaMaterial extends CustomPainter {
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.25
-          ..color = shade.withValues(alpha: colors.dark ? .55 : .28),
+          ..color = shade.withValues(alpha: colors.toneValue(.28, .55)),
       );
     }
     canvas.drawPath(
@@ -417,7 +409,7 @@ class _LuminaMaterial extends CustomPainter {
             ? null
             : _cachedGradient(
                 _rimGradientCache,
-                'edge|${colors.dark}|$inset|$glass|${rect.size}',
+                'edge|${colors.darkProgress}|$inset|$glass|${rect.size}',
                 () => ui.Gradient.linear(rect.topLeft, rect.bottomRight, [
                   light.withValues(
                     alpha: inset
@@ -453,9 +445,10 @@ class _LuminaMaterial extends CustomPainter {
   void _paintLiquidGlass(Canvas canvas, Path path, Rect rect) {
     final inset = depth == LuminaSurfaceDepth.recessed;
     final white = const Color(0xFFFFFFFF);
-    final shadow = colors.dark
-        ? const Color(0xFF020812)
-        : const Color(0xFF415B78);
+    final shadow = colors.tone(
+      const Color(0xFF415B78),
+      const Color(0xFF020812),
+    );
     if (!contrast && !inset) {
       canvas.save();
       canvas.clipPath(
@@ -467,13 +460,13 @@ class _LuminaMaterial extends CustomPainter {
       canvas.drawPath(
         path.shift(Offset(0, pressed ? 2 : 7)),
         Paint()
-          ..color = shadow.withValues(alpha: colors.dark ? .22 : .085)
+          ..color = shadow.withValues(alpha: colors.toneValue(.085, .22))
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 14),
       );
       canvas.drawPath(
         path.shift(const Offset(0, 1)),
         Paint()
-          ..color = shadow.withValues(alpha: colors.dark ? .12 : .045)
+          ..color = shadow.withValues(alpha: colors.toneValue(.045, .12))
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
       );
       canvas.restore();
@@ -485,15 +478,9 @@ class _LuminaMaterial extends CustomPainter {
           ..color = Color.alphaBlend(tint, colors.surface).withValues(alpha: 1),
       );
     } else {
-      final alpha =
-          tint.a *
-          (inset
-              ? .28
-              : colors.dark
-              ? .66
-              : .46);
+      final alpha = tint.a * (inset ? .28 : colors.toneValue(.46, .66));
       final key =
-          'liquid|${colors.dark}|$inset|${tint.toARGB32()}|${rect.size}';
+          'liquid|${colors.darkProgress}|$inset|${tint.toARGB32()}|${rect.size}';
       canvas.drawPath(
         path,
         Paint()
@@ -507,7 +494,7 @@ class _LuminaMaterial extends CustomPainter {
                 Color.lerp(
                   tint,
                   white,
-                  colors.dark ? .08 : .50,
+                  colors.toneValue(.50, .08),
                 )!.withValues(alpha: alpha + .14),
                 tint.withValues(alpha: alpha),
                 Color.lerp(
@@ -518,7 +505,7 @@ class _LuminaMaterial extends CustomPainter {
                 Color.lerp(
                   tint,
                   white,
-                  colors.dark ? .04 : .28,
+                  colors.toneValue(.28, .04),
                 )!.withValues(alpha: alpha + .06),
               ],
               [0, .35, .72, 1],
@@ -533,12 +520,12 @@ class _LuminaMaterial extends CustomPainter {
         Paint()
           ..shader = _cachedGradient(
             _bodyGradientCache,
-            'specular|${colors.dark}|${rect.size}',
+            'specular|${colors.darkProgress}|${rect.size}',
             () => ui.Gradient.radial(
               Offset(rect.width * .18, -rect.height * .2),
               math.max(rect.width, rect.height) * .85,
               [
-                white.withValues(alpha: colors.dark ? .055 : .22),
+                white.withValues(alpha: colors.toneValue(.22, .055)),
                 white.withValues(alpha: 0),
               ],
             ),
@@ -551,14 +538,14 @@ class _LuminaMaterial extends CustomPainter {
           ..strokeWidth = 1.8
           ..shader = _cachedGradient(
             _rimGradientCache,
-            'liquid-inner|${colors.dark}|${rect.size}',
+            'liquid-inner|${colors.darkProgress}|${rect.size}',
             () => ui.Gradient.linear(
               rect.topCenter,
               rect.bottomCenter,
               [
-                white.withValues(alpha: colors.dark ? .12 : .42),
+                white.withValues(alpha: colors.toneValue(.42, .12)),
                 white.withValues(alpha: 0),
-                white.withValues(alpha: colors.dark ? .06 : .18),
+                white.withValues(alpha: colors.toneValue(.18, .06)),
               ],
               [0, .4, 1],
             ),
@@ -580,14 +567,14 @@ class _LuminaMaterial extends CustomPainter {
             ? null
             : _cachedGradient(
                 _rimGradientCache,
-                'liquid-edge|${colors.dark}|$inset|${rect.size}',
+                'liquid-edge|${colors.darkProgress}|$inset|${rect.size}',
                 () => ui.Gradient.linear(
                   rect.topLeft,
                   rect.bottomRight,
                   [
-                    white.withValues(alpha: colors.dark ? .34 : .84),
-                    white.withValues(alpha: colors.dark ? .06 : .18),
-                    white.withValues(alpha: colors.dark ? .19 : .52),
+                    white.withValues(alpha: colors.toneValue(.84, .34)),
+                    white.withValues(alpha: colors.toneValue(.18, .06)),
+                    white.withValues(alpha: colors.toneValue(.52, .19)),
                   ],
                   [0, .55, 1],
                 ),
@@ -646,7 +633,7 @@ class _LuminaMaterial extends CustomPainter {
   @override
   bool shouldRepaint(_LuminaMaterial old) =>
       old.shoulderWidth != shoulderWidth ||
-      old.colors.dark != colors.dark ||
+      old.colors.darkProgress != colors.darkProgress ||
       old.colors.tint != colors.tint ||
       old.tint != tint ||
       old.radius != radius ||

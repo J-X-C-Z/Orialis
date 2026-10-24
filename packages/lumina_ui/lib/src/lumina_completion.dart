@@ -33,8 +33,24 @@ class LuminaCompletionList extends StatefulWidget {
     this.animateChanges = false,
     this.onCompletionActivityChanged,
     super.key,
-  });
+  }) : itemKeys = null,
+       itemBuilder = null;
+
+  /// Builds rows lazily in a sliver. [itemKeys] must match the order and
+  /// stable identity of the rows returned by [itemBuilder].
+  const LuminaCompletionList.sliver({
+    required this.itemKeys,
+    required this.itemBuilder,
+    this.gap = 12,
+    this.empty = const SizedBox.shrink(),
+    this.animateChanges = false,
+    this.onCompletionActivityChanged,
+    super.key,
+  }) : children = const [];
+
   final List<Widget> children;
+  final List<Key>? itemKeys;
+  final IndexedWidgetBuilder? itemBuilder;
   final double gap;
   final Widget empty;
 
@@ -47,12 +63,18 @@ class LuminaCompletionList extends StatefulWidget {
 
 class _LuminaCompletionListState extends State<LuminaCompletionList> {
   late List<Widget> rows = List.of(widget.children);
+  late List<Key> sliverRows = List.of(widget.itemKeys ?? const []);
+  final Map<Key, Widget> mountedSliverChildren = {};
   final active = <Key>{};
   final departing = <Key>{};
   final arriving = <Key>{};
   @override
   void didUpdateWidget(LuminaCompletionList oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.itemKeys != null) {
+      _updateSliverRows();
+      return;
+    }
     final next = List<Widget>.of(widget.children);
     final keys = next.map((w) => w.key).toSet();
     final previousKeys = rows.map((w) => w.key).toSet();
@@ -75,6 +97,55 @@ class _LuminaCompletionListState extends State<LuminaCompletionList> {
     rows = next;
   }
 
+  void _updateSliverRows() {
+    final supplied = widget.itemKeys ?? const <Key>[];
+    final next = List<Key>.of(supplied);
+    final keys = supplied.toSet();
+    final oldKeys = sliverRows.toSet();
+    final oldIndexes = <int>{};
+    for (var i = 0; i < sliverRows.length; i++) {
+      if (mountedSliverChildren.containsKey(sliverRows[i])) oldIndexes.add(i);
+    }
+    if (widget.animateChanges) {
+      if (sliverRows.isEmpty && supplied.isNotEmpty) {
+        arriving.addAll(supplied.take(12));
+      } else {
+        for (final index in oldIndexes) {
+          if (index < supplied.length && !oldKeys.contains(supplied[index])) {
+            arriving.add(supplied[index]);
+          }
+        }
+      }
+    }
+    for (var i = 0; i < sliverRows.length; i++) {
+      final key = sliverRows[i];
+      if (!keys.contains(key) &&
+          (active.contains(key) ||
+              (widget.animateChanges &&
+                  mountedSliverChildren.containsKey(key)))) {
+        departing.add(key);
+        next.insert(math.min(i, next.length), key);
+      } else if (keys.contains(key)) {
+        departing.remove(key);
+      }
+    }
+    arriving.removeWhere((key) => !keys.contains(key));
+    sliverRows = next;
+    final nextKeys = next.toSet();
+    mountedSliverChildren.removeWhere((key, _) => !nextKeys.contains(key));
+    if (arriving.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final unmounted = arriving
+            .where((key) => !mountedSliverChildren.containsKey(key))
+            .toSet();
+        if (unmounted.isNotEmpty) {
+          setState(() => arriving.removeAll(unmounted));
+        }
+      });
+    }
+  }
+
   void finishArrival(Key key) {
     if (!mounted || !arriving.contains(key)) return;
     setState(() => arriving.remove(key));
@@ -84,7 +155,12 @@ class _LuminaCompletionListState extends State<LuminaCompletionList> {
     if (!mounted) return;
     setState(() {
       active.remove(key);
-      if (departing.remove(key)) rows.removeWhere((w) => w.key == key);
+      if (departing.remove(key)) {
+        rows.removeWhere((w) => w.key == key);
+        sliverRows.remove(key);
+      }
+      arriving.remove(key);
+      mountedSliverChildren.remove(key);
     });
     widget.onCompletionActivityChanged?.call(active.isNotEmpty);
   }
@@ -96,6 +172,7 @@ class _LuminaCompletionListState extends State<LuminaCompletionList> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.itemKeys != null) return _buildSliver(context);
     assert(rows.every((w) => w.key != null), 'Completion rows need stable IDs');
     final emptying =
         rows.isEmpty || rows.every((row) => departing.contains(row.key));
@@ -137,6 +214,127 @@ class _LuminaCompletionListState extends State<LuminaCompletionList> {
       ],
     );
   }
+
+  Widget _buildSliver(BuildContext context) {
+    final currentKeys = widget.itemKeys!.toSet();
+    final emptyKey = _SliverCompletionEmptyKey(this);
+    final indexes = <Key, int>{
+      emptyKey: 0,
+      for (var i = 0; i < sliverRows.length; i++) sliverRows[i]: i + 1,
+    };
+    final currentIndexes = <Key, int>{
+      for (var i = 0; i < widget.itemKeys!.length; i++) widget.itemKeys![i]: i,
+    };
+    final emptying =
+        sliverRows.isEmpty ||
+        sliverRows.every((key) => departing.contains(key));
+    return SliverList.builder(
+      itemCount: sliverRows.length + 1,
+      findChildIndexCallback: (key) => indexes[key],
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return KeyedSubtree(
+            key: emptyKey,
+            child: _SliverCompletionEmpty(
+              visible: sliverRows.isEmpty,
+              child: widget.empty,
+            ),
+          );
+        }
+        final rowIndex = index - 1;
+        final key = sliverRows[rowIndex];
+        final departingRow = departing.contains(key);
+        final child = currentKeys.contains(key)
+            ? widget.itemBuilder!(context, currentIndexes[key]!)
+            : mountedSliverChildren[key] ?? const SizedBox.shrink();
+        final entry = _CompletionEntry(
+          departing: departingRow,
+          arriving: arriving.contains(key),
+          preserveExtentDuringArrival: true,
+          gap: rowIndex == sliverRows.length - 1 ? 0 : widget.gap,
+          onStart: () => start(key),
+          onEnd: () => finish(key),
+          onArrivalEnd: () => finishArrival(key),
+          onMount: () => mountedSliverChildren[key] = child,
+          onDispose: () => mountedSliverChildren.remove(key),
+          child: child,
+        );
+        final lastAndEmptying = rowIndex == sliverRows.length - 1 && emptying;
+        return KeyedSubtree(
+          key: key,
+          child: Stack(
+            alignment: Alignment.topCenter,
+            children: [
+              entry,
+              if (lastAndEmptying)
+                IgnorePointer(
+                  child: ExcludeSemantics(
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: widget.empty,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SliverCompletionEmptyKey extends ValueKey<Object> {
+  const _SliverCompletionEmptyKey(super.value);
+}
+
+class _SliverCompletionEmpty extends StatefulWidget {
+  const _SliverCompletionEmpty({required this.visible, required this.child});
+  final bool visible;
+  final Widget child;
+
+  @override
+  State<_SliverCompletionEmpty> createState() => _SliverCompletionEmptyState();
+}
+
+class _SliverCompletionEmptyState extends State<_SliverCompletionEmpty>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _extent = AnimationController(
+    vsync: this,
+    duration: LuminaTheme.motionReducedOf(context)
+        ? Duration.zero
+        : LuminaMotion.standard,
+    value: widget.visible ? 1 : 0,
+  );
+
+  @override
+  void didUpdateWidget(_SliverCompletionEmpty oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _extent.duration = LuminaTheme.motionReducedOf(context)
+        ? Duration.zero
+        : LuminaMotion.standard;
+    if (widget.visible && !oldWidget.visible) {
+      // The exiting row already holds this exact footprint until it is removed.
+      _extent.value = 1;
+    } else if (!widget.visible && oldWidget.visible) {
+      _extent.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _extent.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SizeTransition(
+    alignment: Alignment.topCenter,
+    sizeFactor: _extent,
+    child: FadeTransition(
+      opacity: _extent,
+      child: SizedBox(width: double.infinity, child: widget.child),
+    ),
+  );
 }
 
 class _CompletionEntry extends StatefulWidget {
@@ -144,24 +342,29 @@ class _CompletionEntry extends StatefulWidget {
     required this.departing,
     required this.arriving,
     required this.gap,
+    this.preserveExtentDuringArrival = false,
     required this.onStart,
     required this.onEnd,
     required this.onArrivalEnd,
+    this.onMount,
+    this.onDispose,
     required this.child,
     super.key,
   });
   final bool departing;
   final bool arriving;
   final double gap;
+  final bool preserveExtentDuringArrival;
   final VoidCallback onStart, onEnd;
   final VoidCallback onArrivalEnd;
+  final VoidCallback? onMount, onDispose;
   final Widget child;
   @override
   State<_CompletionEntry> createState() => _CompletionEntryState();
 }
 
 class _CompletionEntryState extends State<_CompletionEntry>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   late final controller = AnimationController(
     vsync: this,
     duration: LuminaMotion.fluid,
@@ -176,8 +379,11 @@ class _CompletionEntryState extends State<_CompletionEntry>
   bool undoing = false;
   Offset? origin;
   @override
+  bool get wantKeepAlive => busy || widget.departing;
+  @override
   void initState() {
     super.initState();
+    widget.onMount?.call();
     if (widget.arriving) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _enter();
@@ -200,6 +406,8 @@ class _CompletionEntryState extends State<_CompletionEntry>
   @override
   void didUpdateWidget(_CompletionEntry oldWidget) {
     super.didUpdateWidget(oldWidget);
+    widget.onMount?.call();
+    if (widget.departing != oldWidget.departing) updateKeepAlive();
     if (widget.departing && !oldWidget.departing && !busy) {
       exiting = true;
       _exit();
@@ -239,6 +447,7 @@ class _CompletionEntryState extends State<_CompletionEntry>
   ) async {
     if (busy) return;
     busy = true;
+    updateKeepAlive();
     undoing = !becomingComplete;
     final box = context.findRenderObject() as RenderBox?;
     final button = trigger.findRenderObject() as RenderBox?;
@@ -258,12 +467,14 @@ class _CompletionEntryState extends State<_CompletionEntry>
       await controller.forward(from: 0).orCancel;
       if (!mounted) return;
       busy = false;
+      updateKeepAlive();
       widget.onEnd();
       if (mounted) controller.value = 0;
     } on TickerCanceled {
       // Navigating away does not cancel the already-started save.
     } catch (_) {
       busy = false;
+      updateKeepAlive();
       if (!mounted) return;
       widget.onEnd();
       showLuminaDialog<void>(
@@ -278,6 +489,7 @@ class _CompletionEntryState extends State<_CompletionEntry>
 
   @override
   void dispose() {
+    widget.onDispose?.call();
     controller.dispose();
     arrival.dispose();
     super.dispose();
@@ -285,6 +497,7 @@ class _CompletionEntryState extends State<_CompletionEntry>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final reduced = LuminaTheme.motionReducedOf(context);
     final colors = LuminaTheme.of(context).colors;
     return _CompletionScope(
@@ -318,7 +531,10 @@ class _CompletionEntryState extends State<_CompletionEntry>
           return SizedBox(
             child: Align(
               alignment: Alignment.topCenter,
-              heightFactor: collapse,
+              heightFactor:
+                  widget.preserveExtentDuringArrival && widget.arriving
+                  ? 1
+                  : collapse,
               child: Padding(
                 padding: EdgeInsets.only(bottom: widget.gap),
                 child: Stack(

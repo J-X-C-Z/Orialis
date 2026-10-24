@@ -98,6 +98,9 @@ class MobileRealtimeClient {
     if (_disposed) return;
     _stopped = false;
     if (_channel != null) return;
+    // A foreground retry should not wait for the background reconnect backoff.
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     final generation = _connectionGeneration;
     final pending = _connectFuture ??= _connect(generation);
     try {

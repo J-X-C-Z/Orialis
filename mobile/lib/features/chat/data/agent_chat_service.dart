@@ -60,7 +60,7 @@ class AgentChatService {
     ),
     this.hakariDeviceId = const String.fromEnvironment(
       'ORIALIS_HAKARI_CHAT_DEVICE_ID',
-      defaultValue: 'JXCZ_HAKARI_DSH',
+      defaultValue: 'JXCZ_HAKARI_Hermes',
     ),
   }) {
     config.addIdentityListener(_resetDeviceNames);
@@ -71,6 +71,19 @@ class AgentChatService {
   final _targetChanges = StreamController<(String, String?)>.broadcast();
   final _refreshes = <String, Future<String?>>{};
   final _authRevisions = <(String, String), int>{};
+  (String, String)? _clientScope;
+  Future<OrialisApiClient>? _sessionClient;
+
+  void _clearClient() {
+    final previous = _sessionClient;
+    _sessionClient = null;
+    _clientScope = null;
+    if (previous != null) {
+      unawaited(
+        previous.then<void>((api) => api.close(), onError: (Object _) {}),
+      );
+    }
+  }
 
   /// Authoritative binding changes discovered while showing cached history.
   /// An empty conversation ID invalidates all visible bindings.
@@ -78,12 +91,14 @@ class AgentChatService {
 
   Future<void> _resetDeviceNames() async {
     _identityGeneration++;
+    _clearClient();
     _deviceNames.clear();
     if (!_disposed) _targetChanges.add(('', null));
   }
 
   void dispose() {
     _disposed = true;
+    _clearClient();
     _identityGeneration++;
     config.removeIdentityListener(_resetDeviceNames);
     unawaited(_targetChanges.close());
@@ -97,15 +112,16 @@ class AgentChatService {
   bool isAllowedTarget(String? id) =>
       id != null &&
       id.isNotEmpty &&
-      ((id == hakariDeviceId && id.toLowerCase().endsWith('_dsh')) ||
-          (id.toLowerCase().endsWith('_hermes') &&
-              (id == macDeviceId ||
-                  id == azureDeviceId ||
-                  id == windowsDeviceId)));
+      id.endsWith('_Hermes') &&
+      (id == macDeviceId ||
+          id == azureDeviceId ||
+          id == windowsDeviceId ||
+          id == hakariDeviceId);
 
-  bool isDshTarget(String? id) => id == hakariDeviceId && isAllowedTarget(id);
+  // Retained for existing UI callers while every supported route is Hermes.
+  bool isDshTarget(String? id) => false;
 
-  String agentLabel(String? id) => isDshTarget(id) ? 'DSH' : 'Hermes';
+  String agentLabel(String? id) => 'Hermes';
 
   final _deviceNames = <String, String>{};
 
@@ -177,12 +193,17 @@ class AgentChatService {
     return _clientFor(scope);
   }
 
-  Future<OrialisApiClient> _clientFor((String, String) scope) async =>
-      OrialisApiClient(
-        baseUrl: scope.$1,
-        deviceId: await config.deviceId(),
-        config: _PinnedSessionConfig(scope.$2),
-      );
+  Future<OrialisApiClient> _clientFor((String, String) scope) {
+    if (_clientScope == scope && _sessionClient != null) return _sessionClient!;
+    _clearClient();
+    _clientScope = scope;
+    // Reuse the HTTP connection for binding, presence and command requests.
+    return _sessionClient = (() async => OrialisApiClient(
+      baseUrl: scope.$1,
+      deviceId: await config.deviceId(),
+      config: _PinnedSessionConfig(scope.$2),
+    ))();
+  }
 
   Future<List<ChatAgentDevice>> devices() async {
     var registry = <ChatAgentDevice>[];

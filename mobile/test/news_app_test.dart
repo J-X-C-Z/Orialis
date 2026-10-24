@@ -104,15 +104,13 @@ class _NewsRepositoryFake extends NewsRepository {
       'github/repos/owner/repo' => <String, dynamic>{
         'repository': 'owner/repo',
         'description': '一个示例仓库',
-        'readme':
-            '# 快速开始\n\n这是一个便于阅读的介绍。\n\n## 功能\n- 条目一\n- 条目二\n\n```bash\nrun demo\n```',
+        'readme': '# 快速开始\n\n这是一个便于阅读的介绍。\n\n## 功能\n- 条目一\n- 条目二\n\n```bash\nrun demo\n```',
         'repositoryUrl': 'https://github.com/owner/repo',
         if (githotDirect) ...{
           'sourceTitle': '源站中文项目标题',
           'sourceSummary': '源站保留的中文简介',
           'sourceTopics': ['开发工具', '开源'],
-          'sourceContent':
-              '# 源站介绍\n\n保留这一段落。\n\n## 原文第二节\n\n- 原文列表一\n- 原文列表二\n\n```bash\nsource demo\n```',
+          'sourceContent': '# 源站介绍\n\n保留这一段落。\n\n## 原文第二节\n\n- 原文列表一\n- 原文列表二\n\n```bash\nsource demo\n```',
           'sourceUrl': 'https://githot.dev/repo/owner/repo',
           'contentOrigin': 'githot.dev',
           'analysisStatus': 'not_required',
@@ -241,6 +239,43 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({'orialis.appearanceMode': 'light'});
   });
+
+  testWidgets(
+    'system appearance updates live and explicit appearance stays fixed',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'orialis.appearanceMode': 'system',
+      });
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            newsRepositoryProvider.overrideWithValue(_NewsRepositoryFake()),
+          ],
+          child: const OrialisNewsApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final context = tester.element(find.byType(NewsHomePage));
+      expect(LuminaTheme.of(context).brightness, Brightness.light);
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+      await tester.pumpAndSettle();
+      expect(LuminaTheme.of(context).brightness, Brightness.dark);
+      expect(Theme.of(context).brightness, Brightness.dark);
+      expect(
+        Theme.of(context).colorScheme.onSurface,
+        LuminaTheme.of(context).colors.ink,
+      );
+      await ProviderScope.containerOf(context)
+          .read(newsAppearanceProvider.notifier)
+          .setMode(ThemeMode.light);
+      await tester.pumpAndSettle();
+      expect(LuminaTheme.of(context).brightness, Brightness.light);
+      expect(Theme.of(context).brightness, Brightness.light);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('refresh keeps the selected period and only reloads its feed', (
     tester,
@@ -427,9 +462,8 @@ void main() {
               ],
               child: MaterialApp(
                 builder: (context, _) => MediaQuery(
-                  data: MediaQuery.of(
-                    context,
-                  ).copyWith(textScaler: const TextScaler.linear(1.6)),
+                  data: MediaQuery.of(context)
+                      .copyWith(textScaler: const TextScaler.linear(1.6)),
                   child: const OrialisNewsApp(),
                 ),
               ),

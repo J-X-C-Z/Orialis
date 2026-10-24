@@ -1,6 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../app/app.dart';
+
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
+
 import '../../../core/database/app_database.dart';
 import '../../../pages/shared/page_parts.dart';
 import '../data/event_repository.dart';
@@ -255,7 +258,10 @@ class _TaskEditorState extends ConsumerState<_TaskEditor> {
         ),
       ],
       if (_error != null)
-        Text(_error!, style: const TextStyle(color: LuminaBaseColors.danger)),
+        Text(
+          _error!,
+          style: TextStyle(color: LuminaTheme.of(context).colors.danger),
+        ),
       Row(
         children: [
           Expanded(

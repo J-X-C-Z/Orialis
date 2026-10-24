@@ -1,5 +1,6 @@
 <template>
-<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><scroll class="content" scroll-y="true"><div class="stack">
+<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><div class="stack" if="{{ vm.cacheLoading }}"><text class="body">正在读取本地缓存…</text></div>
+<scroll if="{{ !vm.cacheLoading }}" class="content" scroll-y="true"><div class="stack">
 <div class="header"><div class="back" onclick="goBack"><text class="backText">‹</text></div><text class="title">连接诊断</text></div><text class="sourceLine">{{ vm.sourceShort }}</text><text class="provenance">{{ vm.provenance }}</text>
 <div class="block"><text class="label">手机互联</text><text class="body">{{ vm.connectionStatus }}</text><text class="meta">{{ vm.detail }}</text><div class="button" onclick="diagnose"><text class="buttonText">诊断连接</text></div><div class="button" onclick="ping"><text class="buttonText">发送 Ping</text></div></div>
 <div class="block"><text class="label">最近结果</text><text class="body">{{ vm.lastResult }}</text><text class="meta">Pong 只表示手机回应。</text></div>

@@ -1,0 +1,18 @@
+{
+  "node": "laptop-1",
+  "profile": "/absolute/path/to/hermes/profile",
+  "state_dir": "/absolute/path/to/private/profile-sync/client-state",
+  "ssh": [
+    "ssh",
+    "-T",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "StrictHostKeyChecking=yes",
+    "-o",
+    "UserKnownHostsFile=/absolute/path/to/private/known_hosts",
+    "-i",
+    "/absolute/path/to/private/sync_key",
+    "sync-user@sync.example.invalid"
+  ]
+}

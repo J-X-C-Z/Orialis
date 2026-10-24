@@ -51,6 +51,8 @@ class SyncEngine {
   OrialisApiClient? _ownedApi;
   OutboxStore? _outbox;
   Set<String>? _serverCapabilities;
+  final Map<String, Future<void>> _conversationPushes = {};
+  final Map<(String, String), Future<void>> _messagePushes = {};
 
   OutboxStore get _outboxStore => _outbox ??= OutboxStore(database);
 
@@ -64,6 +66,41 @@ class SyncEngine {
       deviceId: deviceId,
       config: config,
     );
+  }
+
+  /// Uploads just the conversation dependency and one local chat message.
+  /// This is the send acknowledgement path; it deliberately skips history pulls
+  /// and every non-chat sync domain.
+  Future<void> flushChatMessage({
+    required String conversationId,
+    required String messageId,
+  }) async {
+    if (requireSession && await config.sessionToken() == null) {
+      throw StateError('A signed-in session is required to send chat messages');
+    }
+    final api = await _resolveApi();
+    while (true) {
+      await _pushConversations(api, conversationId: conversationId);
+      final conversation = await (database.select(
+        database.conversations,
+      )..where((row) => row.id.equals(conversationId))).getSingleOrNull();
+      if (conversation == null || conversation.syncStatus == 'synced') break;
+    }
+    await _pushMessages(
+      api,
+      conversationId: conversationId,
+      messageId: messageId,
+    );
+    final message =
+        await (database.select(database.messages)..where(
+              (row) =>
+                  row.conversationId.equals(conversationId) &
+                  row.id.equals(messageId),
+            ))
+            .getSingleOrNull();
+    if (message == null || message.syncStatus != 'synced') {
+      throw StateError('Chat message upload was not acknowledged');
+    }
   }
 
   Future<SyncState> syncOnce() async {
@@ -108,70 +145,107 @@ class SyncEngine {
     }
   }
 
-  Future<void> _pushConversations(OrialisApiClient api) async {
-    final pending = await (database.select(
-      database.conversations,
-    )..where((row) => row.syncStatus.isNotIn(const ['synced']))).get();
+  Future<void> _pushConversations(
+    OrialisApiClient api, {
+    String? conversationId,
+  }) async {
+    final query = database.select(database.conversations)
+      ..where((row) => row.syncStatus.isNotIn(const ['synced']));
+    if (conversationId != null) {
+      query.where((row) => row.id.equals(conversationId));
+    }
+    final pending = await query.get();
     for (final conversation in pending) {
-      final mutationId = mutationIdFor(
-        'conversation',
-        conversation.id,
-        conversation.localRevision,
-        conversation.syncStatus,
+      await _pushConversation(api, conversation);
+    }
+  }
+
+  Future<void> _pushConversation(
+    OrialisApiClient api,
+    Conversation conversation,
+  ) {
+    final existing = _conversationPushes[conversation.id];
+    if (existing != null) return existing;
+    late final Future<void> push;
+    push = _uploadConversation(api, conversation).whenComplete(() {
+      if (identical(_conversationPushes[conversation.id], push)) {
+        _conversationPushes.remove(conversation.id);
+      }
+    });
+    _conversationPushes[conversation.id] = push;
+    return push;
+  }
+
+  Future<void> _uploadConversation(
+    OrialisApiClient api,
+    Conversation conversation,
+  ) async {
+    final currentConversation = await (database.select(
+      database.conversations,
+    )..where((row) => row.id.equals(conversation.id))).getSingleOrNull();
+    if (currentConversation == null ||
+        currentConversation.syncStatus == 'synced') {
+      return;
+    }
+    conversation = currentConversation;
+    final mutationId = mutationIdFor(
+      'conversation',
+      conversation.id,
+      conversation.localRevision,
+      conversation.syncStatus,
+    );
+    Map<String, dynamic> result;
+    if (conversation.syncStatus == 'pendingCreate') {
+      result = await api.createConversation(
+        id: conversation.id,
+        title: conversation.title,
+        pinned: conversation.pinned,
+        manualPosition: conversation.manualPosition,
+        mutationId: mutationId,
       );
-      Map<String, dynamic> result;
-      if (conversation.syncStatus == 'pendingCreate') {
-        result = await api.createConversation(
-          id: conversation.id,
-          title: conversation.title,
-          pinned: conversation.pinned,
-          manualPosition: conversation.manualPosition,
-          mutationId: mutationId,
-        );
-      } else if (conversation.syncStatus == 'pendingDelete') {
-        try {
-          await api.deleteConversation(
-            conversation.id,
-            conversation.remoteVersion,
-            mutationId,
-          );
-        } on DioException catch (error) {
-          if (error.response?.statusCode != 404) rethrow;
-        }
-        result = <String, dynamic>{};
-      } else {
-        result = await api.renameConversation(
+    } else if (conversation.syncStatus == 'pendingDelete') {
+      try {
+        await api.deleteConversation(
           conversation.id,
-          conversation.title,
           conversation.remoteVersion,
           mutationId,
-          pinned: conversation.pinned,
-          manualPosition: conversation.manualPosition,
         );
+      } on DioException catch (error) {
+        if (error.response?.statusCode != 404) rethrow;
       }
-      final remoteVersion =
-          (result['version'] as num?)?.toInt() ??
-          conversation.remoteVersion +
-              (conversation.syncStatus == 'pendingDelete' ? 1 : 0);
-      final current = await (database.select(
-        database.conversations,
-      )..where((row) => row.id.equals(conversation.id))).getSingle();
-      await (database.update(
-        database.conversations,
-      )..where((row) => row.id.equals(conversation.id))).write(
-        ConversationsCompanion(
-          version: Value(remoteVersion),
-          remoteVersion: Value(remoteVersion),
-          syncStatus: Value(
-            current.localRevision == conversation.localRevision
-                ? 'synced'
-                : current.syncStatus == 'pendingCreate'
-                ? 'pendingUpdate'
-                : current.syncStatus,
-          ),
-        ),
+      result = <String, dynamic>{};
+    } else {
+      result = await api.renameConversation(
+        conversation.id,
+        conversation.title,
+        conversation.remoteVersion,
+        mutationId,
+        pinned: conversation.pinned,
+        manualPosition: conversation.manualPosition,
       );
     }
+    final remoteVersion =
+        (result['version'] as num?)?.toInt() ??
+        conversation.remoteVersion +
+            (conversation.syncStatus == 'pendingDelete' ? 1 : 0);
+    final current = await (database.select(
+      database.conversations,
+    )..where((row) => row.id.equals(conversation.id))).getSingle();
+    await (database.update(
+      database.conversations,
+    )..where((row) => row.id.equals(conversation.id))).write(
+      ConversationsCompanion(
+        version: Value(remoteVersion),
+        remoteVersion: Value(remoteVersion),
+        syncStatus: Value(
+          current.localRevision == conversation.localRevision
+              ? 'synced'
+              : current.syncStatus == 'pendingCreate'
+              ? 'pendingUpdate'
+              : current.syncStatus,
+        ),
+      ),
+    );
   }
 
   Future<void> _pushProjects(OrialisApiClient api) async {
@@ -1010,129 +1084,178 @@ class SyncEngine {
     }
   }
 
-  Future<void> _pushMessages(OrialisApiClient api) async {
-    final pending = await (database.select(
-      database.messages,
-    )..where((row) => row.syncStatus.isNotIn(const ['synced']))).get();
-    for (final message in pending) {
-      // Local conversation deletion is authoritative for queued messages.
-      // Do this before attachment upload so a deleted conversation cannot
-      // trigger a doomed upload/message POST and block the whole sync pass.
-      final conversation =
-          await (database.select(database.conversations)
-                ..where((row) => row.id.equals(message.conversationId)))
+  Future<void> _pushMessages(
+    OrialisApiClient api, {
+    String? conversationId,
+    String? messageId,
+  }) async {
+    if (conversationId != null && messageId != null) {
+      final target =
+          await (database.select(database.messages)..where(
+                (row) =>
+                    row.conversationId.equals(conversationId) &
+                    row.id.equals(messageId),
+              ))
               .getSingleOrNull();
-      if (conversation?.deletedAt != null) {
-        await _markMessageSynced(message);
-        continue;
-      }
-      final records = AttachmentBridge.decode(message.attachmentsJson);
-      final attachments = <Map<String, dynamic>>[];
-      for (var index = 0; index < records.length; index++) {
-        var record = records[index];
-        if (!record.isUploaded) {
-          final attempt = record.attempts + 1;
+      if (target == null || target.syncStatus == 'synced') return;
+    }
+    final query = database.select(database.messages)
+      ..where((row) => row.syncStatus.isNotIn(const ['synced']))
+      ..orderBy([
+        (row) => OrderingTerm.asc(row.createdAt),
+        (row) => OrderingTerm.asc(row.id),
+      ]);
+    if (conversationId != null) {
+      query.where((row) => row.conversationId.equals(conversationId));
+    }
+    if (messageId != null && conversationId == null) {
+      query.where((row) => row.id.equals(messageId));
+    }
+    final pending = await query.get();
+    for (final message in pending) {
+      await _pushMessage(api, message);
+      if (messageId != null && message.id == messageId) break;
+    }
+  }
+
+  Future<void> _pushMessage(OrialisApiClient api, Message message) {
+    final key = (message.conversationId, message.id);
+    final existing = _messagePushes[key];
+    if (existing != null) return existing;
+    late final Future<void> push;
+    push = _uploadMessage(api, message).whenComplete(() {
+      if (identical(_messagePushes[key], push)) _messagePushes.remove(key);
+    });
+    _messagePushes[key] = push;
+    return push;
+  }
+
+  Future<void> _uploadMessage(OrialisApiClient api, Message message) async {
+    final currentMessage =
+        await (database.select(database.messages)..where(
+              (row) =>
+                  row.conversationId.equals(message.conversationId) &
+                  row.id.equals(message.id),
+            ))
+            .getSingleOrNull();
+    if (currentMessage == null || currentMessage.syncStatus == 'synced') {
+      return;
+    }
+    message = currentMessage;
+    // Local conversation deletion is authoritative for queued messages.
+    // Do this before attachment upload so a deleted conversation cannot
+    // trigger a doomed upload/message POST and block the whole sync pass.
+    final conversation = await (database.select(
+      database.conversations,
+    )..where((row) => row.id.equals(message.conversationId))).getSingleOrNull();
+    if (conversation?.deletedAt != null) {
+      await _markMessageSynced(message);
+      return;
+    }
+    final records = AttachmentBridge.decode(message.attachmentsJson);
+    final attachments = <Map<String, dynamic>>[];
+    for (var index = 0; index < records.length; index++) {
+      var record = records[index];
+      if (!record.isUploaded) {
+        final attempt = record.attempts + 1;
+        record = record.copyWith(
+          status: AttachmentStatus.uploading,
+          attempts: attempt,
+          lastAttemptAt: DateTime.now().toUtc().toIso8601String(),
+          lastError: null,
+        );
+        records[index] = record;
+        await _saveAttachmentRecords(message, records);
+        try {
+          final uploaded = await api.uploadAttachments(
+            conversationId: message.conversationId,
+            idempotencyKey: '${message.id}:attachment:$index',
+            files: [
+              AttachmentUpload(
+                path: record.localPath,
+                name: record.name,
+                mimeType: record.mimeType,
+              ),
+            ],
+          );
+          if (uploaded.isEmpty) {
+            throw StateError('attachment upload returned no item');
+          }
+          final value = uploaded.single;
           record = record.copyWith(
-            status: AttachmentStatus.uploading,
-            attempts: attempt,
-            lastAttemptAt: DateTime.now().toUtc().toIso8601String(),
+            status: AttachmentStatus.uploaded,
+            id: value['id'] as String?,
+            downloadUrl: value['downloadUrl'] as String?,
             lastError: null,
           );
           records[index] = record;
           await _saveAttachmentRecords(message, records);
-          try {
-            final uploaded = await api.uploadAttachments(
-              conversationId: message.conversationId,
-              idempotencyKey: '${message.id}:attachment:$index',
-              files: [
-                AttachmentUpload(
-                  path: record.localPath,
-                  name: record.name,
-                  mimeType: record.mimeType,
-                ),
-              ],
-            );
-            if (uploaded.isEmpty) {
-              throw StateError('attachment upload returned no item');
-            }
-            final value = uploaded.single;
-            record = record.copyWith(
-              status: AttachmentStatus.uploaded,
-              id: value['id'] as String?,
-              downloadUrl: value['downloadUrl'] as String?,
-              lastError: null,
-            );
-            records[index] = record;
-            await _saveAttachmentRecords(message, records);
-          } catch (error) {
-            records[index] = record.copyWith(
-              status: AttachmentStatus.failed,
-              lastError: error.toString(),
-            );
-            await _saveAttachmentRecords(message, records);
-            rethrow;
-          }
-        }
-        if (record.id == null) throw StateError('attachment has no server id');
-        attachments.add(
-          record.toMessageJson({
-            'id': record.id,
-            'downloadUrl': record.downloadUrl,
-          }),
-        );
-      }
-      late final Map<String, dynamic> result;
-      try {
-        result = await api.createMessage(
-          conversationId: message.conversationId,
-          id: message.id,
-          content: message.content,
-          attachments: attachments,
-          replyToMessageId: message.replyToMessageId,
-          replyQuote: message.replyQuote,
-          replyRole: message.replyRole,
-        );
-      } on DioException catch (error) {
-        // The remote conversation may have been deleted independently. This
-        // message can no longer be delivered; isolate it while preserving
-        // normal failure handling for auth, network, and server errors.
-        if (isIgnorableMessageCreateStatus(error.response?.statusCode)) {
-          await _markMessageSynced(message);
-          continue;
-        }
-        if (error.response?.statusCode == 409) {
-          try {
-            final remote = await api.listMessages(message.conversationId);
-            if (remoteContainsMessage(remote, message.id)) {
-              await _markMessageSynced(message);
-              continue;
-            }
-          } on DioException catch (lookupError) {
-            if (isIgnorableMessageFetchStatus(
-              lookupError.response?.statusCode,
-            )) {
-              await _markMessageSynced(message);
-              continue;
-            }
-            rethrow;
-          }
-        }
-        rethrow;
-      }
-      await (database.update(database.messages)..where(
-            (row) =>
-                row.conversationId.equals(message.conversationId) &
-                row.id.equals(message.id),
-          ))
-          .write(
-            MessagesCompanion(
-              remoteVersion: Value(
-                (result['version'] as num?)?.toInt() ?? message.remoteVersion,
-              ),
-              syncStatus: const Value('synced'),
-            ),
+        } catch (error) {
+          records[index] = record.copyWith(
+            status: AttachmentStatus.failed,
+            lastError: error.toString(),
           );
+          await _saveAttachmentRecords(message, records);
+          rethrow;
+        }
+      }
+      if (record.id == null) throw StateError('attachment has no server id');
+      attachments.add(
+        record.toMessageJson({
+          'id': record.id,
+          'downloadUrl': record.downloadUrl,
+        }),
+      );
     }
+    late final Map<String, dynamic> result;
+    try {
+      result = await api.createMessage(
+        conversationId: message.conversationId,
+        id: message.id,
+        content: message.content,
+        attachments: attachments,
+        replyToMessageId: message.replyToMessageId,
+        replyQuote: message.replyQuote,
+        replyRole: message.replyRole,
+      );
+    } on DioException catch (error) {
+      // The remote conversation may have been deleted independently. This
+      // message can no longer be delivered; isolate it while preserving
+      // normal failure handling for auth, network, and server errors.
+      if (isIgnorableMessageCreateStatus(error.response?.statusCode)) {
+        await _markMessageSynced(message);
+        return;
+      }
+      if (error.response?.statusCode == 409) {
+        try {
+          final remote = await api.listMessages(message.conversationId);
+          if (remoteContainsMessage(remote, message.id)) {
+            await _markMessageSynced(message);
+            return;
+          }
+        } on DioException catch (lookupError) {
+          if (isIgnorableMessageFetchStatus(lookupError.response?.statusCode)) {
+            await _markMessageSynced(message);
+            return;
+          }
+          rethrow;
+        }
+      }
+      rethrow;
+    }
+    await (database.update(database.messages)..where(
+          (row) =>
+              row.conversationId.equals(message.conversationId) &
+              row.id.equals(message.id),
+        ))
+        .write(
+          MessagesCompanion(
+            remoteVersion: Value(
+              (result['version'] as num?)?.toInt() ?? message.remoteVersion,
+            ),
+            syncStatus: const Value('synced'),
+          ),
+        );
   }
 
   Future<void> _markMessageSynced(Message message) async {

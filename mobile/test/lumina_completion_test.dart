@@ -459,7 +459,7 @@ void main() {
     update(() => index = 1);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 60));
-    expect(find.text('keep me'), findsOneWidget);
+    expect(find.text('keep me'), findsNothing);
     expect(find.text('second'), findsOneWidget);
     update(() => index = 2);
     await tester.pump();

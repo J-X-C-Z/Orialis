@@ -1,8 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../app/app.dart';
+
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show OrialisPageScaffold;
+
 import '../../core/database/app_database.dart';
 import '../../features/events/presentation/task_children.dart';
 import '../../features/events/presentation/task_editor.dart';
@@ -424,16 +427,22 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
 
   Color _statusColor(DateTime day, List<Schedule> schedules) {
     final tasks = _dueOn(day);
-    final dark = LuminaTheme.of(context).colors.dark;
+    final colors = LuminaTheme.of(context).colors;
     if (tasks.any((t) => t.important == true && t.urgent == true)) {
-      return LuminaCardPalette.rose.colors(dark: dark).accent;
+      return LuminaCardPalette.rose
+          .colors(darkProgress: colors.darkProgress)
+          .accent;
     }
     if (tasks.any((t) => t.urgent == true)) {
-      return LuminaCardPalette.amber.colors(dark: dark).accent;
+      return LuminaCardPalette.amber
+          .colors(darkProgress: colors.darkProgress)
+          .accent;
     }
     if (schedules.any((s) => s.important) ||
         tasks.any((t) => t.important == true)) {
-      return LuminaCardPalette.ocean.colors(dark: dark).accent;
+      return LuminaCardPalette.ocean
+          .colors(darkProgress: colors.darkProgress)
+          .accent;
     }
     return LuminaTheme.of(context).colors.muted;
   }
@@ -530,7 +539,9 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 if (ongoing)
                   Text(
                     '进行中',
-                    style: text.labelSmall.copyWith(color: LuminaBaseColors.accent),
+                    style: text.labelSmall.copyWith(
+                      color: LuminaTheme.of(context).colors.accent,
+                    ),
                   ),
               ],
             ),
@@ -994,9 +1005,9 @@ class _ScheduleEditorState extends State<_ScheduleEditor> {
       ? _start.add(const Duration(hours: 1))
       : widget.event!.allDay
       // Storage uses an exclusive end; the editor displays the last included day.
-      ? DateTime.parse(
-          widget.event!.endAt,
-        ).toLocal().subtract(const Duration(microseconds: 1))
+      ? DateTime.parse(widget.event!.endAt)
+            .toLocal()
+            .subtract(const Duration(microseconds: 1))
       : DateTime.parse(widget.event!.endAt).toLocal();
   late bool _allDay = widget.event?.allDay ?? false;
   late bool _important = widget.event?.important ?? false;
@@ -1144,7 +1155,10 @@ class _ScheduleEditorState extends State<_ScheduleEditor> {
         keyboardType: TextInputType.number,
       ),
       if (_error != null)
-        Text(_error!, style: const TextStyle(color: LuminaBaseColors.danger)),
+        Text(
+          _error!,
+          style: TextStyle(color: LuminaTheme.of(context).colors.danger),
+        ),
       LuminaButton(
         onPressed: _saving ? null : _save,
         child: Text(_saving ? '保存中…' : '保存'),

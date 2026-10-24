@@ -1,0 +1,4 @@
+- id: acp
+  config:
+    provider: westlake-hpc
+    model: deepseek-flash

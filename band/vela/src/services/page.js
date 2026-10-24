@@ -2,6 +2,7 @@ let router = null
 let storage = null
 let application = null
 const feedback = require('./feedback')
+const store = require('./store')
 try { application = require('@system.app') } catch (error) { console.warn('app unavailable') }
 try { router = require('@system.router') } catch (error) { console.warn('router unavailable') }
 try { storage = require('@system.storage') } catch (error) { console.warn('storage unavailable') }
@@ -13,7 +14,7 @@ function savePreferences(activeStore) {
 }
 function createPage(kind) {
   return Object.assign({
-    data: { pageKind: kind || 'home', motionClass: '', vm: { tasks: [], commands: [], devices: [], provenance: '无数据 · 等待手机同步' }, selectedTask: null, selectedCommand: null, confirmCommand: false, taskMutationStatus: '', organizer: { rows: [], groups: [], days: [], related: [], milestones: [], deadlines: [], later: [], profile: {}, sync: {} }, selection: null, detailTrail: [], editor: null, fields: [], filter: '待完成', quadrantFilter: -1, quadrantLabel: '全部象限', calendarDate: '', calendarMode: '日', calendarDateLabel: '', calendarWeekday: '', calendarIsToday: false, calendarTotal: 0, visibleScheduleRows: [], notice: '', confirmDelete: false, homeSection: '', sectionTitle: '', visibleRows: [], visibleLimit: 10, hasMore: false, quadrants: [], unclassifiedCount: 0, pageTitle: { home: '今日', events: '四象限', calendar: '日历', projects: '项目', profile: '我的' }[kind] || 'Orialis' },
+    data: { pageKind: kind || 'home', motionClass: '', vm: store.view(), selectedTask: null, selectedCommand: null, confirmCommand: false, taskMutationStatus: '', organizer: { rows: [], groups: [], days: [], related: [], milestones: [], deadlines: [], later: [], profile: {}, sync: {} }, selection: null, detailTrail: [], editor: null, fields: [], filter: '待完成', quadrantFilter: -1, quadrantLabel: '全部象限', calendarDate: '', calendarMode: '日', calendarDateLabel: '', calendarWeekday: '', calendarIsToday: false, calendarTotal: 0, visibleScheduleRows: [], notice: '', confirmDelete: false, homeSection: '', sectionTitle: '', visibleRows: [], visibleLimit: 10, hasMore: false, quadrants: [], unclassifiedCount: 0, pageTitle: { home: '今日', events: '四象限', calendar: '日历', projects: '项目', profile: '我的' }[kind] || 'Orialis' },
     onInit() {
       this.wearStore = this.$app.$def.wearStore
       this.wearTransport = this.$app.$def.wearTransport

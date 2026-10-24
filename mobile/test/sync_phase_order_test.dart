@@ -294,89 +294,80 @@ void main() {
     );
   });
 
-  for (final first in ['conversation.push', 'schedule.push']) {
-    test('phase barriers hold when $first completes first', () async {
-      final db = AppDatabase(executor: NativeDatabase.memory());
-      final api = _PhaseApi();
-      Future<SyncState>? run;
-      addTearDown(() async {
-        api.releaseAll();
-        if (run != null) await run.timeout(const Duration(seconds: 10));
-        await db.close();
-      });
-      await _seed(db);
-      final engine = SyncEngine(
-        database: db,
-        config: AppConfig(),
-        apiClient: api,
-      );
-      run = engine.syncOnce();
-      // Both requests must start while neither is allowed to finish.
-      await Future.wait([
-        api.started('conversation.push'),
-        api.started('schedule.push'),
-      ]);
-      expect(
-        api.calls,
-        unorderedEquals(['conversation.push', 'schedule.push']),
-      );
-      await api.finish(first);
-      await _drain();
-      expect(api.gates['task.push']!.started.isCompleted, isFalse);
-      await api.finish(
-        first == 'conversation.push' ? 'schedule.push' : 'conversation.push',
-      );
-      await api.started('task.push');
-      expect(api.gates['conversation.pull']!.started.isCompleted, isFalse);
-      expect(api.gates['derived.push']!.started.isCompleted, isFalse);
-      await api.finish('task.push');
-      await api.started('conversation.pull');
-      expect(api.gates['message.push']!.started.isCompleted, isFalse);
-      expect(api.gates['message.pull']!.started.isCompleted, isFalse);
-      await api.finish('conversation.pull');
-      await Future.wait([
-        api.started('message.push'),
-        api.started('message.pull'),
-      ]);
-      final firstMessage = first == 'conversation.push'
-          ? 'message.push'
-          : 'message.pull';
-      await api.finish(firstMessage);
-      await _drain();
-      expect(api.gates['events.pull']!.started.isCompleted, isFalse);
-      await api.finish(
-        firstMessage == 'message.push' ? 'message.pull' : 'message.push',
-      );
-      await api.started('events.pull');
-      expect(api.gates['derived.push']!.started.isCompleted, isFalse);
-      await api.finish('events.pull');
-      await api.started('derived.push');
-      expect(api.gates['project.push']!.started.isCompleted, isFalse);
-      await api.finish('derived.push');
-      await api.started('project.push');
-      expect(api.gates['milestone.push']!.started.isCompleted, isFalse);
-      await api.finish('project.push');
-      await api.started('milestone.push');
-      var finished = false;
-      unawaited(run.then((_) => finished = true));
-      await _drain();
-      expect(finished, isFalse);
-      await api.finish('milestone.push');
-      expect(await run, SyncState.idle);
-      expect(api.taskPayloads['task']!['scheduleId'], 'schedule');
-      expect(api.taskPayloads['derived'], isNot(contains('completed')));
-      expect(
-        api.taskPayloads['derived'],
-        isNot(contains('_derivedCompletionCauseId')),
-      );
-      expect(api.messageConversations, ['default', 'chat']);
-      expect(
-        (await db.select(db.outboxMutations).get()).every(
-          (row) => row.status == OutboxStatus.acknowledged,
-        ),
-        isTrue,
-      );
-    });
+  for (final firstMessage in ['message.push', 'message.pull']) {
+    test(
+      'chat phases precede business sync when $firstMessage completes first',
+      () async {
+        final db = AppDatabase(executor: NativeDatabase.memory());
+        final api = _PhaseApi();
+        Future<SyncState>? run;
+        addTearDown(() async {
+          api.releaseAll();
+          if (run != null) await run.timeout(const Duration(seconds: 10));
+          await db.close();
+        });
+        await _seed(db);
+        final engine = SyncEngine(
+          database: db,
+          config: AppConfig(),
+          apiClient: api,
+        );
+        run = engine.syncOnce();
+        await api.started('conversation.push');
+        expect(api.gates['schedule.push']!.started.isCompleted, isFalse);
+        expect(api.gates['task.push']!.started.isCompleted, isFalse);
+        await api.finish('conversation.push');
+        await api.started('conversation.pull');
+        expect(api.gates['message.push']!.started.isCompleted, isFalse);
+        expect(api.gates['message.pull']!.started.isCompleted, isFalse);
+        await api.finish('conversation.pull');
+        await Future.wait([
+          api.started('message.push'),
+          api.started('message.pull'),
+        ]);
+        await api.finish(firstMessage);
+        await _drain();
+        expect(api.gates['schedule.push']!.started.isCompleted, isFalse);
+        await api.finish(
+          firstMessage == 'message.push' ? 'message.pull' : 'message.push',
+        );
+        await api.started('schedule.push');
+        expect(api.gates['task.push']!.started.isCompleted, isFalse);
+        await api.finish('schedule.push');
+        await api.started('task.push');
+        expect(api.gates['events.pull']!.started.isCompleted, isFalse);
+        await api.finish('task.push');
+        await api.started('events.pull');
+        expect(api.gates['derived.push']!.started.isCompleted, isFalse);
+        await api.finish('events.pull');
+        await api.started('derived.push');
+        expect(api.gates['project.push']!.started.isCompleted, isFalse);
+        await api.finish('derived.push');
+        await api.started('project.push');
+        expect(api.gates['milestone.push']!.started.isCompleted, isFalse);
+        await api.finish('project.push');
+        await api.started('milestone.push');
+        var finished = false;
+        unawaited(run.then((_) => finished = true));
+        await _drain();
+        expect(finished, isFalse);
+        await api.finish('milestone.push');
+        expect(await run, SyncState.idle);
+        expect(api.taskPayloads['task']!['scheduleId'], 'schedule');
+        expect(api.taskPayloads['derived'], isNot(contains('completed')));
+        expect(
+          api.taskPayloads['derived'],
+          isNot(contains('_derivedCompletionCauseId')),
+        );
+        expect(api.messageConversations, ['default', 'chat']);
+        expect(
+          (await db.select(db.outboxMutations).get()).every(
+            (row) => row.status == OutboxStatus.acknowledged,
+          ),
+          isTrue,
+        );
+      },
+    );
   }
 
   test(

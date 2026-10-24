@@ -1,6 +1,7 @@
 <template>
 <div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd">
-<scroll class="content" scroll-y="true"><div class="stack">
+<div class="stack" if="{{ vm.cacheLoading }}"><text class="body">正在读取本地缓存…</text></div>
+<scroll if="{{ !vm.cacheLoading }}" class="content" scroll-y="true"><div class="stack">
 <div class="header"><div class="back" onclick="goBack"><text class="backText">‹</text></div><text class="title">设置</text></div>
 <text class="sectionTitle">触感与显示</text>
 <div class="row" onclick="toggleHaptics"><div class="settingCopy"><text class="settingTitle">触感反馈</text><text class="settingHint">点按时短震</text></div><div class="toggle {{ vm.haptics ? 'toggleOn' : '' }}"><div class="toggleKnob"></div></div></div>

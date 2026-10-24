@@ -92,6 +92,7 @@ impl TestServer {
     }
 
     async fn register(&self, username: &str) -> (String, String) {
+        let _auth_guard = crate::auth_tests::AUTH_TEST_LOCK.lock().await;
         let body = format!(r#"{{"username":"{username}","password":"Password-123"}}"#);
         let (status, bytes) = self
             .request(

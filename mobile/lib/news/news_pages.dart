@@ -40,6 +40,7 @@ class _NewsRequestState extends ConsumerState<_NewsRequest>
   StreamSubscription<List<NewsLoadResult>>? _subscription;
   int _generation = 0;
   bool _foreground = true;
+  bool _visible = false;
   int? _refreshGeneration;
   Future<void>? _refreshing;
   int? _refreshingGeneration;
@@ -56,12 +57,18 @@ class _NewsRequestState extends ConsumerState<_NewsRequest>
     _config = ref.read(newsConfigProvider);
     _config.addIdentityListener(_identityChanging);
     _config.addIdentityCommittedListener(_identityCommitted);
-    _load();
+    final state = WidgetsBinding.instance.lifecycleState;
+    _foreground = state == null || state == AppLifecycleState.resumed;
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final visible = TickerMode.valuesOf(context).enabled;
+    if (_visible != visible) {
+      _visible = visible;
+      _load();
+    }
     final generation = NewsRefreshScope.of(context);
     if (_refreshGeneration != null && generation != _refreshGeneration) {
       unawaited(_refresh());
@@ -84,7 +91,7 @@ class _NewsRequestState extends ConsumerState<_NewsRequest>
   }
 
   Future<void> _reloadForIdentityChange() async {
-    if (mounted && _foreground) _load();
+    if (mounted && _active) _load();
   }
 
   @override
@@ -116,13 +123,7 @@ class _NewsRequestState extends ConsumerState<_NewsRequest>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
-    if (_foreground) {
-      _load();
-    } else {
-      _generation++;
-      unawaited(_subscription?.cancel());
-      _subscription = null;
-    }
+    _load();
   }
 
   void _remember(List<NewsLoadResult> results) {
@@ -133,10 +134,13 @@ class _NewsRequestState extends ConsumerState<_NewsRequest>
     }
   }
 
+  bool get _active => _foreground && _visible;
+
   void _load() {
     final generation = ++_generation;
     unawaited(_subscription?.cancel());
-    if (!_foreground) return;
+    _subscription = null;
+    if (!_active) return;
     _subscription = ref
         .read(newsRepositoryProvider)
         .watch(widget.paths, requireSession: widget.requireSession)
@@ -171,6 +175,7 @@ class _NewsRequestState extends ConsumerState<_NewsRequest>
   }
 
   Future<void> _refresh() {
+    if (!_active) return Future.value();
     if (_refreshing != null && _refreshingGeneration == _generation) {
       return _refreshing!;
     }

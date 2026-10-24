@@ -1,5 +1,6 @@
 <template>
-<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><scroll class="content" scroll-y="true"><div class="stack">
+<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><div class="stack" if="{{ vm.cacheLoading }}"><text class="body">正在读取本地缓存…</text></div>
+<scroll if="{{ !vm.cacheLoading }}" class="content" scroll-y="true"><div class="stack">
 <div class="header"><div class="back" onclick="goBack"><text class="backText">‹</text></div><text class="title">{{ selectedTask ? '任务详情' : '任务' }}</text><div class="badge"><text class="badgeText">{{ vm.tasks.length }}</text></div></div><text class="sourceLine">{{ vm.sourceShort }}</text>
 <div class="block" if="{{ !vm.tasks.length }}"><text class="emptyTitle">暂无任务</text><text class="emptyBody">在手机打开 Orialis，同步任务后查看摘要。</text></div>
 <div class="stack" if="{{ !selectedTask }}"><div class="listRow {{ vm.compact ? 'compactRow' : '' }}" for="{{ vm.tasks }}" onclick="openTask($item.id)"><div class="glyphCircle teal"><div class="check"></div></div><div class="copy"><text class="rowTitle">{{ $item.shortTitle }}</text><text class="rowHint">{{ $item.statusLabel }}</text><text if="{{ !vm.compact }}" class="rowHint">{{ $item.shortSummary }}</text><div class="statusLine {{ $item.tone }}"></div></div><text class="chevron">›</text></div></div>

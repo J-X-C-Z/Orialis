@@ -14,7 +14,7 @@ void main() {
       final repository = ChatRepository(database: database);
       final controller = ChatController(
         repository: repository,
-        flush: () async => throw StateError('upload unavailable'),
+        flush: (_, _) async => throw StateError('upload unavailable'),
       );
       final attachments = AttachmentBridge.encode([
         const AttachmentRecord(
@@ -39,7 +39,7 @@ void main() {
       expect(saved.syncStatus, 'pendingCreate');
       final restored = ChatController(
         repository: repository,
-        flush: () async {},
+        flush: (_, _) async {},
       );
       await restored.retry(saved.id, conversationId: 'aozora-chat');
       expect(await repository.watchMessages('aozora-chat').first, hasLength(1));
@@ -54,7 +54,7 @@ void main() {
     var flushes = 0;
     final controller = ChatController(
       repository: repository,
-      flush: () async => flushes++,
+      flush: (_, _) async => flushes++,
     );
 
     await controller.send(conversationId: 'default', content: 'hello');
@@ -74,7 +74,7 @@ void main() {
     var attempts = 0;
     final controller = ChatController(
       repository: repository,
-      flush: () async {
+      flush: (_, _) async {
         attempts++;
         if (attempts == 1) throw StateError('offline');
       },

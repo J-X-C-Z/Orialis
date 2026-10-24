@@ -101,6 +101,8 @@ class OrialisApiClient {
   final AppConfig _config;
   final Dio _dio;
 
+  void close() => _dio.close();
+
   Future<Uint8List> downloadAttachment(String id) async {
     if (id.isEmpty) throw ArgumentError('Attachment ID is required');
     final cancel = CancelToken();
@@ -592,6 +594,35 @@ class OrialisApiClient {
       cursor = page.nextCursor;
     }
     return items;
+  }
+
+  Future<Map<String, dynamic>?> memoryAnalysis(String id) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/api/v1/memory/analyses/${Uri.encodeComponent(id)}',
+      );
+      return response.data;
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> createMemoryAnalysis({
+    required String id,
+    required String content,
+    String? imageBase64,
+    List<String> sourceUrls = const [],
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/memory/analyses/${Uri.encodeComponent(id)}',
+      data: {
+        'content': content,
+        'imageBase64': ?imageBase64,
+        'sourceUrls': sourceUrls,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
   }
 
   Future<List<Map<String, dynamic>>> uploadAttachments({

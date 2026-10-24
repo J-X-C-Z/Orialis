@@ -63,11 +63,12 @@ pub(crate) async fn capabilities() -> Json<CapabilitiesResponse> {
         // UI is opaque assistant content: clients validate and fall back to text.
         response_ui: serde_json::json!({
             "format": "orialis-ui", "version": 1, "transport": "content_fence",
-            "block_types": ["metrics", "chart", "tabs", "checklist", "choices"],
+            "block_types": ["metrics", "chart", "tabs", "checklist", "choices", "svg", "diagram", "math", "plot", "timeline", "simulation", "form", "table", "sources", "diff", "media", "actions"],
             "limits": {
                 "json_bytes": 32768, "blocks": 12, "items": 12, "title": 80,
                 "fallback": 4000, "label": 120, "value": 120, "detail": 240,
-                "content": 4000, "prompt": 1000, "unit": 32,
+                "content": 4000, "prompt": 1000, "unit": 32, "source": 16000,
+                "math_source": 4000, "points": 120, "edges": 24, "columns": 8,
             },
         }),
     })
@@ -95,10 +96,32 @@ mod tests {
         assert_eq!(ui["format"], "orialis-ui");
         assert_eq!(ui["version"], 1);
         assert_eq!(ui["transport"], "content_fence");
-        assert_eq!(ui["block_types"], serde_json::json!(["metrics", "chart", "tabs", "checklist", "choices"]));
+        assert_eq!(
+            ui["block_types"],
+            serde_json::json!([
+                "metrics",
+                "chart",
+                "tabs",
+                "checklist",
+                "choices",
+                "svg",
+                "diagram",
+                "math",
+                "plot",
+                "timeline",
+                "simulation",
+                "form",
+                "table",
+                "sources",
+                "diff",
+                "media",
+                "actions"
+            ])
+        );
         assert_eq!(ui["limits"]["json_bytes"], 32768);
         assert_eq!(ui["limits"]["blocks"], 12);
         assert_eq!(ui["limits"]["items"], 12);
         assert_eq!(ui["limits"]["fallback"], 4000);
+        assert_eq!(ui["limits"]["source"], 16000);
     }
 }

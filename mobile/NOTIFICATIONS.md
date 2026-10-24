@@ -5,14 +5,16 @@ The existing Android system integration remains opt-in and account-scoped. Enabl
 ## Behavior
 
 - Local schedule alarms are projected from the synced local database, keyed by `schedule:<eventId>`. Snapshot replacement cancels changed/deleted alarm PendingIntents before restoring current future alarms; alarms survive process death/reboot. Exact-alarm denial falls back to Android's inexact idle-aware alarm. Notification tap opens `/calendar/schedule/<id>?date=...` after account-scope validation.
-- An authenticated realtime `message` envelope is stored locally and offered to Android as a chat notification. Repeated message IDs are ignored; a stable tag/group per conversation replaces the conversation's current notice to limit bursts. Tap opens `/chat?conversationId=<id>&messageId=<id>` and highlights the message when present. Notifications remain in Android's notification history only; the existing chat database is the durable message record.
+- Authenticated realtime `message` envelopes are stored locally, but only `role: assistant` replies are offered to Android as chat notifications. User message echoes, background memory/event conversations and recognized internal work/review notices never trigger a system popup. Both the Dart controller and native entry require an explicit assistant role, including the test path.
+- Notification titles extract a topic from the reply heading or its matching user question, with the conversation title and reply text as fallbacks (up to 26 graphemes). The body extracts at most two short points, up to 100 graphemes, removing Markdown formatting, raw links, code blocks and bare acknowledgements. Structured response cards use their authored plain-text fallback. This runs locally without a model or network request.
+- Repeated message IDs are ignored; a stable tag/group per conversation replaces the conversation's current notice to limit bursts. Tap opens `/chat?conversationId=<id>&messageId=<id>` and scrolls to the latest content without highlighting a message. Notifications remain in Android's notification history only; the existing chat database is the durable message record.
 - `schedule.updated` first requests sync. Only a successful sync refreshes the local alarm projection and emits an update/cancellation notice; offline, authentication and sync errors must not announce a cancellation while the old projection is still present. An updated/deleted schedule therefore replaces or removes its old local alarm by event ID before the update notice is posted.
 - Disabling system reminders or switching accounts removes all Orialis reminder, chat and schedule-update notices. Delivery deduplication is account-scoped and is committed only after Android accepts the notification, so a permission failure can be retried.
 - Android creates `chat_messages`, `schedule_reminders`, and `schedule_updates` channels, plus reserved `project_updates` and `news_updates` channels. Earlier Android versions use normal notifications without channel controls.
 
 ## Test path
 
-1. Enable **开启提醒与桌面**, allow notification permission, then tap **发送测试聊天通知**. The preview selects a locally stored message from a confirmed Mac/Azure Hermes conversation; tapping it opens that conversation and highlights its latest message. Create a device conversation and exchange a message first if none exists. To exercise any specific IDs, call `SystemIntegrationController.notifyChatMessage` with `{id, conversationId, content, sender}`; the method is account-scoped and idempotent.
+1. Enable **开启提醒与桌面**, allow notification permission, then tap **发送测试聊天通知**. The preview selects the latest visible assistant reply from a confirmed device conversation and summarizes that actual reply; tapping opens its conversation at the latest content without highlighting a message. Create a device conversation and receive a reply first if none exists. To exercise any specific IDs, call `SystemIntegrationController.notifyChatMessage` with `{id, conversationId, role: 'assistant', content, replyToMessageId, createdAt}`; the method is account-scoped and idempotent. The optional reply anchor and timestamp select the matching question rather than a newer turn.
 2. To exercise schedule notice rendering, call `notifyScheduleUpdate` with `{eventId, notificationId, title, startAt, location, action}`. Local alarm registration/update/cancel is tested through schedule CRUD and the existing `SystemIntegrationController.refresh()` projection path.
 3. Native test method-channel names `testChatMessage` and `testScheduleUpdate` are available for host-side acceptance harnesses. They share the same permission, scope and payload validation as production.
 
@@ -21,7 +23,7 @@ The existing Android system integration remains opt-in and account-scoped. Enabl
 No APNs/FCM/Mi Push registration or delivery endpoint exists in the current mobile/server contract. A provider-neutral delivery adapter should deliver authenticated, account-targeted envelopes:
 
 ```json
-{"type":"chat.message","id":"<messageId>","messageId":"<messageId>","conversationId":"<conversationId>","sender":"<sender>","title":"<title>","body":"<body>","createdAt":"<RFC3339>","deeplink":"orialis://chat/<conversationId>?message=<messageId>"}
+{"type":"chat.message","id":"<messageId>","messageId":"<messageId>","conversationId":"<conversationId>","role":"assistant","sender":"<sender>","title":"<title>","body":"<body>","createdAt":"<RFC3339>","deeplink":"orialis://chat/<conversationId>?message=<messageId>"}
 ```
 
 ```json

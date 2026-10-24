@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 import '../domain/agent_event_state.dart';
+import '../domain/chat_transcript.dart';
 import 'chat_activity_panel.dart';
+import 'chat_thinking_indicator.dart';
 import 'safe_markdown.dart';
 
 typedef AgentActionCallback = Future<void> Function(
@@ -21,6 +23,7 @@ class AgentEventsPanel extends StatelessWidget {
     this.onPromptSelected,
     this.onRefresh,
     this.showActivity = true,
+    this.showThinking = false,
     super.key,
   });
   final AgentEventStore store;
@@ -30,6 +33,7 @@ class AgentEventsPanel extends StatelessWidget {
   final ValueChanged<String>? onPromptSelected;
   final Future<void> Function()? onRefresh;
   final bool showActivity;
+  final bool showThinking;
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +42,10 @@ class AgentEventsPanel extends StatelessWidget {
       listenable: store,
       builder: (context, _) {
         final children = <Widget>[];
+        final thinking = showThinking ? chatThinkingLabel(store) : null;
+        if (thinking != null) {
+          children.add(ChatThinkingIndicator(label: thinking));
+        }
         if (showActivity &&
             (onRefresh != null ||
                 store.typing ||
@@ -54,6 +62,10 @@ class AgentEventsPanel extends StatelessWidget {
           );
         }
         for (final stream in store.streams.values) {
+          if (stream.error == null &&
+              classifyChatText(stream.text) != ChatTextKind.message) {
+            continue;
+          }
           if (stream.complete &&
               stream.error == null &&
               persistedMessageIds.contains(stream.messageId)) {
@@ -87,18 +99,25 @@ class AgentEventsPanel extends StatelessWidget {
         }
         for (final session in store.sessions.values) {
           if (session.statusSnapshot) continue;
+          if (classifyChatText(session.message ?? '') != ChatTextKind.message) {
+            continue;
+          }
           children.add(_SessionCard(session: session));
         }
         for (final artifact in store.artifacts.values) {
           children.add(_ArtifactCard(artifact: artifact));
         }
         for (final notice in store.deliveryNotices) {
+          if (classifyChatText(notice.message) != ChatTextKind.message) {
+            continue;
+          }
           children.add(_NoticeCard(notice: notice));
         }
         for (final error in store.errors) {
           children.add(_ErrorCard(error: error));
         }
         for (final event in store.fallbacks) {
+          if (event.kind == 'review.summary') continue;
           children.add(_FallbackCard(event: event));
         }
         if (children.isEmpty) return const SizedBox.shrink();
@@ -247,6 +266,7 @@ class _StreamCard extends StatelessWidget {
                 fallback: stream.hasGap,
                 allowResponseUi: true,
                 onPromptSelected: onPromptSelected,
+                actionScope: stream.complete ? stream.messageId : null,
               )
             : Text(
                 stream.error!,

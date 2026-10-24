@@ -1,6 +1,13 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart' show MaterialPageRoute, RefreshIndicator;
+import 'package:flutter/material.dart'
+    show
+        Icons,
+        IconButton,
+        Material,
+        MaterialPageRoute,
+        MaterialType,
+        RefreshIndicator;
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -25,6 +32,7 @@ class _MemoryPageState extends State<MemoryPage> with WidgetsBindingObserver {
   MemoryStatus? status;
   String? error;
   int generation = 0;
+  String categoryFilter = 'all';
 
   @override
   void initState() {
@@ -71,21 +79,6 @@ class _MemoryPageState extends State<MemoryPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _setup(Future<void> Function() action) async {
-    try {
-      await action();
-    } catch (_) {
-      if (mounted) showLuminaMessage(context, '系统设置未能打开，请稍后重试');
-    }
-  }
-
-  Future<void> _addTile() => _setup(() async {
-    final added = await repository.requestAddTile();
-    if (!added && mounted) {
-      showLuminaMessage(context, '下拉控制中心，编辑快捷按钮，将“记住屏幕”加入');
-    }
-  });
-
   Future<void> _open(MemoryRecord record) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -103,6 +96,7 @@ class _MemoryPageState extends State<MemoryPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final filtered = records
         ?.where((record) => record.matches(search.text))
+        .where((record) => categoryFilter == 'all' || record.category == 'ai')
         .toList();
     return OrialisPageScaffold(
       title: '屏幕记忆',
@@ -133,38 +127,80 @@ class _MemoryPageState extends State<MemoryPage> with WidgetsBindingObserver {
               if (index > 0) {
                 final record = filtered![index - 1];
                 final preview = _preview(record.summary);
+                final sourceUrl = record.primarySourceUrl;
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: LuminaSurface(
-                    padding: const EdgeInsets.all(12),
-                    child: LuminaListRow(
-                      title: record.title,
-                      subtitle:
-                          '${_source(record)} · ${_time(record.createdAt)}\n${_analysisLabel(record.analysisStatus)}',
-                      detail: preview.isEmpty
-                          ? null
-                          : Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(
-                                preview,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: LuminaTheme.of(context)
-                                    .textTheme
-                                    .bodySmall,
-                              ),
-                            ),
-                      leading: SizedBox(
-                        width: 48,
-                        height: 64,
-                        child: _MemoryImage(
-                          path: record.imagePath,
-                          thumbnail: true,
-                        ),
+                  child: LuminaListRow(
+                    title: record.title,
+                    subtitle:
+                        '${_source(record)} · ${_time(record.createdAt)}\n${_analysisLabel(record.analysisStatus)}',
+                    detail: record.category == 'ai' || preview.isNotEmpty
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (record.category == 'ai')
+                                DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: LuminaTheme.of(context)
+                                        .colors
+                                        .accentSoft,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 7,
+                                      vertical: 2,
+                                    ),
+                                    child: Text(
+                                      'AI',
+                                      style: LuminaTheme.of(context)
+                                          .textTheme
+                                          .labelSmall,
+                                    ),
+                                  ),
+                                ),
+                              if (preview.isNotEmpty) ...[
+                                if (record.category == 'ai')
+                                  const SizedBox(height: 6),
+                                Text(
+                                  preview,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: LuminaTheme.of(context)
+                                      .textTheme
+                                      .bodySmall,
+                                ),
+                              ],
+                            ],
+                          )
+                        : null,
+                    leading: SizedBox(
+                      width: 48,
+                      height: 64,
+                      child: _MemoryImage(
+                        path: record.imagePath,
+                        thumbnail: true,
                       ),
-                      trailing: const LuminaIcon(LuminaIcons.chevronRight),
-                      onTap: () => _open(record),
                     ),
+                    trailing: Material(
+                      type: MaterialType.transparency,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (sourceUrl != null)
+                            IconButton(
+                              tooltip: record.hasVideoSource
+                                  ? '打开原视频'
+                                  : '打开原链接',
+                              onPressed: () =>
+                                  _launchSourceUrl(context, sourceUrl),
+                              icon: const Icon(Icons.open_in_new),
+                            ),
+                          const LuminaIcon(LuminaIcons.chevronRight),
+                        ],
+                      ),
+                    ),
+                    onTap: () => _open(record),
                   ),
                 );
               }
@@ -177,6 +213,27 @@ class _MemoryPageState extends State<MemoryPage> with WidgetsBindingObserver {
                     onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: 16),
+                  Material(
+                    type: MaterialType.transparency,
+                    child: Wrap(
+                      spacing: 8,
+                      children: [
+                        LuminaChip(
+                          label: const Text('全部'),
+                          selected: categoryFilter == 'all',
+                          onSelected: (_) =>
+                              setState(() => categoryFilter = 'all'),
+                        ),
+                        LuminaChip(
+                          label: const Text('AI'),
+                          selected: categoryFilter == 'ai',
+                          onSelected: (_) =>
+                              setState(() => categoryFilter = 'ai'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   if (error != null) ...[
                     Text(error!),
                     LuminaButton(onPressed: _load, child: const Text('重试')),
@@ -185,38 +242,12 @@ class _MemoryPageState extends State<MemoryPage> with WidgetsBindingObserver {
                   else if (!status!.supported)
                     const Text('屏幕记忆需要支持截屏的 Android 手机。')
                   else ...[
-                    LuminaSurface(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const Text(
-                            '将「记住屏幕」加入控制中心。点击快捷按钮后，按安卓提示授权截屏，即可保存当前内容。',
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            '截图会自动交给 Azure Hermes 理解并记录。小红书、哔哩哔哩等应用可通过「分享 → Orialis 记忆」保存平台实际分享的文案、图片和原始链接。多张图片会分别记录。',
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              LuminaButton(
-                                primary: false,
-                                onPressed: _addTile,
-                                child: const Text('添加快捷按钮'),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
                     if (filtered!.isEmpty)
                       Text(
                         search.text.isEmpty
-                            ? '还没有记忆。从控制中心截屏，或将图文、链接分享到「Orialis 记忆」。'
+                            ? categoryFilter == 'ai'
+                                  ? '还没有 AI 记忆，相关内容会自动归入这里。'
+                                  : '还没有记忆。从控制中心截屏，或将图文、链接分享到「Orialis 记忆」。'
                             : '没有找到匹配的记忆',
                       ),
                   ],
@@ -372,17 +403,7 @@ class _MemoryDetailPageState extends State<_MemoryDetailPage> {
   }
 
   Future<void> _openUrl(String url) async {
-    try {
-      if (!MemoryRecord.isWebUrl(url) ||
-          !await launchUrl(
-            Uri.parse(url),
-            mode: LaunchMode.externalApplication,
-          )) {
-        if (mounted) showLuminaMessage(context, '链接未能打开，可以复制后使用');
-      }
-    } catch (_) {
-      if (mounted) showLuminaMessage(context, '链接未能打开，可以复制后使用');
-    }
+    await _launchSourceUrl(context, url);
   }
 
   @override
@@ -421,6 +442,20 @@ class _MemoryDetailPageState extends State<_MemoryDetailPage> {
                         : '开始理解',
                   ),
                 ),
+              if (widget.onAnalyze != null &&
+                  record.videoStatus == 'unavailable')
+                LuminaButton(
+                  primary: false,
+                  onPressed: busy ? null : _analyze,
+                  child: Text(busy ? '正在处理…' : '重试视频理解'),
+                ),
+              if (record.primarySourceUrl != null)
+                LuminaButton(
+                  onPressed: busy
+                      ? null
+                      : () => _openUrl(record.primarySourceUrl!),
+                  child: Text(record.hasVideoSource ? '打开原视频' : '打开原链接'),
+                ),
               LuminaButton(
                 primary: false,
                 onPressed: busy ? null : _edit,
@@ -444,6 +479,23 @@ class _MemoryDetailPageState extends State<_MemoryDetailPage> {
             const Text('内容摘要'),
             const SizedBox(height: 8),
             SafeMarkdownView(source: record.summary!),
+          ],
+          if (record.videoStatus == 'analyzed' ||
+              record.videoStatus == 'unavailable') ...[
+            const SizedBox(height: 20),
+            const Text('视频理解'),
+            const SizedBox(height: 8),
+            if (record.videoStatus == 'analyzed')
+              SafeMarkdownView(
+                source: record.videoSummary?.trim().isNotEmpty == true
+                    ? record.videoSummary!
+                    : '视频已理解，但没有可显示的摘要。',
+              )
+            else ...[
+              Text(
+                '${record.videoError?.trim().isNotEmpty == true ? record.videoError! : '暂时无法获取视频内容。'}\n截图、分享文案和原始链接仍可查看。',
+              ),
+            ],
           ],
           if (record.notes.isNotEmpty) ...[
             const SizedBox(height: 20),
@@ -555,6 +607,20 @@ String _source(MemoryRecord record) => record.sourceLabel.isNotEmpty
     : record.sourcePackage.isNotEmpty
     ? record.sourcePackage
     : '分享内容';
+
+Future<void> _launchSourceUrl(BuildContext context, String url) async {
+  try {
+    if (!MemoryRecord.isWebUrl(url) ||
+        !await launchUrl(
+          Uri.parse(url),
+          mode: LaunchMode.externalApplication,
+        )) {
+      if (context.mounted) showLuminaMessage(context, '链接未能打开，可以复制后使用');
+    }
+  } catch (_) {
+    if (context.mounted) showLuminaMessage(context, '链接未能打开，可以复制后使用');
+  }
+}
 
 String _preview(String? summary) {
   final lines = (summary ?? '').trim().split('\n');

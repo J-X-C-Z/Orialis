@@ -214,7 +214,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         ),
                       ],
                     ),
-                    const QuietLabel('留住想法，安排生活。'),
                     LuminaListRow(
                       title: _loadingSession ? '正在检查账户…' : _username ?? '未登录',
                       subtitle: _username == null ? '本地可用，登录后可跨设备同步' : '已登录',
@@ -225,59 +224,33 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                           ? _openAuth
                           : null,
                     ),
-                    if (_username != null)
-                      LuminaButton(
-                        primary: false,
-                        onPressed: _logout,
-                        child: const Text('退出登录'),
-                      ),
                   ],
                 ),
               ),
-              LuminaSection(
-                title: '连接与同步',
-                child: ContentStack(
-                  children: [
-                    LuminaListRow(
-                      title: '服务器',
-                      subtitle: '$_serverUrl · $_serverState',
-                      leading: const LuminaIcon(LuminaIcons.server),
-                      trailing: const LuminaIcon(LuminaIcons.chevronRight),
-                      onTap: _editServerUrl,
-                    ),
-                    LuminaListRow(
-                      title: _syncState.label,
-                      subtitle: _syncState.message,
-                      leading: const LuminaIcon(LuminaIcons.sync),
-                    ),
-                    if (_syncState == SyncState.conflict)
-                      const Text('本设备的修改仍保存在本地，请检查冲突后再同步。'),
-                    LuminaButton(
-                      onPressed: _syncState == SyncState.syncing
-                          ? null
-                          : () async {
-                              setState(() => _syncState = SyncState.syncing);
-                              final result = await ref
-                                  .read(syncCoordinatorProvider)
-                                  .requestSync();
-                              if (mounted) {
-                                setState(() {
-                                  _syncState = result;
-                                  _serverState = result == SyncState.offline
-                                      ? '无法连接'
-                                      : '已检查';
-                                });
-                              }
-                            },
-                      child: Text(
-                        _syncState == SyncState.syncing ? '同步中…' : '检查并同步',
+              if (!ref.watch(desktopModeProvider))
+                LuminaSection(
+                  title: '常用功能',
+                  child: ContentStack(
+                    children: [
+                      LuminaListRow(
+                        title: '屏幕记忆',
+                        subtitle: '快捷记录屏幕、Bilibili 链接与理解结果',
+                        leading: const LuminaIcon(LuminaIcons.image),
+                        trailing: const LuminaIcon(LuminaIcons.chevronRight),
+                        onTap: () => context.push('/memory'),
                       ),
-                    ),
-                  ],
+                      LuminaListRow(
+                        title: '系统提醒与桌面',
+                        subtitle: '任务提醒、今日卡片与小米超级岛',
+                        leading: const LuminaIcon(LuminaIcons.devices),
+                        trailing: const LuminaIcon(LuminaIcons.chevronRight),
+                        onTap: () => context.push('/system'),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
               LuminaSection(
-                title: '显示与动效',
+                title: '外观与体验',
                 child: ContentStack(
                   children: [
                     const QuietLabel('外观'),
@@ -319,44 +292,87 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   ],
                 ),
               ),
-              FutureBuilder<String>(
-                future: _deviceId,
-                builder: (_, s) => LuminaListRow(
-                  title: '当前设备',
-                  subtitle: s.data ?? '正在初始化…',
-                  leading: const LuminaIcon(LuminaIcons.devices),
+              LuminaSection(
+                title: '设备与连接',
+                child: ContentStack(
+                  children: [
+                    LuminaListRow(
+                      title: '设备中心',
+                      subtitle: '查看设备、切换当前设备并管理默认设备',
+                      leading: const LuminaIcon(LuminaIcons.devices),
+                      trailing: const LuminaIcon(LuminaIcons.chevronRight),
+                      onTap: () => context.push('/devices'),
+                    ),
+                    if (!ref.watch(desktopModeProvider))
+                      LuminaListRow(
+                        title: '手环连接',
+                        subtitle: '连接状态、互联权限与消息诊断',
+                        leading: const LuminaIcon(LuminaIcons.devices),
+                        trailing: const LuminaIcon(LuminaIcons.chevronRight),
+                        onTap: () => context.push('/wear'),
+                      ),
+                    FutureBuilder<String>(
+                      future: _deviceId,
+                      builder: (_, s) => LuminaListRow(
+                        title: '当前设备',
+                        subtitle: s.data ?? '正在初始化…',
+                        leading: const LuminaIcon(LuminaIcons.devices),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              LuminaListRow(
-                title: '设备中心',
-                subtitle: '查看设备、切换当前设备并管理默认设备',
-                leading: const LuminaIcon(LuminaIcons.devices),
-                trailing: const LuminaIcon(LuminaIcons.chevronRight),
-                onTap: () => context.push('/devices'),
+              LuminaSection(
+                title: '数据与同步',
+                child: ContentStack(
+                  children: [
+                    LuminaListRow(
+                      title: _syncState.label,
+                      subtitle: _syncState.message,
+                      leading: const LuminaIcon(LuminaIcons.sync),
+                    ),
+                    if (_syncState == SyncState.conflict)
+                      const Text('本设备的修改仍保存在本地，请检查冲突后再同步。'),
+                    LuminaButton(
+                      onPressed: _syncState == SyncState.syncing
+                          ? null
+                          : () async {
+                              setState(() => _syncState = SyncState.syncing);
+                              final result = await ref
+                                  .read(syncCoordinatorProvider)
+                                  .requestSync();
+                              if (mounted) {
+                                setState(() {
+                                  _syncState = result;
+                                  _serverState = result == SyncState.offline
+                                      ? '无法连接'
+                                      : '已检查';
+                                });
+                              }
+                            },
+                      child: Text(
+                        _syncState == SyncState.syncing ? '同步中…' : '检查并同步',
+                      ),
+                    ),
+                    LuminaListRow(
+                      title: '服务器',
+                      subtitle: '$_serverUrl · $_serverState',
+                      leading: const LuminaIcon(LuminaIcons.server),
+                      trailing: const LuminaIcon(LuminaIcons.chevronRight),
+                      onTap: _editServerUrl,
+                    ),
+                  ],
+                ),
               ),
-              if (!ref.watch(desktopModeProvider))
-                LuminaListRow(
-                  title: '系统提醒与桌面',
-                  subtitle: '任务提醒、今日卡片与小米超级岛',
-                  leading: const LuminaIcon(LuminaIcons.devices),
-                  trailing: const LuminaIcon(LuminaIcons.chevronRight),
-                  onTap: () => context.push('/system'),
-                ),
-              if (!ref.watch(desktopModeProvider))
-                LuminaListRow(
-                  title: '屏幕记忆',
-                  subtitle: '快捷记录屏幕、Bilibili 链接与理解结果',
-                  leading: const LuminaIcon(LuminaIcons.image),
-                  trailing: const LuminaIcon(LuminaIcons.chevronRight),
-                  onTap: () => context.push('/memory'),
-                ),
-              if (!ref.watch(desktopModeProvider))
-                LuminaListRow(
-                  title: '手环连接',
-                  subtitle: '连接状态、互联权限与消息诊断',
-                  leading: const LuminaIcon(LuminaIcons.devices),
-                  trailing: const LuminaIcon(LuminaIcons.chevronRight),
-                  onTap: () => context.push('/wear'),
+              if (_username != null)
+                LuminaSection(
+                  title: '账户',
+                  child: LuminaListRow(
+                    title: '退出登录',
+                    leading: const LuminaIcon(LuminaIcons.person),
+                    trailing: const LuminaIcon(LuminaIcons.chevronRight),
+                    onTap: _logout,
+                  ),
                 ),
               const QuietLabel('Lumina 光构'),
             ],

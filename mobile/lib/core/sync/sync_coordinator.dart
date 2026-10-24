@@ -14,6 +14,7 @@ class SyncCoordinator {
     this.localChanges,
     this.onChatMessage,
     this.onScheduleUpdate,
+    this.flushChatMessage,
     this.localChangeDelay = const Duration(milliseconds: 250),
   });
 
@@ -23,11 +24,17 @@ class SyncCoordinator {
   final Stream<void>? localChanges;
   final Future<void> Function(Map<String, dynamic>)? onChatMessage;
   final Future<void> Function(Map<String, dynamic>)? onScheduleUpdate;
+  final Future<void> Function({
+    required String conversationId,
+    required String messageId,
+  })?
+  flushChatMessage;
   final Duration localChangeDelay;
   StreamSubscription<MobileEnvelope>? _events;
   StreamSubscription<void>? _localChanges;
   Timer? _localChangeTimer;
   Future<SyncState>? _inFlight;
+  final Set<Future<void>> _chatFlushes = {};
   bool _queued = false;
   bool _started = false;
   bool _disposed = false;
@@ -63,6 +70,23 @@ class SyncCoordinator {
     final future = _runSync();
     _inFlight = future;
     return future;
+  }
+
+  Future<void> flushMessage(String conversationId, String messageId) {
+    if (_disposed) {
+      return Future.error(StateError('Sync coordinator disposed'));
+    }
+    final flush = flushChatMessage;
+    if (flush == null) {
+      return Future.error(StateError('Chat flush unavailable'));
+    }
+    late final Future<void> tracked;
+    tracked = flush(
+      conversationId: conversationId,
+      messageId: messageId,
+    ).whenComplete(() => _chatFlushes.remove(tracked));
+    _chatFlushes.add(tracked);
+    return tracked;
   }
 
   Future<SyncState> _runSync() async {
@@ -115,5 +139,6 @@ class SyncCoordinator {
     _events = null;
     // Finish old-account work before its database and credentials are changed.
     await _inFlight;
+    await Future.wait(_chatFlushes.map((flush) => flush.catchError((_) {})));
   }
 }

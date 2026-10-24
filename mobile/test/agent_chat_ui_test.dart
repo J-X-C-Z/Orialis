@@ -44,6 +44,8 @@ class _Service extends AgentChatService {
   final created = <String>[];
   final renamed = <String>[];
   String macName = 'Mac 电脑';
+  Completer<void>? devicesGate;
+  int deviceLoads = 0;
   Completer<void>? validationGate;
   Completer<void>? unknownGate;
   @override
@@ -61,20 +63,25 @@ class _Service extends AgentChatService {
   }
 
   @override
-  Future<List<ChatAgentDevice>> devices() async => [
-    ChatAgentDevice(
-      id: 'JXCZ_MBA_Hermes',
-      platform: 'macos',
-      online: true,
-      displayLabel: macName,
-    ),
-    const ChatAgentDevice(
-      id: 'JXCZ_AOZORA_Hermes',
-      platform: 'linux',
-      online: false,
-      displayLabel: 'Azure 服务器',
-    ),
-  ];
+  Future<List<ChatAgentDevice>> devices() async {
+    deviceLoads++;
+    await devicesGate?.future;
+    return [
+      ChatAgentDevice(
+        id: 'JXCZ_MBA_Hermes',
+        platform: 'macos',
+        online: true,
+        displayLabel: macName,
+      ),
+      const ChatAgentDevice(
+        id: 'JXCZ_AOZORA_Hermes',
+        platform: 'linux',
+        online: false,
+        displayLabel: 'Azure 服务器',
+      ),
+    ];
+  }
+
   @override
   Future<String?> target(
     String conversationId, {
@@ -115,6 +122,8 @@ class _Sync extends SyncCoordinator {
   Future<void> start() async {}
   @override
   Future<SyncState> requestSync() async => SyncState.offline;
+  @override
+  Future<void> flushMessage(String conversationId, String messageId) async {}
 }
 
 Finder action(String label) => find.byWidgetPredicate(
@@ -124,6 +133,7 @@ Finder action(String label) => find.byWidgetPredicate(
 Future<_Service> _openChat(
   WidgetTester tester, {
   bool notificationMessages = false,
+  int notificationMessageCount = 2,
   bool slowUnknown = false,
   ChatShareCoordinator? shares,
 }) async {
@@ -144,13 +154,14 @@ Future<_Service> _openChat(
     });
     await repository.createConversation(title: '旧测试会话');
     if (notificationMessages) {
-      for (final id in ['notice-1', 'notice-2']) {
+      for (var index = 1; index <= notificationMessageCount; index++) {
+        final id = 'notice-$index';
         await repository.applyRemoteMessage({
           'conversationId': 'existing-mac',
           'id': id,
           'role': 'assistant',
           'content': '通知消息 $id',
-          'createdAt': '2026-10-04T00:00:00Z',
+          'createdAt': DateTime.utc(2026, 10, 4, 0, 0, index).toIso8601String(),
           'version': 1,
         });
       }
@@ -339,30 +350,106 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('notification reopens a conversation and changes message focus', (
+  testWidgets(
+    'notification opens latest messages without highlighting on repeated taps',
+    (tester) async {
+      await _openChat(
+        tester,
+        notificationMessages: true,
+        notificationMessageCount: 80,
+      );
+      await tester.tap(action('返回会话列表'));
+      await tester.pumpAndSettle();
+      final router = GoRouter.of(tester.element(find.byType(ChatPage)));
+      Finder highlighted(String id) => find.byWidgetPredicate((widget) {
+        if (widget.runtimeType.toString() != '_MessageBubble') return false;
+        final dynamic bubble = widget;
+        return bubble.message.id == id && bubble.highlighted == true;
+      });
+      router.go('/chat?conversationId=existing-mac&messageId=notice-1');
+      await tester.pumpAndSettle();
+      expect(action('返回会话列表'), findsOneWidget);
+      expect(highlighted('notice-1'), findsNothing);
+      final transcript = find.byKey(const ValueKey('existing-mac'));
+      ScrollPosition position() => tester
+          .state<ScrollableState>(
+            find
+                .descendant(of: transcript, matching: find.byType(Scrollable))
+                .first,
+          )
+          .position;
+      expect(position().maxScrollExtent, greaterThan(0));
+      expect(position().extentAfter, lessThan(2));
+      expect(find.text('通知消息 notice-80', findRichText: true), findsOneWidget);
+      await tester.drag(transcript, const Offset(0, 500));
+      await tester.pumpAndSettle();
+      expect(position().extentAfter, greaterThan(100));
+      router.go('/chat?conversationId=existing-mac&messageId=notice-2');
+      await tester.pumpAndSettle();
+      expect(highlighted('notice-2'), findsNothing);
+      expect(position().extentAfter, lessThan(2));
+      expect(find.text('通知消息 notice-80', findRichText: true), findsOneWidget);
+      expect(
+        find.byWidgetPredicate((widget) {
+          if (widget.runtimeType.toString() != '_MessageBubble') return false;
+          final dynamic bubble = widget;
+          return bubble.highlighted == true;
+        }),
+        findsNothing,
+      );
+      expect(highlighted('notice-1'), findsNothing);
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets('one device entry opens sheet before slow registry responds', (
     tester,
   ) async {
-    await _openChat(tester, notificationMessages: true);
+    final service = await _openChat(tester);
     await tester.tap(action('返回会话列表'));
     await tester.pumpAndSettle();
-    final router = GoRouter.of(tester.element(find.byType(ChatPage)));
-    Finder highlighted(String id) => find.byWidgetPredicate((widget) {
-      if (widget.runtimeType.toString() != '_MessageBubble') return false;
-      final dynamic bubble = widget;
-      return bubble.message.id == id && bubble.highlighted == true;
-    });
-    router.go('/chat?conversationId=existing-mac&messageId=notice-1');
-    await tester.pumpAndSettle();
-    expect(action('返回会话列表'), findsOneWidget);
-    expect(highlighted('notice-1'), findsOneWidget);
-    router.go('/chat?conversationId=existing-mac&messageId=notice-2');
-    await tester.pumpAndSettle();
-    expect(highlighted('notice-2'), findsOneWidget);
-    expect(highlighted('notice-1'), findsNothing);
+    expect(action('与设备对话'), findsOneWidget);
+    expect(action('新建会话'), findsNothing);
+    service.devicesGate = Completer<void>();
+    await tester.tap(action('与设备对话'));
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('与设备对话'), findsOneWidget);
+    expect(find.text('正在读取设备状态…'), findsOneWidget);
+    expect(service.deviceLoads, 1);
+    service.devicesGate!.complete();
     await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('chat-device-JXCZ_MBA_Hermes')),
+        matching: find.text('Mac 电脑'),
+      ),
+      findsOneWidget,
+    );
+    final mac = find.byKey(const ValueKey('chat-device-JXCZ_MBA_Hermes'));
+    final azure = find.byKey(const ValueKey('chat-device-JXCZ_AOZORA_Hermes'));
+    expect(
+      tester.getTopLeft(azure).dy - tester.getBottomLeft(mac).dy,
+      greaterThanOrEqualTo(16),
+    );
+    final rings = tester
+        .widgetList<AgentStatusRing>(find.byType(AgentStatusRing))
+        .toList();
+    expect(rings.any((ring) => ring.status == AgentRingStatus.online), isTrue);
+    expect(rings.any((ring) => ring.status == AgentRingStatus.offline), isTrue);
+    await tester.tap(action('Mac 电脑 · 在线'));
+    await tester.pumpAndSettle();
+    expect(service.renamed, isEmpty);
+    expect(service.created, isEmpty);
+    expect(find.widgetWithText(LuminaButton, '保存'), findsNothing);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump(const Duration(milliseconds: 500));
     await tester.pumpAndSettle();
   });
 
@@ -397,12 +484,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('新建设备对话'));
       await tester.pumpAndSettle();
-      await tester.tap(action('修改设备名称').first);
+      await tester.longPress(find.text('Mac 电脑'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(EditableText).last, '工作 Mac');
       await tester.tap(find.widgetWithText(LuminaButton, '保存'));
       await tester.pumpAndSettle();
       expect(service.renamed, ['工作 Mac']);
+      expect(service.deviceLoads, 1);
       expect(find.text('工作 Mac'), findsOneWidget);
       await tester.tap(find.text('工作 Mac'));
       await tester.pumpAndSettle();
@@ -422,7 +510,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('新建设备对话'));
       await tester.pumpAndSettle();
-      await tester.tap(action('修改设备名称').first);
+      await tester.longPress(find.text('Mac 电脑'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(EditableText).last, '   ');
       await tester.tap(find.widgetWithText(LuminaButton, '保存'));

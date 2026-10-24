@@ -1,0 +1,25 @@
+- id: llm-pi-ai
+  config:
+    providers:
+      westlake-hpc:
+        displayName: Westlake HPC
+        api: openai-completions
+        baseURL: http://127.0.0.1:18777/v1
+        apiKeyEnv: MAGPIE_API_KEY
+        defaultContextWindow: 1000000
+        defaultMaxTokens: 65536
+        models:
+          - id: deepseek-flash
+            name: DeepSeek Flash - Westlake HPC
+            contextWindow: 1000000
+            maxTokens: 65536
+            reasoningEfforts: false
+          - id: Qwen
+            name: Qwen · Westlake HPC
+            contextWindow: 1000000
+            maxTokens: 65536
+            reasoningEfforts: false
+- id: agent-default-model
+  config:
+    provider: westlake-hpc
+    model: deepseek-flash

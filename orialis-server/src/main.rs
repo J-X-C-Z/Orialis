@@ -4,6 +4,7 @@ mod auth;
 mod calendar;
 mod config;
 mod health;
+mod memory_analysis;
 mod mobile_realtime;
 mod news;
 mod node_control;
@@ -65,7 +66,7 @@ use tasks::{
     TaskInput, TaskPatch,
 };
 use tokio::io::AsyncWriteExt;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -365,6 +366,15 @@ async fn main() {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     });
+    let retention_pool = state.pool.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Err(error) = expire_inactive_conversations(&retention_pool, None).await {
+                warn!(%error, "automatic conversation retention cleanup failed");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(60 * 60)).await;
+        }
+    });
     let app = Router::new()
         .merge(node_control::router())
         .merge(
@@ -414,6 +424,12 @@ async fn main() {
         .route(
             "/api/v1/schedules/{id}",
             patch(update_event).delete(delete_event),
+        )
+        .route(
+            "/api/v1/memory/analyses/{id}",
+            get(memory_analysis::get_analysis)
+                .post(memory_analysis::start_analysis)
+                .layer(DefaultBodyLimit::max(2_000_000)),
         )
         .route(
             "/api/v1/conversations",
@@ -514,9 +530,38 @@ async fn list_conversations(
 ) -> Result<Json<Vec<Conversation>>, AppError> {
     let user_id = authenticated_user_or_agent(&headers, &state).await?;
     ensure_default_conversation(&state.pool, &user_id).await?;
+    expire_inactive_conversations(&state.pool, Some(&user_id)).await?;
     let items = sqlx::query_as::<_, Conversation>("SELECT id,title,is_default,CASE WHEN is_default=1 THEN 'main' ELSE 'normal' END AS conversation_type,pinned,manual_position,created_at,updated_at,version FROM conversations WHERE user_id=? AND deleted_at IS NULL ORDER BY pinned DESC,manual_position IS NULL,manual_position,updated_at DESC,id")
         .bind(user_id).fetch_all(&state.pool).await?;
     Ok(Json(items))
+}
+
+/// Soft-delete a user's conversations after seven days without messages.
+/// Cleanup runs hourly and on conversation-list reads, preserving the existing
+/// soft-delete semantics for both active and inactive clients.
+async fn expire_inactive_conversations(
+    pool: &SqlitePool,
+    user_id: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let timestamp = now();
+    sqlx::query(
+        "UPDATE conversations
+         SET deleted_at=?, updated_at=?, version=version+1
+         WHERE (? IS NULL OR user_id=?) AND is_default=0 AND deleted_at IS NULL
+           AND julianday(COALESCE(
+             (SELECT MAX(m.created_at) FROM messages m
+              WHERE m.user_id=conversations.user_id
+                AND m.conversation_id=conversations.id),
+             conversations.updated_at
+           )) < julianday('now', '-7 days')",
+    )
+    .bind(timestamp.clone())
+    .bind(timestamp)
+    .bind(user_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 async fn create_conversation(
@@ -1862,3 +1907,6 @@ mod calendar_tests;
 
 #[cfg(test)]
 mod sync_tests;
+
+#[cfg(test)]
+mod conversation_retention_tests;

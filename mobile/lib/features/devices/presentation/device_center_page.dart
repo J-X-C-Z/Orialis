@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show OrialisPageScaffold;
+
 import '../../../pages/shared/page_parts.dart';
 import '../application/device_center_controller.dart';
 import '../data/device_data_source.dart';
@@ -43,7 +44,9 @@ class DeviceCenterPage extends ConsumerWidget {
                   LuminaSurface(
                     child: Text(
                       state.error!,
-                      style: const TextStyle(color: Colors.red),
+                      style: TextStyle(
+                        color: LuminaTheme.of(context).colors.danger,
+                      ),
                     ),
                   ),
                 for (final device in state.devices)

@@ -7,6 +7,8 @@ know the message/attachment subset; newer peers advertise extra capabilities in
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import re
 import uuid
@@ -27,7 +29,7 @@ HELPER_CAPABILITIES = frozenset({
     "slash_commands", "command.request", "command.reply", "slash.command",
     "delivery.send", "cron.delivery", "proactive.delivery", "cron_delivery",
     "proactive_delivery", "sessions", "artifacts",
-    "workspace.request", "reply_followups", "session.status",
+    "workspace.request", "reply_followups", "session.status", "memory.analyze",
 })
 KNOWN_CAPABILITIES = SUPPORTED_CAPABILITIES | HELPER_CAPABILITIES
 LEGACY_CAPABILITIES = frozenset({"messages", "attachments", "ack", "reconnect", "device_auth"})
@@ -44,7 +46,7 @@ KNOWN_TYPES = frozenset({
     "command.request", "command.reply", "slash.command", "slash.reply", "delivery.send", "delivery.ack",
     "cron.delivery", "proactive.delivery", "session.open", "session.close", "session.reset", "session.list",
     "session.info", "session.reply", "artifact", "artifact.event",
-    "workspace.request", "workspace.response",
+    "workspace.request", "workspace.response", "memory.analyze", "memory.result",
 })
 
 MAX_ATTACHMENTS = 16
@@ -52,6 +54,8 @@ MAX_ATTACHMENT_NAME = 180
 MAX_CHOICES = 32
 MAX_CAPABILITIES = 64
 MAX_EVENT_TEXT = 256 * 1024
+MAX_MEMORY_TEXT_BYTES = 100_000
+MAX_MEMORY_IMAGE_BYTES = 900 * 1024
 _EXCLUDED_ATTACHMENT_PREFIXES = ("audio/", "video/")
 _ALLOWED_APPROVAL_CHOICES = frozenset({"once", "session", "always", "deny"})
 _ALLOWED_SLASH_CHOICES = frozenset({"once", "always", "cancel"})
@@ -564,6 +568,48 @@ def parse_message(raw: Any) -> dict[str, Any]:
         message["capabilities"] = _text_list(message.get("capabilities"), "capabilities", max_items=MAX_CAPABILITIES)
         _non_negative_int(message, "resume_from", optional=True)
         _non_negative_int(message, "next_seq", optional=True)
+    elif message_type in {"memory.analyze", "memory.result"}:
+        request_id = _required_text(message, "request_id")
+        if len(request_id.encode("utf-8")) > 160:
+            raise ProtocolError("request_id is too long")
+        if message_type == "memory.analyze":
+            from .memory_video import web_url
+            urls = message.get("source_urls", [])
+            if not isinstance(urls, list) or len(urls) > 32 or not all(isinstance(url, str) and web_url(url) for url in urls):
+                raise ProtocolError("invalid memory source URLs")
+            content = _required_text(message, "content")
+            if len(content.encode("utf-8")) > MAX_MEMORY_TEXT_BYTES:
+                raise ProtocolError("memory content is too large")
+            image = message.get("image_base64")
+            if image is not None:
+                if not isinstance(image, str) or len(image) > 4 * ((MAX_MEMORY_IMAGE_BYTES + 2) // 3):
+                    raise ProtocolError("memory image is too large")
+                try:
+                    raw = base64.b64decode(image, validate=True)
+                except (ValueError, binascii.Error) as exc:
+                    raise ProtocolError("memory image must be base64 JPEG") from exc
+                if len(raw) > MAX_MEMORY_IMAGE_BYTES or not raw.startswith(b"\xff\xd8\xff") or not raw.endswith(b"\xff\xd9"):
+                    raise ProtocolError("memory image must be a JPEG of at most 900 KiB")
+        else:
+            content, error = message.get("content"), message.get("error")
+            if (content is None) == (error is None):
+                raise ProtocolError("memory result requires content or error")
+            for field, value in (("content", content), ("error", error)):
+                if value is not None and (not isinstance(value, str) or not value.strip()
+                                          or len(value.encode("utf-8")) > MAX_MEMORY_TEXT_BYTES):
+                    raise ProtocolError(f"invalid memory {field}")
+            if message.get("category") not in {None, "ai", "other"}:
+                raise ProtocolError("invalid memory category")
+            if message.get("video_status") not in {None, "none", "analyzed", "unavailable"}:
+                raise ProtocolError("invalid memory video status")
+            if message.get("source_url") is not None:
+                from .memory_video import web_url
+                if not web_url(message["source_url"]):
+                    raise ProtocolError("invalid memory source URL")
+            for field, maximum in (("video_summary", MAX_MEMORY_TEXT_BYTES), ("video_error", 4000)):
+                value = message.get(field)
+                if value is not None and (not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > maximum):
+                    raise ProtocolError(f"invalid memory {field}")
     elif message_type in {"workspace.request", "workspace.response"}:
         for field in ("request_id", "conversation_id"):
             _required_text(message, field)

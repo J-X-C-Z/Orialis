@@ -29,8 +29,11 @@ void main() {
   late HttpServer server;
   late AgentChatService service;
   final requests = <String>[];
+  final remotePorts = <int?>[];
+  var expectedToken = 'test-session';
   var bindingAvailable = true;
   Completer<void>? bindingGate;
+  Completer<void>? bindingArrived;
   String? bindingTarget;
   String? gatedConversation;
   String? rejectedConversation;
@@ -52,8 +55,11 @@ void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     requests.clear();
+    remotePorts.clear();
+    expectedToken = 'test-session';
     bindingAvailable = true;
     bindingGate = null;
+    bindingArrived = null;
     gatedConversation = null;
     rejectedConversation = null;
     bindingTarget = 'JXCZ_MBA_Hermes';
@@ -68,16 +74,22 @@ void main() {
     service = AgentChatService(config);
     server.listen((request) async {
       if (!unavailable) {
-        expect(request.headers.value('Authorization'), 'Session test-session');
+        expect(
+          request.headers.value('Authorization'),
+          'Session $expectedToken',
+        );
       }
+      remotePorts.add(request.connectionInfo?.remotePort);
       requests.add('${request.method} ${request.uri.path}');
       if (request.method == 'GET' &&
           request.uri.path.endsWith('/agent-device') &&
           (gatedConversation == null ||
               request.uri.path.contains('/$gatedConversation/'))) {
+        if (bindingArrived?.isCompleted == false) bindingArrived!.complete();
         await bindingGate?.future;
       }
       request.response.headers.contentType = ContentType.json;
+      if (request.method == 'GET') await request.drain<void>();
       if (unavailable ||
           (rejectedConversation != null &&
               request.uri.path.contains('/$rejectedConversation/'))) {
@@ -106,6 +118,11 @@ void main() {
               {
                 'deviceId': 'JXCZ_PC_Hermes',
                 'platform': 'windows',
+                'online': true,
+              },
+              {
+                'deviceId': 'JXCZ_HAKARI_Hermes',
+                'platform': 'linux',
                 'online': true,
               },
               {
@@ -145,19 +162,60 @@ void main() {
     await server.close(force: true);
   });
 
-  test('registry exposes configured Mac, Windows and Azure Hermes', () async {
-    final devices = await service.devices();
-    expect(devices.map((d) => d.label), ['Mac 电脑', 'Windows 电脑', 'Azure 服务器']);
-    expect(devices[1].online, true);
-    expect(service.isAllowedTarget('JXCZ_PC_Hermes'), true);
-    expect(service.targetLabel('JXCZ_PC_Hermes'), 'Windows 电脑');
-    expect(devices.last.online, false);
-    expect(devices.map((d) => d.id), [
-      'JXCZ_MBA_Hermes',
-      'JXCZ_PC_Hermes',
-      'JXCZ_AOZORA_Hermes',
-    ]);
-    expect(await service.target('conversation-mac'), 'JXCZ_MBA_Hermes');
+  test(
+    'binding and presence reuse a connection until the session changes',
+    () async {
+      await service.target('conversation-mac', requireOnline: true);
+      final originalClient = await service.client();
+      await service.devicePresence('JXCZ_MBA_Hermes');
+      expect(await service.client(), same(originalClient));
+      await service.devicePresence('JXCZ_AOZORA_Hermes');
+      expect(remotePorts.length, 3);
+      expect(remotePorts.first, isNotNull);
+      expect(remotePorts.toSet().length, lessThan(3));
+
+      config.token = expectedToken = 'renewed-session';
+      await service.devicePresence('JXCZ_MBA_Hermes');
+      expect(remotePorts.take(3), isNot(contains(remotePorts.last)));
+    },
+  );
+
+  test(
+    'registry exposes configured Mac, Windows, Hakari and Azure agents',
+    () async {
+      final devices = await service.devices();
+      expect(devices.map((d) => d.label), [
+        'Mac 电脑',
+        'Windows 电脑',
+        'Hakari 服务器',
+        'Azure 服务器',
+      ]);
+      expect(devices[1].online, true);
+      expect(service.isAllowedTarget('JXCZ_PC_Hermes'), true);
+      expect(service.targetLabel('JXCZ_PC_Hermes'), 'Windows 电脑');
+      expect(service.isAllowedTarget('JXCZ_HAKARI_Hermes'), true);
+      expect(service.isDshTarget('JXCZ_HAKARI_Hermes'), false);
+      expect(service.agentLabel('JXCZ_HAKARI_Hermes'), 'Hermes');
+      expect(service.isAllowedTarget('JXCZ_HAKARI_DSH'), false);
+      expect(devices.last.online, false);
+      expect(devices.map((d) => d.id), [
+        'JXCZ_MBA_Hermes',
+        'JXCZ_PC_Hermes',
+        'JXCZ_HAKARI_Hermes',
+        'JXCZ_AOZORA_Hermes',
+      ]);
+      expect(await service.target('conversation-mac'), 'JXCZ_MBA_Hermes');
+    },
+  );
+  test('DSH remains excluded when supplied as the Hakari device override', () {
+    final overridden = AgentChatService(
+      config,
+      hakariDeviceId: 'JXCZ_HAKARI_DSH',
+    );
+    expect(overridden.isAllowedTarget('JXCZ_HAKARI_DSH'), false);
+    expect(overridden.isDshTarget('JXCZ_HAKARI_DSH'), false);
+    expect(overridden.agentLabel('JXCZ_HAKARI_DSH'), 'Hermes');
+    overridden.dispose();
   });
   test(
     'presence distinguishes authoritative offline from unavailable registry',
@@ -187,7 +245,7 @@ void main() {
         azureDeviceId: 'JXCZ_NEWAZURE_Hermes',
       );
       final devices = await configured.devices();
-      expect(devices.length, 3);
+      expect(devices.length, 4);
       expect(devices.last.id, 'JXCZ_NEWAZURE_Hermes');
       expect(devices.last.label, 'Azure 服务器');
       expect(devices.last.online, false);
@@ -235,6 +293,7 @@ void main() {
       false,
       false,
       false,
+      false,
     ]);
     config.token = 'another-account';
     expect(await restarted.target('conversation-mac'), isNull);
@@ -245,6 +304,7 @@ void main() {
       expect(await service.target('conversation-mac'), 'JXCZ_MBA_Hermes');
       requests.clear();
       bindingGate = Completer<void>();
+      bindingArrived = Completer<void>();
       bindingTarget = 'JXCZ_AOZORA_Hermes';
       final restarted = AgentChatService(config);
       final changed = restarted.targetChanges.first;
@@ -264,7 +324,7 @@ void main() {
             onlineFinished = true;
             return value;
           });
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await bindingArrived!.future.timeout(const Duration(seconds: 5));
       expect(onlineFinished, false);
       expect(requests, [
         'GET /api/v1/conversations/conversation-mac/agent-device',
@@ -397,7 +457,12 @@ void main() {
       await service.renameDevice('JXCZ_MBA_Hermes', '工作 Mac');
       changeRegistryIdentity = true;
       final devices = await service.devices();
-      expect(devices.map((device) => device.online), [false, false, false]);
+      expect(devices.map((device) => device.online), [
+        false,
+        false,
+        false,
+        false,
+      ]);
       expect(devices.first.label, 'Mac 电脑');
     },
   );

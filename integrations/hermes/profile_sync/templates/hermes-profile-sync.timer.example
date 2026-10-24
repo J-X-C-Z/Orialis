@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically sync curated Hermes profile files
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=60
+Persistent=true
+Unit=hermes-profile-sync.service
+
+[Install]
+WantedBy=timers.target

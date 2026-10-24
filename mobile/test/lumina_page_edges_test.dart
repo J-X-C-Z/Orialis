@@ -1,4 +1,5 @@
 import 'package:drift/native.dart';
+import 'package:flutter/rendering.dart' show RenderSliver;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orialis_mobile/app/app.dart';
@@ -510,15 +511,13 @@ void main() {
     expect(tester.widget<Text>(find.text('重点事项 0')).style?.fontSize, 16);
     expect(
       tester
-          .getSize(
+          .renderObject<RenderSliver>(
             find
-                .ancestor(
-                  of: first,
-                  matching: find.byType(LuminaCollapsibleCard),
-                )
+                .ancestor(of: first, matching: find.byType(DecoratedSliver))
                 .first,
           )
-          .width,
+          .constraints
+          .crossAxisExtent,
       greaterThan(380),
     );
     final list = find

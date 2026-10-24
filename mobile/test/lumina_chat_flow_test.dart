@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -57,12 +59,14 @@ class _Sync extends SyncCoordinator {
   _Sync({required super.realtime, required super.chatRepository})
     : super(sync: () async => SyncState.offline);
   int attempts = 0;
+  Completer<SyncState>? gate;
   @override
   Future<void> start() async {}
   @override
-  Future<SyncState> requestSync() async {
+  Future<void> flushMessage(String conversationId, String messageId) async {
     attempts++;
-    return SyncState.offline;
+    final result = gate == null ? SyncState.offline : await gate!.future;
+    if (result != SyncState.idle) throw StateError('offline');
   }
 }
 
@@ -217,7 +221,7 @@ void main() {
         '离线消息不会丢失',
       );
       final before = h.sync.attempts;
-      await tester.tap(find.text('待发送 · 重试'));
+      await tester.tap(find.text('!'));
       await tester.pumpAndSettle();
       expect(h.sync.attempts, before + 1);
       expect(
@@ -229,30 +233,133 @@ void main() {
       expect(iconAction('返回会话列表'), findsNothing);
       expect(find.text('离线消息不会丢失'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 4));
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
     },
   );
 
-  testWidgets(
-    'attachment permission refusal returns to the same conversation',
-    (tester) async {
-      await openChat(tester);
-      await tester.tap(iconAction('附件与快捷指令'));
+  testWidgets('new send immediately uses the status spinner', (tester) async {
+    final h = await openChat(tester);
+    h.sync.gate = Completer<SyncState>();
+    await tester.enterText(find.byType(EditableText).first, '发送中的消息');
+    await tester.tap(iconAction('发送'));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    final bubble = find.ancestor(
+      of: find.text('发送中的消息'),
+      matching: find.byType(LuminaChatBubble),
+    );
+    expect(
+      find.descendant(of: bubble, matching: find.byType(LuminaProgress)),
+      findsOneWidget,
+    );
+    final sendingSize = tester.getSize(bubble);
+    h.sync.gate!.complete(SyncState.error);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(bubble), sendingSize);
+    expect(
+      find.descendant(of: bubble, matching: find.text('!')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('message geometry stays fixed through retry and upload', (
+    tester,
+  ) async {
+    final h = await openChat(tester);
+    final semantics = tester.ensureSemantics();
+
+    for (final content in [
+      '简短消息',
+      '这是一条较长的消息，用于验证换行以后发送状态切换不会改变消息气泡的宽度和高度。' * 3,
+      '第一行\n第二行',
+    ]) {
+      final pendingMessage = h.repo.sendMessage(
+        conversationId: h.id,
+        content: content,
+      );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('拍照'));
+      final message = await pendingMessage;
       await tester.pumpAndSettle();
-      expect(find.text('允许访问相机？'), findsOneWidget);
-      await tester.tap(find.text('暂不允许'));
+      final bubble = find.ancestor(
+        of: find.text(content),
+        matching: find.byType(LuminaChatBubble),
+      );
+      final originalSize = tester.getSize(bubble);
+      final originalTextOffset =
+          tester.getTopLeft(find.text(content)) - tester.getTopLeft(bubble);
+      expect(find.text('待发送 · 重试'), findsNothing);
+      h.sync.gate = Completer<SyncState>();
+      await tester.tap(find.text('◷').last);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.bySemanticsLabel(RegExp('发送中')), findsOneWidget);
+      expect(
+        find.descendant(of: bubble, matching: find.byType(LuminaProgress)),
+        findsOneWidget,
+      );
+      expect(tester.getSize(bubble), originalSize);
+      final uploaded =
+          (h.db.update(
+            h.db.messages,
+          )..where((row) => row.id.equals(message.id))).write(
+            const MessagesCompanion(
+              syncStatus: Value('synced'),
+              remoteVersion: Value(1),
+            ),
+          );
+      await tester.pump(const Duration(milliseconds: 100));
+      await uploaded;
+      h.sync.gate!.complete(SyncState.offline);
       await tester.pumpAndSettle();
-      expect(find.text('允许访问相机？'), findsNothing);
-      expect(iconAction('发送'), findsOneWidget);
-      expect(find.byType(EditableText), findsOneWidget);
+      expect(
+        find.descendant(of: bubble, matching: find.byType(LuminaProgress)),
+        findsNothing,
+      );
+      expect(tester.getSize(bubble), originalSize);
+      expect(
+        tester.getTopLeft(find.text(content)) - tester.getTopLeft(bubble),
+        originalTextOffset,
+      );
       expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pumpAndSettle();
-    },
-  );
+    }
+    semantics.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('camera and photos open without an in-app confirmation', (
+    tester,
+  ) async {
+    await openChat(tester);
+    await tester.tap(iconAction('附件与快捷指令'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('拍照'));
+    await tester.pumpAndSettle();
+    expect(find.text('允许访问相机？'), findsNothing);
+    expect(find.text('继续'), findsNothing);
+    expect(find.text('暂不允许'), findsNothing);
+    expect(find.byType(EditableText), findsOneWidget);
+
+    await tester.tap(iconAction('附件与快捷指令'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择照片'));
+    await tester.pumpAndSettle();
+    expect(find.text('选择要分享的照片'), findsNothing);
+    expect(find.text('继续'), findsNothing);
+    expect(find.text('暂不允许'), findsNothing);
+    expect(iconAction('发送'), findsOneWidget);
+    expect(find.byType(EditableText), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
 
   testWidgets(
     'approval failure restores choices and confirmed retry clears request panel',
@@ -293,7 +400,9 @@ void main() {
           },
         }),
       );
-      await tester.pumpAndSettle();
+      // Processing resumes with a continuous thinking shimmer.
+      await tester.pump();
+      await tester.pump(LuminaMotion.standard);
       expect(find.byType(AgentApprovalSheet), findsNothing);
       await tester.pump(const Duration(seconds: 4));
       expect(tester.takeException(), isNull);
@@ -322,6 +431,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('选择文件'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 4));
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
     },

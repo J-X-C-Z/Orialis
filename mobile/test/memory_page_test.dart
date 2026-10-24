@@ -5,11 +5,24 @@ import 'package:orialis_mobile/features/memory/data/memory_repository.dart';
 import 'package:orialis_mobile/features/memory/domain/memory_record.dart';
 import 'package:orialis_mobile/features/memory/presentation/memory_page.dart';
 import 'package:orialis_mobile/features/chat/presentation/safe_markdown.dart';
+import 'package:url_launcher_platform_interface/link.dart';
+import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
+
+class _MockUrlLauncher extends UrlLauncherPlatform {
+  final launchedUrls = <String>[];
+
+  @override
+  LinkDelegate? get linkDelegate => null;
+
+  @override
+  Future<bool> launchUrl(String url, LaunchOptions options) async {
+    launchedUrls.add(url);
+    return true;
+  }
+}
 
 class FakeMemoryRepository extends MemoryRepository {
   bool fail = false;
-  @override
-  Future<bool> requestAddTile() async => false;
   final records = <MemoryRecord>[
     MemoryRecord(
       id: 'bili',
@@ -20,6 +33,7 @@ class FakeMemoryRepository extends MemoryRepository {
       urls: const ['https://b23.tv/Test1'],
       title: '视频收藏',
       analysisStatus: 'pending',
+      category: 'ai',
     ),
     MemoryRecord(
       id: 'web',
@@ -30,6 +44,7 @@ class FakeMemoryRepository extends MemoryRepository {
       urls: const [],
       title: '今日菜单',
       summary: '早餐清单',
+      category: 'other',
     ),
   ];
   @override
@@ -158,7 +173,6 @@ void main() {
       'urls': [url],
     });
     await showMemory(tester, repository);
-    expect(find.textContaining('小红书、哔哩哔哩'), findsOneWidget);
     await tester.tap(find.text('小红书收藏'));
     await tester.pumpAndSettle();
     final selectable = tester.widgetList<LuminaSelectableText>(
@@ -169,23 +183,129 @@ void main() {
     expect(find.textContaining('不代表已获取笔记或视频全文'), findsOneWidget);
   });
 
-  testWidgets(
-    'manual tile instructions appear when Android cannot add automatically',
-    (tester) async {
-      final repository = FakeMemoryRepository();
-      addTearDown(repository.dispose);
-      await showMemory(tester, repository);
-      expect(
-        find.text('将「记住屏幕」加入控制中心。点击快捷按钮后，按安卓提示授权截屏，即可保存当前内容。'),
-        findsOneWidget,
-      );
-      expect(find.text('启用屏幕记忆服务'), findsNothing);
-      await tester.tap(find.text('添加快捷按钮'));
-      await tester.pump();
-      expect(find.text('下拉控制中心，编辑快捷按钮，将“记住屏幕”加入'), findsOneWidget);
-      await tester.pump(const Duration(seconds: 4));
-    },
-  );
+  testWidgets('memory records use a single Lumina surface', (tester) async {
+    final repository = FakeMemoryRepository();
+    addTearDown(repository.dispose);
+    await showMemory(tester, repository);
+    final rowSurfaces = find.ancestor(
+      of: find.text('视频收藏'),
+      matching: find.byType(LuminaSurface),
+    );
+    expect(rowSurfaces, findsOneWidget);
+    expect(find.text('添加快捷按钮'), findsNothing);
+    expect(find.textContaining('将「记住屏幕」加入控制中心'), findsNothing);
+  });
+
+  testWidgets('AI category combines with search and survives refresh', (
+    tester,
+  ) async {
+    final repository = FakeMemoryRepository();
+    addTearDown(repository.dispose);
+    await showMemory(tester, repository);
+    expect(find.text('视频收藏'), findsOneWidget);
+    expect(find.text('今日菜单'), findsOneWidget);
+    expect(find.text('AI'), findsNWidgets(2));
+    await tester.tap(find.widgetWithText(LuminaChip, 'AI'));
+    await tester.pumpAndSettle();
+    expect(find.text('视频收藏'), findsOneWidget);
+    expect(find.text('今日菜单'), findsNothing);
+
+    repository.records.add(
+      MemoryRecord(
+        id: 'other-refresh',
+        createdAt: DateTime.utc(2026, 10, 24),
+        sourcePackage: 'browser',
+        sourceLabel: '浏览器',
+        visibleText: '',
+        urls: const [],
+        title: '刷新后新增的普通记忆',
+        category: 'other',
+      ),
+    );
+    repository.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.text('今日菜单'), findsNothing);
+    expect(find.text('刷新后新增的普通记忆'), findsNothing);
+
+    await tester.enterText(find.byType(EditableText), '配方');
+    await tester.pumpAndSettle();
+    expect(find.text('没有找到匹配的记忆'), findsOneWidget);
+    await tester.enterText(find.byType(EditableText), '电影');
+    await tester.pumpAndSettle();
+    expect(find.text('视频收藏'), findsOneWidget);
+    expect(find.text('今日菜单'), findsNothing);
+  });
+
+  testWidgets('opens exact original video URL without analyzing', (
+    tester,
+  ) async {
+    const url =
+        'https://www.bilibili.com/video/BV1xx?spm_id_from=abc%2B123&foo=a%2Fb';
+    final repository = FakeMemoryRepository();
+    addTearDown(repository.dispose);
+    repository.records[0] = MemoryRecord.fromMap({
+      ...repository.records[0].toMap(),
+      'sourceUrl': url,
+    });
+    final launcher = _MockUrlLauncher();
+    final originalLauncher = UrlLauncherPlatform.instance;
+    UrlLauncherPlatform.instance = launcher;
+    addTearDown(() => UrlLauncherPlatform.instance = originalLauncher);
+    var analyses = 0;
+    await showMemory(tester, repository, analyze: (_) async => analyses++);
+    await tester.tap(find.byTooltip('打开原视频'));
+    await tester.pumpAndSettle();
+    expect(launcher.launchedUrls, [url]);
+    expect(find.text('打开原视频'), findsNothing);
+    await tester.tap(find.text('视频收藏'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('打开原视频'));
+    await tester.pumpAndSettle();
+    expect(launcher.launchedUrls, [url, url]);
+    expect(analyses, 0);
+  });
+
+  testWidgets('detail shows analyzed video summary', (tester) async {
+    final repository = FakeMemoryRepository();
+    addTearDown(repository.dispose);
+    repository.records[0] = MemoryRecord.fromMap({
+      ...repository.records[0].toMap(),
+      'analysisStatus': 'completed',
+      'videoStatus': 'analyzed',
+      'videoSummary': '视频讲解了电影里的科学原理。',
+    });
+    await showMemory(tester, repository);
+    await tester.tap(find.text('视频收藏'));
+    await tester.pumpAndSettle();
+    expect(find.text('视频理解'), findsOneWidget);
+    expect(
+      tester.widget<SafeMarkdownView>(find.byType(SafeMarkdownView)).source,
+      '视频讲解了电影里的科学原理。',
+    );
+  });
+
+  testWidgets('completed memory can retry unavailable video analysis', (
+    tester,
+  ) async {
+    final repository = FakeMemoryRepository();
+    addTearDown(repository.dispose);
+    repository.records[0] = MemoryRecord.fromMap({
+      ...repository.records[0].toMap(),
+      'analysisStatus': 'completed',
+      'videoStatus': 'unavailable',
+      'videoError': '视频内容暂时无法读取。',
+    });
+    var retries = 0;
+    await showMemory(tester, repository, analyze: (_) async => retries++);
+    await tester.tap(find.text('视频收藏'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('视频内容暂时无法读取。'), findsOneWidget);
+    expect(find.textContaining('截图、分享文案和原始链接仍可查看。'), findsOneWidget);
+    expect(find.text('重试视频理解'), findsOneWidget);
+    await tester.tap(find.text('重试视频理解'));
+    await tester.pumpAndSettle();
+    expect(retries, 1);
+  });
 
   testWidgets(
     'failed analysis displays the safe reason and remains manually retryable',

@@ -1,5 +1,10 @@
 import 'dart:convert';
 
+import 'response_svg.dart';
+import 'response_visual_schema.dart';
+import 'response_interactive_schema.dart';
+import 'response_action_schema.dart';
+
 /// A small native response vocabulary. Never evaluates HTML, scripts or URLs.
 class ResponseUiDocument {
   const ResponseUiDocument({
@@ -48,12 +53,33 @@ class ResponseUiDocument {
           return null;
         }
         final type = raw['type'];
+        final extended = visualResponseTypes.contains(type)
+            ? validateVisualResponseBlock(raw)
+            : interactiveResponseTypes.contains(type)
+            ? validateInteractiveResponseBlock(raw)
+            : actionResponseTypes.contains(type)
+            ? validateActionResponseBlock(raw)
+            : null;
+        if (extended != null) {
+          if (!extended) return null;
+          parsed.add(
+            ResponseUiBlock(
+              type: type as String,
+              title: raw['title'] as String?,
+              unit: raw['unit'] as String?,
+              items: const [],
+              data: Map.unmodifiable(raw),
+            ),
+          );
+          continue;
+        }
         if (!const {
           'metrics',
           'chart',
           'tabs',
           'checklist',
           'choices',
+          'svg',
         }.contains(type)) {
           return null;
         }
@@ -78,6 +104,8 @@ class ResponseUiDocument {
               if (item['checked'] is! bool) return null;
             case 'choices':
               if (!_text(item['prompt'], 1000)) return null;
+            case 'svg':
+              if (!ResponseSvg.isValid(item['source'])) return null;
           }
           items.add(
             ResponseUiItem(
@@ -89,6 +117,7 @@ class ResponseUiDocument {
               content: type == 'tabs' ? item['content'] as String : null,
               checked: type == 'checklist' ? item['checked'] as bool : false,
               prompt: type == 'choices' ? item['prompt'] as String : null,
+              source: type == 'svg' ? item['source'] as String : null,
             ),
           );
         }
@@ -126,11 +155,13 @@ class ResponseUiBlock {
     required this.items,
     this.title,
     this.unit,
+    this.data = const {},
   });
   final String type;
   final String? title;
   final String? unit;
   final List<ResponseUiItem> items;
+  final Map<String, dynamic> data;
 }
 
 class ResponseUiItem {
@@ -140,6 +171,7 @@ class ResponseUiItem {
     this.detail,
     this.content,
     this.prompt,
+    this.source,
     this.checked = false,
   });
   final String label;
@@ -147,5 +179,6 @@ class ResponseUiItem {
   final String? detail;
   final String? content;
   final String? prompt;
+  final String? source;
   final bool checked;
 }

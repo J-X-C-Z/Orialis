@@ -74,6 +74,29 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(runs, 2);
   });
+
+  test(
+    'dispose waits for targeted message uploads before account teardown',
+    () async {
+      final gate = Completer<void>();
+      var disposed = false;
+      final coordinator = SyncCoordinator(
+        sync: () async => SyncState.idle,
+        flushChatMessage: ({required conversationId, required messageId}) =>
+            gate.future,
+        realtime: MobileRealtimeClient(config: AppConfig()),
+      );
+
+      final flush = coordinator.flushMessage('conversation', 'message');
+      final disposal = coordinator.dispose().then((_) => disposed = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(disposed, isFalse);
+      gate.complete();
+      await flush;
+      await disposal;
+      expect(disposed, isTrue);
+    },
+  );
 }
 
 class _TestRealtime extends MobileRealtimeClient {

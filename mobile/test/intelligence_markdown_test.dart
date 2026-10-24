@@ -38,6 +38,73 @@ Widget _host(String source, {double scale = 1, double width = 320}) =>
     );
 
 void main() {
+  test('stream parser matches full parsing for every Markdown prefix', () {
+    const source =
+        'Intro\r\n\r\n| Name | Value |\r\n| --- | ---: |\r\n| A | 2 |'
+        '\r\n\r\n> quoted\r\n> next\r\n\r\n7. first\r\n8. second'
+        '\r\n\r\n```orialis-ui\r\n{\r\n  "version": 1,\r\n'
+        '  "fallback": "safe"\r\n}\r\n```\r\n\r\n```text\r\n'
+        'code\r\n\r\n---\r\n```\r\n\r\n## End';
+    final parser = MarkdownBlockStreamParser();
+
+    for (var end = 0; end <= source.length; end++) {
+      final streamed = parser
+          .update(source.substring(0, end))
+          .expand((part) => part);
+      final expected = MarkdownBlock.parse(source.substring(0, end));
+      expect(
+        _blockShape(streamed),
+        _blockShape(expected),
+        reason: 'prefix $end',
+      );
+    }
+
+    final unclosed = '```text\nfirst\n\nsecond';
+    expect(
+      _blockShape(parser.update(unclosed).expand((part) => part)),
+      _blockShape(MarkdownBlock.parse(unclosed)),
+    );
+  });
+
+  test('stream parser re-parses only the changed tail section', () {
+    final parser = MarkdownBlockStreamParser();
+    final initial = parser.update('## Stable\n\n```text\ncode\n```');
+    final stableBlock = initial.first.single;
+    expect(parser.lastParseCount, 2);
+
+    final updated = parser.update('## Stable\n\n```text\ncode\n```\nmore');
+    expect(parser.lastParseCount, 1);
+    expect(identical(updated.first.single, stableBlock), isTrue);
+    expect(updated.expand((part) => part).map((block) => block.type), [
+      MarkdownBlockType.heading,
+      MarkdownBlockType.code,
+      MarkdownBlockType.paragraph,
+    ]);
+  });
+
+  test('long streaming reply reuses a thousand stable paragraphs', () {
+    final parser = MarkdownBlockStreamParser();
+    final stable = List.generate(
+      1000,
+      (index) => 'Stable paragraph for long-reply regression $index.',
+    ).join('\n\n');
+    final before = parser.update('$stable\n\nChanging tail');
+    expect(parser.lastParseCount, 1001);
+    final after = parser.update('$stable\n\nChanging tail with more text');
+    expect(parser.lastParseCount, 1);
+    expect(identical(before.first, after.first), isTrue);
+    expect(identical(before[999], after[999]), isTrue);
+    expect(identical(before.last, after.last), isFalse);
+    expect(
+      identical(
+        parser.update('$stable\n\nChanging tail with more text'),
+        after,
+      ),
+      isTrue,
+    );
+    expect(parser.lastParseCount, 0);
+  });
+
   test(
     'quotes and dividers split paragraphs and ordered lists retain their start',
     () {
@@ -112,3 +179,8 @@ void main() {
     },
   );
 }
+
+List<String> _blockShape(Iterable<MarkdownBlock> blocks) => [
+  for (final block in blocks)
+    '${block.type.name}|${block.level}|${block.startNumber}|${block.language}|${block.fenceClosed}|${block.lines.join('\\n')}',
+];

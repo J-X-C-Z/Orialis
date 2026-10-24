@@ -1,5 +1,6 @@
 <template>
-<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><scroll class="content" scroll-y="true"><div class="stack">
+<div class="screen {{ motionClass }}" @swipe="handleSwipe" @touchstart="touchStart" @touchmove="touchMove" @touchend="touchEnd"><div class="stack" if="{{ vm.cacheLoading }}"><text class="body">正在读取本地缓存…</text></div>
+<scroll if="{{ !vm.cacheLoading }}" class="content" scroll-y="true"><div class="stack">
 <div class="header"><div class="back" onclick="goBack"><text class="backText">‹</text></div><text class="title">菜单</text></div>
 <div class="row menuRow" onclick="events"><div class="glyphCircle teal"><div class="glyph check"></div></div><text class="menuTitle">四象限</text><text class="chevron">›</text></div>
 <div class="row menuRow" onclick="projects"><div class="glyphCircle orange"><div class="glyph folderGlyph"></div></div><text class="menuTitle">项目</text><text class="chevron">›</text></div>

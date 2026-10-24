@@ -11,6 +11,7 @@ import 'package:orialis_mobile/app/design/lumina_compat.dart'
 import '../../core/database/app_database.dart';
 import '../../features/events/presentation/task_editor.dart';
 import '../../features/events/presentation/task_quadrant.dart';
+import '../../features/events/presentation/task_quadrant_sliver.dart';
 import '../../features/events/presentation/long_press_orderable.dart';
 import '../../features/events/presentation/quick_event_button.dart';
 import '../projects/projects_page.dart';
@@ -153,15 +154,21 @@ class _EventsPageState extends ConsumerState<EventsPage> {
     builder: (context, snapshot) {
       if (snapshot.hasError) return const PageFailure();
       if (!snapshot.hasData) return const Center(child: LuminaProgress());
-      final tasks = snapshot.data!
-          .where(
-            (t) => switch (_contentFilter) {
-              'done' => t.completed,
-              'undated' => !t.completed && t.due == null,
-              _ => !t.completed,
-            },
-          )
-          .toList();
+      final tasks = <Task>[];
+      final grouped = {for (final q in TaskQuadrant.values) q: <Task>[]};
+      for (final task in snapshot.data!) {
+        final matches = switch (_contentFilter) {
+          'done' => task.completed,
+          'undated' => !task.completed && task.due == null,
+          _ => !task.completed,
+        };
+        if (!matches) continue;
+        tasks.add(task);
+        grouped[quadrantOf(task)]!.add(task);
+      }
+      if (!ref.watch(desktopModeProvider)) {
+        return _mobileTasks(topInset, snapshot.data!, tasks, grouped);
+      }
       return ListView(
         padding: EdgeInsets.fromLTRB(
           20,
@@ -172,60 +179,11 @@ class _EventsPageState extends ConsumerState<EventsPage> {
               MediaQuery.paddingOf(context).bottom,
         ),
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: LuminaSegmented<String>(
-                  transparent: true,
-                  items: const {
-                    'active': '待完成',
-                    'undated': '无截止',
-                    'done': '已完成',
-                  },
-                  value: _selectedFilter,
-                  onChanged: _selectFilter,
-                ),
-              ),
-              const SizedBox(width: 8),
-              LuminaIconButton(
-                tooltip: '恢复事件默认排序',
-                icon: const LuminaIcon(LuminaIcons.sync),
-                onPressed: () => ref
-                    .read(taskRepositoryProvider)
-                    .resetTaskOrder(
-                      snapshot.data!.map((task) => task.id).toList(),
-                    ),
-              ),
-            ],
-          ),
+          _taskFilters(snapshot.data!),
           const SizedBox(height: 20),
           ContentStack(
             children: [
-              if (_quadrantUndo case final undo?)
-                LuminaSurface(
-                  glass: true,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  child: Row(
-                    children: [
-                      const Expanded(child: Text('已调整象限')),
-                      LuminaButton(
-                        primary: false,
-                        onPressed: () async {
-                          await _setTaskQuadrant(
-                            undo.task,
-                            undo.important,
-                            undo.urgent,
-                          );
-                          if (mounted) setState(() => _quadrantUndo = null);
-                        },
-                        child: const Text('撤销'),
-                      ),
-                    ],
-                  ),
-                ),
+              if (_quadrantUndo case final undo?) _undoPanel(undo),
               LayoutBuilder(
                 builder: (context, constraints) {
                   const quadrants = [
@@ -235,11 +193,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
                     TaskQuadrant.neither,
                   ];
                   final panels = [
-                    for (final q in quadrants)
-                      _quadrant(
-                        q,
-                        tasks.where((t) => quadrantOf(t) == q).toList(),
-                      ),
+                    for (final q in quadrants) _quadrant(q, grouped[q]!),
                   ];
                   if (ref.watch(desktopModeProvider) &&
                       LuminaNavigationInset.of(context) == 0 &&
@@ -273,12 +227,10 @@ class _EventsPageState extends ConsumerState<EventsPage> {
           LuminaReveal(
             visible:
                 _holdUnclassified ||
-                tasks.any((t) => quadrantOf(t) == TaskQuadrant.unclassified),
+                grouped[TaskQuadrant.unclassified]!.isNotEmpty,
             child: _quadrant(
               TaskQuadrant.unclassified,
-              tasks
-                  .where((t) => quadrantOf(t) == TaskQuadrant.unclassified)
-                  .toList(),
+              grouped[TaskQuadrant.unclassified]!,
               onCompletionActivityChanged: (active) {
                 if (mounted && _holdUnclassified != active) {
                   setState(() => _holdUnclassified = active);
@@ -295,6 +247,132 @@ class _EventsPageState extends ConsumerState<EventsPage> {
       );
     },
   );
+  Widget _taskFilters(List<Task> allTasks) => Row(
+    children: [
+      Expanded(
+        child: LuminaSegmented<String>(
+          transparent: true,
+          items: const {'active': '待完成', 'undated': '无截止', 'done': '已完成'},
+          value: _selectedFilter,
+          onChanged: _selectFilter,
+        ),
+      ),
+      const SizedBox(width: 8),
+      LuminaIconButton(
+        tooltip: '恢复事件默认排序',
+        icon: const LuminaIcon(LuminaIcons.sync),
+        onPressed: () => ref
+            .read(taskRepositoryProvider)
+            .resetTaskOrder(allTasks.map((task) => task.id).toList()),
+      ),
+    ],
+  );
+
+  Widget _undoPanel(({Task task, bool? important, bool? urgent}) undo) =>
+      LuminaSurface(
+        glass: true,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          children: [
+            const Expanded(child: Text('已调整象限')),
+            LuminaButton(
+              primary: false,
+              onPressed: () async {
+                await _setTaskQuadrant(undo.task, undo.important, undo.urgent);
+                if (mounted) setState(() => _quadrantUndo = null);
+              },
+              child: const Text('撤销'),
+            ),
+          ],
+        ),
+      );
+
+  Widget _mobileTasks(
+    double topInset,
+    List<Task> allTasks,
+    List<Task> tasks,
+    Map<TaskQuadrant, List<Task>> grouped,
+  ) => CustomScrollView(
+    slivers: [
+      SliverPadding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          topInset,
+          20,
+          104 +
+              LuminaNavigationInset.of(context) +
+              MediaQuery.paddingOf(context).bottom,
+        ),
+        sliver: SliverMainAxisGroup(
+          slivers: [
+            SliverToBoxAdapter(child: _taskFilters(allTasks)),
+            const SliverToBoxAdapter(child: SizedBox(height: 20)),
+            if (_quadrantUndo case final undo?) ...[
+              SliverToBoxAdapter(child: _undoPanel(undo)),
+              const SliverToBoxAdapter(child: SizedBox(height: 12)),
+            ],
+            for (final q in const [
+              TaskQuadrant.urgentImportant,
+              TaskQuadrant.urgentOnly,
+              TaskQuadrant.importantOnly,
+              TaskQuadrant.neither,
+            ]) ...[
+              if (q != TaskQuadrant.urgentImportant)
+                const SliverToBoxAdapter(child: SizedBox(height: 12)),
+              _sliverQuadrant(q, grouped[q]!),
+            ],
+            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            LuminaSliverReveal(
+              visible:
+                  _holdUnclassified ||
+                  grouped[TaskQuadrant.unclassified]!.isNotEmpty,
+              sliver: _sliverQuadrant(
+                TaskQuadrant.unclassified,
+                grouped[TaskQuadrant.unclassified]!,
+                onCompletionActivityChanged: (active) {
+                  if (mounted && _holdUnclassified != active) {
+                    setState(() => _holdUnclassified = active);
+                  }
+                },
+              ),
+            ),
+            if (tasks.isEmpty)
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.only(top: 16),
+                  child: QuietLabel('从右上角记下一件事，再为它选择轻重缓急。'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ],
+  );
+
+  Widget _sliverQuadrant(
+    TaskQuadrant q,
+    List<Task> tasks, {
+    ValueChanged<bool>? onCompletionActivityChanged,
+  }) => TaskQuadrantSliver(
+    key: ValueKey(q),
+    quadrant: q,
+    tasks: tasks,
+    onMove: (task) => _moveTaskToQuadrant(task, q),
+    onCompletionActivityChanged: onCompletionActivityChanged,
+    itemBuilder: (context, index) {
+      final task = tasks[index];
+      return LongPressOrderable<Task>(
+        key: ValueKey('order:${q.name}:${task.id}'),
+        item: task,
+        group: q,
+        onReorder: (dragged, target) => _reorderTasks(tasks, dragged, target),
+        onMoveAcrossGroup: (dragged, target) => _moveTaskToQuadrant(dragged, q),
+        feedback: SizedBox(width: 280, child: _task(task)),
+        child: _task(task),
+      );
+    },
+  );
+
   Widget _quadrant(
     TaskQuadrant q,
     List<Task> tasks, {

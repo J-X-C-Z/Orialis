@@ -32,6 +32,31 @@ class ProjectsPage extends ConsumerStatefulWidget {
 
 class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   String? _selected = LuminaCardMemory.selectedProject;
+  ProjectRepository? _streamRepository;
+  Stream<List<Project>>? _projectsStream;
+  final Map<String, Stream<List<ProjectMilestone>>> _milestoneStreams = {};
+  final Map<String, Stream<List<Task>>> _taskStreams = {};
+
+  void _useRepository(ProjectRepository repository) {
+    if (identical(_streamRepository, repository)) return;
+    _streamRepository = repository;
+    _projectsStream = repository.watchProjects();
+    _milestoneStreams.clear();
+    _taskStreams.clear();
+  }
+
+  Stream<List<ProjectMilestone>> _watchMilestones(String projectId) =>
+      _milestoneStreams.putIfAbsent(
+        projectId,
+        () => _streamRepository!.watchMilestones(projectId),
+      );
+
+  Stream<List<Task>> _watchProjectTasks(String projectId) =>
+      _taskStreams.putIfAbsent(
+        projectId,
+        () => _streamRepository!.watchProjectTasks(projectId),
+      );
+
   Future<void> _editProject([Project? project]) async {
     await showLuminaSheet<void>(
       context: context,
@@ -116,8 +141,10 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   @override
   Widget build(BuildContext context) {
     final desktop = ref.watch(desktopModeProvider);
+    _useRepository(ref.watch(projectRepositoryProvider));
     final body = StreamBuilder<List<Project>>(
-      stream: ref.watch(projectRepositoryProvider).watchProjects(),
+      key: ObjectKey(_streamRepository!),
+      stream: _projectsStream,
       builder: (context, snapshot) {
         if (snapshot.hasError) return const PageFailure();
         if (!snapshot.hasData) return const Center(child: LuminaProgress());
@@ -264,9 +291,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                                     ],
                                   ),
                                   StreamBuilder<List<ProjectMilestone>>(
-                                    stream: ref
-                                        .watch(projectRepositoryProvider)
-                                        .watchMilestones(p.id),
+                                    stream: _watchMilestones(p.id),
                                     builder: (_, snapshot) {
                                       final items =
                                           snapshot.data ??
@@ -631,9 +656,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         ),
       ),
       StreamBuilder<List<ProjectMilestone>>(
-        stream: ref
-            .watch(projectRepositoryProvider)
-            .watchMilestones(project.id),
+        stream: _watchMilestones(project.id),
         builder: (_, snapshot) {
           if (snapshot.hasError) return const PageFailure();
           return LuminaCompletionList(
@@ -676,9 +699,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       const LuminaEngravedDivider(),
       const LuminaSectionHeader(title: '关联事件'),
       StreamBuilder<List<Task>>(
-        stream: ref
-            .watch(projectRepositoryProvider)
-            .watchProjectTasks(project.id),
+        stream: _watchProjectTasks(project.id),
         builder: (_, snapshot) {
           if (snapshot.hasError) return const PageFailure();
           final tasks = snapshot.data ?? const <Task>[];

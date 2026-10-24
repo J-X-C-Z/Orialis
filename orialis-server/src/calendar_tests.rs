@@ -633,7 +633,14 @@ async fn calendar_utc_upgrade_preserves_links_and_rolls_back_invalid_legacy_rows
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, if accepted { 19 } else { 18 });
+        assert_eq!(
+            count,
+            if accepted {
+                sqlx::migrate!("./migrations").iter().count() as i64
+            } else {
+                18
+            }
+        );
         assert!(sqlx::query(
             "INSERT INTO tasks(id,user_id,title,schedule_id) VALUES('bad','owner','bad','missing')"
         )

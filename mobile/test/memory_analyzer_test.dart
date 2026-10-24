@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,23 +37,59 @@ class _Repository extends MemoryRepository {
 }
 
 class _Api extends OrialisApiClient {
-  _Api(this.repository)
-    : super(baseUrl: 'https://unused.invalid', deviceId: 'test');
-  final _Repository repository;
-  final created = <String>[];
-  final uploads = <List<AttachmentUpload>>[];
-  final uploadKeys = <String?>[];
-  final sent = <Map<String, dynamic>>[];
-  final messages = <Map<String, dynamic>>[];
-  final bindings = <String>[];
-  String? target;
-  int polls = 0;
-  int replyAfterPoll = 0;
-  bool reply = true, failCreateOnce = false, validUpload = true;
-  bool acknowledge = false;
-  String replyContent = '# 科学视频\n\n视频讲解科学现象。\nhttps://invented.example/video';
-  void Function()? onUpload, onPoll;
-  Completer<void>? uploadGate;
+  _Api() : super(baseUrl: 'https://unused.invalid', deviceId: 'test');
+  final submitted = <Map<String, dynamic>>[];
+  Map<String, dynamic>? job;
+  int polls = 0, chatCalls = 0;
+  int replyAfterPoll = 2;
+  bool reply = true, failSubmitOnce = false, hideMismatchedJob = false;
+  String replyContent = '# 科学视频\n\n视频讲解科学现象。';
+  void Function()? onSubmit, onPoll;
+  Completer<void>? submitGate;
+
+  @override
+  Future<Map<String, dynamic>?> memoryAnalysis(String id) async {
+    polls++;
+    onPoll?.call();
+    if (job != null &&
+        job!['status'] == 'analyzing' &&
+        reply &&
+        polls >= replyAfterPoll) {
+      job = {
+        'id': id,
+        'status': 'completed',
+        'content': replyContent,
+        'category': 'ai',
+        'sourceUrl': 'https://b23.tv/Original',
+        'videoStatus': 'analyzed',
+        'videoSummary': '字幕与画面中的科学知识。',
+      };
+    }
+    return hideMismatchedJob && job?['id'] != id ? null : job;
+  }
+
+  @override
+  Future<Map<String, dynamic>> createMemoryAnalysis({
+    required String id,
+    required String content,
+    String? imageBase64,
+    List<String> sourceUrls = const [],
+  }) async {
+    submitted.add({
+      'id': id,
+      'content': content,
+      'imageBase64': imageBase64,
+      'sourceUrls': sourceUrls,
+    });
+    job = {'id': id, 'status': 'analyzing'};
+    onSubmit?.call();
+    await submitGate?.future;
+    if (failSubmitOnce) {
+      failSubmitOnce = false;
+      throw StateError('accepted-but-connection-lost');
+    }
+    return job!;
+  }
 
   @override
   Future<Map<String, dynamic>> createConversation({
@@ -61,41 +99,8 @@ class _Api extends OrialisApiClient {
     int? manualPosition,
     bool pinned = false,
   }) async {
-    expect(repository.record['analysisConversationId'], id);
-    expect(repository.record['analysisMessageId'], isNotNull);
-    expect(title, startsWith('屏幕记忆'));
-    expect(mutationId, '$id:create');
-    created.add(id!);
-    if (failCreateOnce) {
-      failCreateOnce = false;
-      throw StateError('secret-token-never-show');
-    }
-    return {'id': id};
-  }
-
-  @override
-  Future<String?> conversationAgentDevice(String id) async => target;
-  @override
-  Future<void> bindConversationAgentDevice(String id, String deviceId) async {
-    bindings.add(deviceId);
-    target = deviceId;
-  }
-
-  @override
-  Future<List<Map<String, dynamic>>> uploadAttachments({
-    required String conversationId,
-    required List<AttachmentUpload> files,
-    String? idempotencyKey,
-  }) async {
-    uploads.add(files);
-    uploadKeys.add(idempotencyKey);
-    onUpload?.call();
-    await uploadGate?.future;
-    return validUpload
-        ? [
-            {'id': 'attachment-1', 'downloadUrl': '/private/url'},
-          ]
-        : [];
+    chatCalls++;
+    throw StateError('memory must not create chats');
   }
 
   @override
@@ -108,40 +113,14 @@ class _Api extends OrialisApiClient {
     String? replyQuote,
     String? replyRole,
   }) async {
-    sent.add({
-      'conversationId': conversationId,
-      'id': id,
-      'content': content,
-      'attachments': attachments,
-    });
-    messages.add({'id': id, 'role': 'user', 'content': content});
-    return {'id': id};
+    chatCalls++;
+    throw StateError('memory must not send messages');
   }
 
   @override
   Future<List<Map<String, dynamic>>> listMessages(String conversationId) async {
-    polls++;
-    onPoll?.call();
-    return [
-      ...messages,
-      {
-        'role': 'assistant',
-        'replyToMessageId': 'another-message',
-        'content': '# 不属于这条记忆',
-      },
-      if (acknowledge && messages.isNotEmpty)
-        {
-          'role': 'assistant',
-          'replyToMessageId': messages.first['id'],
-          'content': '✅',
-        },
-      if (reply && messages.isNotEmpty && polls >= replyAfterPoll)
-        {
-          'role': 'assistant',
-          'replyToMessageId': messages.first['id'],
-          'content': replyContent,
-        },
-    ];
+    chatCalls++;
+    throw StateError('memory must not poll chat messages');
   }
 }
 
@@ -184,20 +163,25 @@ void main() {
   late _Api api;
   late _Agents agents;
   late MemoryAnalyzer analyzer;
+  late Directory directory;
+  late File jpeg;
   final preparedIds = <String>[];
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-  setUp(() {
+  setUp(() async {
     repository = _Repository();
+    directory = await Directory.systemTemp.createTemp('memory-analysis-');
+    jpeg = await File('${directory.path}/capture.jpg')
+        .writeAsBytes([255, 216, 255, 217]);
     preparedIds.clear();
     messenger.setMockMethodCallHandler(repository.channel, (call) async {
       if (call.method == 'prepareUpload') {
         preparedIds.add(call.arguments['id'] as String);
-        return '/private/upload/capture-1.jpg';
+        return jpeg.path;
       }
       throw MissingPluginException(call.method);
     });
-    api = _Api(repository);
+    api = _Api();
     agents = _Agents(api);
     analyzer = MemoryAnalyzer(
       repository: repository,
@@ -206,316 +190,293 @@ void main() {
       timeout: const Duration(seconds: 2),
     );
   });
-  tearDown(() {
+  tearDown(() async {
+    expect(api.chatCalls, 0);
     messenger.setMockMethodCallHandler(repository.channel, null);
     agents.dispose();
     repository.dispose();
+    await directory.delete(recursive: true);
   });
   Future<MemoryRecord> record() => repository.read('capture-1');
 
   test(
-    'a later receipt does not hide an already available matching summary',
+    'submits screenshot in background and saves summary without chat activity',
     () async {
-      api.reply = false;
-      api.acknowledge = true;
-      api.messages.addAll([
-        {'id': 'memory-capture-1', 'role': 'user'},
-        {
-          'role': 'assistant',
-          'replyToMessageId': 'memory-capture-1',
-          'content': '# 已有结果\n\n这是对应记忆的完整正文。',
-        },
-      ]);
       await analyzer.analyze(await record());
-      expect(repository.record['analysisStatus'], 'completed');
-      expect(repository.record['title'], '已有结果');
-      expect(api.uploads, isEmpty);
-      expect(api.sent, isEmpty);
-    },
-  );
-
-  test(
-    'matching receipt acknowledgement waits for later matching summary',
-    () async {
-      api.acknowledge = true;
-      api.replyAfterPoll = 3;
-      await analyzer.analyze(await record());
-      expect(api.polls, greaterThanOrEqualTo(3));
-      expect(repository.record['analysisStatus'], 'completed');
-      expect(repository.record['title'], '科学视频');
-      expect(repository.record['summary'], isNot('✅'));
+      expect(api.submitted, hasLength(1));
+      expect(api.submitted.single['id'], 'memory-v2-capture-1');
       expect(
-        repository.updates.any(
-          (fields) => fields['analysisStatus'] == 'failed',
-        ),
-        isFalse,
+        base64Decode(api.submitted.single['imageBase64'] as String),
+        await jpeg.readAsBytes(),
       );
-      expect(api.sent, hasLength(1));
-    },
-  );
-
-  test(
-    'receipt alone times out without borrowing a different message reply',
-    () async {
-      api.acknowledge = true;
-      api.reply = false;
-      analyzer = MemoryAnalyzer(
-        repository: repository,
-        agents: agents,
-        timeout: const Duration(milliseconds: 40),
-        pollInterval: const Duration(milliseconds: 2),
-      );
-      await analyzer.analyze(await record());
-      expect(api.polls, greaterThan(2));
-      expect(repository.record['analysisStatus'], 'failed');
-      expect(repository.record['analysisError'], contains('超时'));
-      expect(repository.record['summary'], isNull);
-      expect(repository.record['imagePath'], '/private/capture-1.png');
-    },
-  );
-
-  test(
-    'missing upload derivative fails without uploading the original PNG',
-    () async {
-      messenger.setMockMethodCallHandler(repository.channel, (_) async => '');
-      await analyzer.analyze(await record());
-      expect(api.uploads, isEmpty);
-      expect(api.sent, isEmpty);
-      expect(repository.record['analysisStatus'], 'failed');
-      expect(repository.record['imagePath'], '/private/capture-1.png');
-    },
-  );
-
-  test(
-    'uploads evidence to exact Azure and saves only its matching reply',
-    () async {
-      await analyzer.analyze(await record());
-      expect(api.created, ['memory-capture-1']);
-      expect(api.bindings, ['JXCZ_AOZORA_Hermes']);
-      expect(api.uploadKeys, ['memory-capture-1:screenshot']);
       expect(preparedIds, ['capture-1']);
-      expect(api.uploads.single.single.mimeType, 'image/jpeg');
-      expect(api.uploads.single.single.path, '/private/upload/capture-1.jpg');
-      expect(api.uploads.single.single.name, 'capture-1.jpg');
-      expect(repository.record['imagePath'], '/private/capture-1.png');
-      final request = api.sent.single;
-      expect(request['id'], 'memory-capture-1');
-      expect(request['attachments'], [
-        {'id': 'attachment-1'},
-      ]);
-      expect(request['content'], contains('不可信'));
-      expect(request['content'], contains('https://b23.tv/Original'));
-      expect(request['content'], contains('科学视频'));
-      expect(request['content'], isNot(contains('PRIVATE_USER_NOTES')));
+      final prompt = api.submitted.single['content'] as String;
+      expect(prompt, contains('不可信'));
+      expect(prompt, contains('https://b23.tv/Original'));
+      expect(prompt, isNot(contains('PRIVATE_USER_NOTES')));
       expect(repository.record['analysisStatus'], 'completed');
       expect(repository.record['title'], '科学视频');
-      expect(repository.record['urls'], ['https://b23.tv/Original']);
-      expect(repository.record['notes'], 'PRIVATE_USER_NOTES');
+      expect(repository.record['category'], 'ai');
+      expect(repository.record['videoStatus'], 'analyzed');
+      expect(repository.record['videoSummary'], contains('字幕'));
+      expect(repository.record['sourceUrl'], 'https://b23.tv/Original');
       expect(repository.record['summary'], contains('视频讲解科学现象'));
+      expect(repository.record['imagePath'], '/private/capture-1.png');
+      expect(repository.record['notes'], 'PRIVATE_USER_NOTES');
+      expect(repository.record['urls'], ['https://b23.tv/Original']);
+      expect(repository.record['analysisConversationId'], isNull);
+      expect(repository.record['analysisMessageId'], isNull);
     },
   );
 
-  test('preserves Xiaohongshu share text and complete original URL evidence', () async {
+  test('signed original share URLs remain complete and text-only needs no image', () async {
     const url =
         'https://www.xiaohongshu.com/explore/123?xsec_token=abc%2Bdef&xsec_source=app_share';
-    const sharedText = '周末徒步路线 小红书分享\n$url';
+    const text = '周末徒步路线 小红书分享\n$url';
     repository.record.addAll({
       'sourcePackage': 'com.xingin.xhs',
       'sourceLabel': '小红书',
       'visibleText': '',
-      'sharedText': sharedText,
+      'sharedText': text,
       'urls': [url],
       'imagePath': null,
     });
     await analyzer.analyze(await record());
-    final prompt = api.sent.single['content'] as String;
-    expect(prompt, contains('小红书'));
+    final prompt = api.submitted.single['content'] as String;
     expect(prompt, contains(url));
-    expect(prompt, contains('周末徒步路线 小红书分享'));
-    expect(prompt, contains('查询参数及 token'));
+    expect(prompt, contains('周末徒步路线'));
     expect(prompt, contains('不声称已抓取未提供的笔记正文'));
-    expect(repository.record['sharedText'], sharedText);
+    expect(api.submitted.single['imageBase64'], isNull);
+    expect(preparedIds, isEmpty);
+    expect(repository.record['sharedText'], text);
     expect(repository.record['urls'], [url]);
-    expect(api.uploads, isEmpty);
   });
 
   test(
-    'resumes a crash with existing IDs and never resends the prompt',
+    'existing background result resumes without image upload or online agent',
     () async {
+      agents.azureOnline = false;
+      api.job = {
+        'id': 'memory-v2-capture-1',
+        'status': 'completed',
+        'content': '# 已有结果\n\n完整正文。',
+      };
       repository.record.addAll({
-        'analysisConversationId': 'prior-conversation',
-        'analysisMessageId': 'prior-message',
         'analysisStatus': 'analyzing',
+        'analysisConversationId': 'old-chat',
+        'analysisMessageId': 'old-message',
       });
-      api.target = agents.azureDeviceId;
-      api.messages.add({'id': 'prior-message', 'role': 'user'});
+      await analyzer.analyze(await record());
+      expect(api.submitted, isEmpty);
+      expect(preparedIds, isEmpty);
+      expect(agents.deviceQueries, 0);
+      expect(repository.record['title'], '已有结果');
+    },
+  );
+
+  test(
+    'accepted request whose response was lost resumes the same job',
+    () async {
+      api.failSubmitOnce = true;
+      await analyzer.analyze(await record());
+      expect(repository.record['analysisStatus'], 'failed');
       await analyzer.analyze(await record(), retry: true);
-      expect(api.created, ['prior-conversation']);
-      expect(api.sent, isEmpty);
-      expect(api.uploads, isEmpty);
-      expect(api.bindings, isEmpty);
+      expect(api.submitted, hasLength(1));
+      expect(preparedIds, hasLength(1));
       expect(repository.record['analysisStatus'], 'completed');
     },
   );
 
-  test('offline Azure never falls back to another online Hermes', () async {
+  test('failed server task stays failed until explicit retry', () async {
+    api.job = {
+      'id': 'memory-v2-capture-1',
+      'status': 'failed',
+      'error': 'SECRET_PROVIDER_ERROR',
+    };
+    await analyzer.analyze(await record());
+    expect(api.submitted, isEmpty);
+    expect(repository.record['analysisStatus'], 'failed');
+    expect(
+      repository.record['analysisError'],
+      isNot(contains('SECRET_PROVIDER_ERROR')),
+    );
+    await analyzer.analyze(await record(), retry: true);
+    expect(api.submitted, hasLength(1));
+    expect(repository.record['analysisStatus'], 'completed');
+  });
+
+  test('offline Azure does not fall back to another online device', () async {
     agents.azureOnline = false;
     await analyzer.analyze(await record());
-    expect(agents.clients, 0);
-    expect(api.created, isEmpty);
+    expect(api.submitted, isEmpty);
     expect(repository.record['analysisStatus'], 'failed');
     expect(repository.record['analysisError'], contains('Azure Hermes'));
-    expect(repository.record['imagePath'], '/private/capture-1.png');
   });
 
   test(
-    'identity change after upload cannot post or write a new-account result',
+    'identity change while preparing image cannot submit evidence',
     () async {
-      api.onUpload = () {
+      messenger.setMockMethodCallHandler(repository.channel, (_) async {
         agents.scope = ('https://server.invalid', 'other-session');
         repository.record['summary'] = 'NEW_ACCOUNT_RESULT';
-      };
+        return jpeg.path;
+      });
       await analyzer.analyze(await record());
-      expect(api.sent, isEmpty);
+      expect(api.submitted, isEmpty);
       expect(repository.record['summary'], 'NEW_ACCOUNT_RESULT');
       expect(repository.updates, hasLength(1));
     },
   );
 
   test(
-    'generation cancellation during polling cannot save an incoming reply',
+    'identity change during polling cannot save old account result',
     () async {
-      var active = true;
-      api.onPoll = () => active = false;
-      await analyzer.analyze(await record(), isCurrent: () => active);
-      expect(api.sent, isEmpty);
+      api.onPoll = () {
+        if (api.polls == 2) {
+          agents.scope = ('https://other.invalid', 'other-session');
+        }
+      };
+      await analyzer.analyze(await record());
+      expect(api.submitted, hasLength(1));
       expect(repository.record['summary'], isNull);
       expect(repository.updates, hasLength(1));
     },
   );
 
   test(
-    'wrong bound device is rejected before uploading any evidence',
+    'generation cancellation on lookup cannot submit or update result',
     () async {
-      api.target = agents.macDeviceId;
-      await analyzer.analyze(await record());
-      expect(api.bindings, isEmpty);
-      expect(api.uploads, isEmpty);
-      expect(repository.record['analysisStatus'], 'failed');
+      var active = true;
+      api.onPoll = () => active = false;
+      await analyzer.analyze(await record(), isCurrent: () => active);
+      expect(api.submitted, isEmpty);
+      expect(repository.updates, hasLength(1));
     },
   );
 
   test(
-    'interrupted conversation creation reuses persisted IDs on retry',
-    () async {
-      api.failCreateOnce = true;
-      await analyzer.analyze(await record());
-      expect(repository.record['analysisStatus'], 'failed');
-      expect(
-        repository.record['analysisError'],
-        isNot(contains('secret-token')),
-      );
-      await analyzer.analyze(await record(), retry: true);
-      expect(api.created, ['memory-capture-1', 'memory-capture-1']);
-      expect(api.sent, hasLength(1));
-      expect(repository.record['analysisStatus'], 'completed');
-    },
-  );
-
-  test(
-    'timeout is bounded and keeps screenshot, notes, and observed URLs',
+    'timeout preserves evidence and retry can retrieve eventual result',
     () async {
       api.reply = false;
       analyzer = MemoryAnalyzer(
         repository: repository,
         agents: agents,
-        timeout: const Duration(milliseconds: 30),
+        timeout: const Duration(seconds: 1),
         pollInterval: const Duration(milliseconds: 2),
       );
       await analyzer.analyze(await record());
       expect(repository.record['analysisStatus'], 'failed');
       expect(repository.record['analysisError'], contains('超时'));
       expect(repository.record['notes'], 'PRIVATE_USER_NOTES');
-      expect(repository.record['urls'], ['https://b23.tv/Original']);
       expect(repository.record['imagePath'], '/private/capture-1.png');
-      expect(api.sent, hasLength(1));
+      api.reply = true;
+      await analyzer.analyze(await record(), retry: true);
+      expect(api.submitted, hasLength(1));
+      expect(repository.record['analysisStatus'], 'completed');
     },
   );
 
-  test(
-    'concurrent analyses of a record share one upload and message',
-    () async {
-      api.uploadGate = Completer<void>();
-      final current = await record();
-      final first = analyzer.analyze(current);
-      await Future<void>.delayed(const Duration(milliseconds: 5));
-      await analyzer.analyze(current);
-      api.uploadGate!.complete();
-      await first;
-      expect(api.uploads, hasLength(1));
-      expect(api.sent, hasLength(1));
-    },
-  );
-
-  test('malformed upload response is never posted as an attachment', () async {
-    api.validUpload = false;
-    await analyzer.analyze(await record());
-    expect(api.sent, isEmpty);
-    expect(repository.record['analysisStatus'], 'failed');
+  test('concurrent local analyses submit once', () async {
+    api.submitGate = Completer<void>();
+    final current = await record();
+    final first = analyzer.analyze(current);
+    while (api.submitted.isEmpty) {
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+    await analyzer.analyze(current);
+    api.submitGate!.complete();
+    await first;
+    expect(api.submitted, hasLength(1));
   });
 
-  test('completed record is skipped without remote calls', () async {
-    repository.record['analysisStatus'] = 'completed';
-    await analyzer.analyze(await record());
-    expect(agents.deviceQueries, 0);
-    expect(repository.updates, isEmpty);
-  });
-
-  for (final reply in [
-    'Provider authentication failed: SECRET_PROVIDER_DIAGNOSTIC',
-    '# 只有标题\n\n',
-    '# \n\n缺少标题的正文',
-  ]) {
+  for (final invalid in ['', '/missing/derivative.jpg']) {
     test(
-      'incomplete analysis response is failed without overwriting evidence: $reply',
+      'missing upload copy fails without submitting original: $invalid',
       () async {
-        api.replyContent = reply;
-        await analyzer.analyze(await record());
-        expect(repository.record['analysisStatus'], 'failed');
-        expect(repository.record['summary'], isNull);
-        expect(repository.record['title'], '原始标题');
-        expect(repository.record['imagePath'], '/private/capture-1.png');
-        expect(repository.record['urls'], ['https://b23.tv/Original']);
-        expect(repository.record['notes'], 'PRIVATE_USER_NOTES');
-        expect(
-          repository.record['analysisError'],
-          isNot(contains('SECRET_PROVIDER_DIAGNOSTIC')),
+        messenger.setMockMethodCallHandler(
+          repository.channel,
+          (_) async => invalid,
         );
+        await analyzer.analyze(await record());
+        expect(api.submitted, isEmpty);
+        expect(repository.record['analysisStatus'], 'failed');
+        expect(repository.record['imagePath'], '/private/capture-1.png');
       },
     );
   }
 
-  test('text-only sharing is analyzed without inventing an image', () async {
-    repository.record.remove('imagePath');
+  test('oversized upload copy is not sent', () async {
+    await jpeg.writeAsBytes(List.filled(900 * 1024 + 1, 0));
     await analyzer.analyze(await record());
-    expect(api.uploads, isEmpty);
-    expect(preparedIds, isEmpty);
-    expect(api.sent.single['attachments'], isEmpty);
-    expect(repository.record['analysisStatus'], 'completed');
+    expect(api.submitted, isEmpty);
+    expect(repository.record['analysisStatus'], 'failed');
   });
 
-  test(
-    'identity drift in the reply poll cannot save the old summary',
-    () async {
-      api.onPoll = () {
-        if (api.polls == 2) {
-          agents.scope = ('https://different-server.invalid', 'other-session');
-        }
-      };
+  test('completed local record skips all remote calls', () async {
+    repository.record['analysisStatus'] = 'completed';
+    repository.record['category'] = 'other';
+    await analyzer.analyze(await record());
+    expect(api.polls, 0);
+    expect(agents.clients, 0);
+    expect(repository.updates, isEmpty);
+  });
+
+  for (final response in ['✅', '# 只有标题\n\n', '# \n\n没有标题']) {
+    test('incomplete result cannot overwrite evidence: $response', () async {
+      api.replyContent = response;
       await analyzer.analyze(await record());
-      expect(api.sent, hasLength(1));
+      expect(repository.record['analysisStatus'], 'failed');
       expect(repository.record['summary'], isNull);
-      expect(repository.updates, hasLength(1));
+      expect(repository.record['title'], '原始标题');
+      expect(repository.record['urls'], ['https://b23.tv/Original']);
+    });
+  }
+
+  test('result for a different task is rejected', () async {
+    api.job = {
+      'id': 'another-task',
+      'status': 'completed',
+      'content': '# 错误结果\n\n不应保存',
+    };
+    await analyzer.analyze(await record());
+    expect(repository.record['analysisStatus'], 'failed');
+    expect(repository.record['summary'], isNull);
+  });
+  test(
+    'old completed memories are automatically upgraded to classified jobs',
+    () async {
+      repository.record['analysisStatus'] = 'completed';
+      await analyzer.analyze(await record());
+      expect(api.submitted.single['id'], 'memory-v2-capture-1');
+      expect(api.submitted.single['sourceUrls'], ['https://b23.tv/Original']);
+      expect(repository.record['category'], 'ai');
     },
   );
+
+  test('unavailable video retry persists a fresh job id and resumes it after lost response', () async {
+    repository.record.addAll({
+      'analysisStatus': 'completed',
+      'category': 'ai',
+      'videoStatus': 'unavailable',
+      'analysisRequestId': 'memory-v2-capture-1',
+    });
+    api.job = {
+      'id': 'memory-v2-capture-1',
+      'status': 'completed',
+      'content': '# Original\n\nScreenshot summary',
+      'category': 'ai',
+      'videoStatus': 'unavailable',
+    };
+    api.hideMismatchedJob = true;
+    api.failSubmitOnce = true;
+    await analyzer.analyze(await record(), retry: true);
+    final id = repository.record['analysisRequestId'];
+    expect(id, isNot('memory-v2-capture-1'));
+    expect(repository.record['analysisStatus'], 'failed');
+    expect(repository.record['videoStatus'], isNull);
+    await analyzer.analyze(await record(), retry: true);
+    expect(repository.record['analysisRequestId'], id);
+    expect(api.submitted, hasLength(1));
+    expect(repository.record['analysisStatus'], 'completed');
+  });
 }

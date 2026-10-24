@@ -137,18 +137,19 @@ const transport = {
       return
     }
     if (frame.type !== 'snapshot.part') { this.lastResult = '未知消息类型：' + frame.type; return }
-    if (!this.cacheReady) { this.lastResult = '快照拒收：缓存会话尚未就绪；未发送 ACK'; return }
+    if (!this.cacheReady && !this.restoringCache) { this.lastResult = '快照拒收：缓存会话尚未就绪；未发送 ACK'; return }
     let complete
     try { complete = this.receiver.accept(frame) } catch (error) { this.lastResult = '快照拒收：' + stringifyError(error); return }
     if (!complete) { this.lastResult = '接收快照分片中：' + frame.payload.transferId; return }
     if (!storage || typeof storage.set !== 'function') { this.lastResult = '快照已校验但存储不可用；未发送 ACK'; return }
-    try { store.assertSnapshot(complete.snapshot) } catch (error) { this.lastResult = '快照拒收：' + stringifyError(error); return }
+    try { if (this.cacheReady) store.assertSnapshot(complete.snapshot) } catch (error) { this.lastResult = '快照拒收：' + stringifyError(error); return }
     if (this.queue.length >= 4) { this.lastResult = '快照保存队列已满；未发送 ACK'; return }
     this.queue.push({ complete, generation: store.generation() })
     this.persistNext()
   },
   persistNext() {
     if (this.destroyed || this.writing || !this.queue.length) return
+    if (!this.cacheReady && this.queue[0].kind !== 'clear') return
     const entry = this.queue.shift()
     if (entry.kind === 'clear') {
       this.writing = true
@@ -196,39 +197,77 @@ const transport = {
     })
   },
   invalidateCache(guard) {
+    this.restoringCache = false
     this.cacheReady = false
     this.queue = this.queue.filter((entry) => entry.kind === 'clear')
     return new Promise((resolve, reject) => { this.queue.push({ kind: 'clear', guard, generation: store.generation(), resolve, reject }); this.persistNext() })
   },
   loadSavedSnapshot() {
     this.cacheReady = false
-    if (!storage || typeof storage.get !== 'function') return
+    this.restoringCache = true
+    store.setCacheLoading(true)
     const generation = store.generation()
-    const load = () => storage.get({
-      key: 'orialis.wear.v1.snapshot',
-      success: (value) => {
-        if (this.destroyed || generation !== store.generation()) return
-        const stored = typeof value === 'string' ? value : value && value.data
-        if (!stored) return
-        try {
-          const saved = JSON.parse(stored)
-          store.acceptSnapshot(saved, { restored: true })
-          this.snapshotSummary = 'revision ' + saved.revision + ' · ' + (saved.title || '手机快照') + ' (已恢复)'
-        } catch (error) { this.snapshotSummary = '缓存未恢复：' + stringifyError(error) }
-      },
-      fail: (data, code) => { this.detail = '读取快照失败 (' + code + '): ' + stringifyError(data) }
-    })
-    storage.get({ key: 'orialis.wear.v1.cache.guard', success: (value) => {
-      if (this.destroyed || generation !== store.generation()) return
-      if (value) {
-        try { store.restoreScope(JSON.parse(value)) } catch (error) { this.detail = '缓存会话标记损坏；未恢复'; return }
+    const loadId = (this.cacheLoadId || 0) + 1
+    this.cacheLoadId = loadId
+    const active = () => !this.destroyed && loadId === this.cacheLoadId && generation === store.generation()
+    const finish = () => {
+      if (!active()) return
+      this.restoringCache = false
+      store.setCacheLoading(false)
+      if (!this.cacheReady) this.queue = this.queue.filter((entry) => entry.kind === 'clear')
+      this.persistNext()
+    }
+    if (!storage || typeof storage.get !== 'function') { finish(); return }
+    let guardDone = false
+    let snapshotDone = false
+    let guardValid = false
+    let savedValue = ''
+    const restore = () => {
+      if (!active() || !guardDone || !snapshotDone) return
+      if (guardValid) {
+        const stored = typeof savedValue === 'string' ? savedValue : savedValue && savedValue.data
+        if (stored) {
+          try {
+            const saved = JSON.parse(stored)
+            store.acceptSnapshot(saved, { restored: true })
+            this.snapshotSummary = 'revision ' + saved.revision + ' · ' + (saved.title || '手机快照') + ' (已恢复)'
+          } catch (error) { this.snapshotSummary = '缓存未恢复：' + stringifyError(error) }
+        }
+        this.cacheReady = true
       }
-      this.cacheReady = true
-      load()
-    }, fail: (data, code) => { this.detail = '缓存会话读取失败 (' + code + ')；未恢复缓存' } })
+      finish()
+    }
+    // Read both records together, but never expose a snapshot before its guard is checked.
+    storage.get({ key: 'orialis.wear.v1.cache.guard', success: (value) => {
+      if (!active()) return
+      try {
+        const stored = typeof value === 'string' ? value : value && value.data
+        if (stored) store.restoreScope(JSON.parse(stored))
+        guardValid = true
+      } catch (error) { this.detail = '缓存会话标记损坏；未恢复' }
+      guardDone = true
+      restore()
+    }, fail: (data, code) => {
+      if (!active()) return
+      this.detail = '缓存会话读取失败 (' + code + ')；未恢复缓存'
+      guardDone = true
+      restore()
+    } })
+    storage.get({ key: 'orialis.wear.v1.snapshot', success: (value) => {
+      if (!active()) return
+      savedValue = value
+      snapshotDone = true
+      restore()
+    }, fail: (data, code) => {
+      if (!active()) return
+      this.detail = '读取快照失败 (' + code + '): ' + stringifyError(data)
+      snapshotDone = true
+      restore()
+    } })
   },
   onDestroy() {
     this.destroyed = true
+    this.restoringCache = false
     this.cacheReady = false
     this.started = false
     this.queue = []

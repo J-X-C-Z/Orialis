@@ -9,6 +9,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/config/app_config.dart';
 import '../../core/database/app_database.dart';
+import '../chat/data/chat_repository.dart';
+import '../chat/domain/chat_transcript.dart';
+import 'chat_notification_summary.dart';
 import 'system_snapshot.dart';
 
 class SystemIntegrationController {
@@ -307,6 +310,10 @@ class SystemIntegrationController {
     Map<String, dynamic> payload, {
     bool testEvent = false,
   }) async {
+    final role = payload['role'];
+    if (role is! String || role.trim().toLowerCase() != 'assistant') {
+      return false;
+    }
     if (_disposed ||
         !supported ||
         !enabled ||
@@ -314,11 +321,73 @@ class SystemIntegrationController {
         _identityChanging) {
       return false;
     }
+    final generation = _generation;
+    final conversationId = payload['conversationId'];
+    if (conversationId is! String ||
+        conversationId.trim().isEmpty ||
+        ChatRepository.isBackgroundChatConversationId(conversationId)) {
+      return false;
+    }
+    final content = switch (payload['content'] ?? payload['body']) {
+      final String text => text,
+      _ => '',
+    };
+    final attachments = payload['attachments'];
+    final hasAttachments = attachments is List && attachments.isNotEmpty;
+    if (!hasAttachments && classifyChatText(content) != ChatTextKind.message) {
+      return false;
+    }
     final scope = await _scope();
     if (scope == null || scope != await _marker()) return false;
+    final conversation =
+        await (database.select(database.conversations)..where(
+              (row) => row.id.equals(conversationId) & row.deletedAt.isNull(),
+            ))
+            .getSingleOrNull();
+    final replyTo = payload['replyToMessageId'];
+    final createdAt = payload['createdAt'];
+    final prompt =
+        await (database.select(database.messages)
+              ..where(
+                (row) =>
+                    row.conversationId.equals(conversationId) &
+                    row.role.equals('user') &
+                    (replyTo is String && replyTo.isNotEmpty
+                        ? row.id.equals(replyTo)
+                        : createdAt is String
+                        ? row.createdAt.isSmallerOrEqualValue(createdAt)
+                        : const Constant(true)),
+              )
+              ..orderBy([
+                (row) => OrderingTerm.desc(row.createdAt),
+                (row) => OrderingTerm.desc(row.id),
+              ])
+              ..limit(1))
+            .getSingleOrNull();
+    final reportedTitle = payload['title'];
+    final summary = summarizeChatNotification(
+      content: content,
+      userPrompt: prompt?.content,
+      conversationTitle:
+          conversation?.title ??
+          (reportedTitle is String ? reportedTitle : null),
+      hasAttachments: hasAttachments,
+    );
+    if (_disposed ||
+        !enabled ||
+        _identityChanging ||
+        generation != _generation) {
+      return false;
+    }
     return await _invoke<bool>(
           testEvent ? 'testChatMessage' : 'notifyChatMessage',
-          {...payload, 'scope': scope},
+          {
+            ...payload,
+            'scope': scope,
+            'role': 'assistant',
+            'title': summary.title,
+            'body': summary.body,
+          },
         ) ??
         false;
   }
@@ -326,6 +395,7 @@ class SystemIntegrationController {
   Future<bool> previewChatMessage() => notifyChatMessage({
     'id': 'test-${DateTime.now().millisecondsSinceEpoch}',
     'conversationId': 'default',
+    'role': 'assistant',
     'sender': 'Orialis 测试消息',
     'content': '点击此通知可打开默认会话',
   }, testEvent: true);

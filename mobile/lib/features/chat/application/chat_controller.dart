@@ -6,7 +6,7 @@ class ChatController {
   ChatController({required this.repository, required this.flush});
 
   final ChatRepository repository;
-  final Future<void> Function() flush;
+  final Future<void> Function(String conversationId, String messageId) flush;
   ChatSendState state = ChatSendState.idle;
   Object? lastError;
   String? lastMessageId;
@@ -56,7 +56,7 @@ class ChatController {
 
   Future<void> _flushMessage(String conversationId, String messageId) async {
     try {
-      await flush();
+      await flush(conversationId, messageId);
     } catch (_) {
       // Other sync domains may fail after this message was acknowledged.
       if (!await repository.isMessageUploaded(conversationId, messageId)) {

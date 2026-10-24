@@ -376,7 +376,9 @@ async fn handle_text(
     // pipeline. Peek the type so they reach mobile instead of UnknownType.
     if let Ok(value) = serde_json::from_str::<Value>(text.as_str()) {
         if let Some(message_type) = value.get("type").and_then(Value::as_str) {
-            if protocol::is_extension_type(message_type) && !matches!(message_type, "session.info" | "session.reply") {
+            if protocol::is_extension_type(message_type)
+                && !matches!(message_type, "session.info" | "session.reply")
+            {
                 handle_extension_frame(state, socket, user_id, text.as_str()).await;
                 return;
             }
@@ -392,7 +394,11 @@ async fn handle_text(
             )
             .await;
         }
-        Ok(message @ (protocol::GatewayMessage::WorkspaceResponse { .. } | protocol::GatewayMessage::SessionReply { .. })) => {
+        Ok(
+            message @ (protocol::GatewayMessage::WorkspaceResponse { .. }
+            | protocol::GatewayMessage::SessionReply { .. }
+            | protocol::GatewayMessage::MemoryResult { .. }),
+        ) => {
             state
                 .agent
                 .resolve_reply_for_device(device_id, message)
@@ -433,13 +439,23 @@ async fn handle_text(
         }
         Ok(message @ protocol::GatewayMessage::MessageAck { .. }) => {
             if message.reply_to().is_some() {
-                state.agent.resolve_reply_for_device(device_id, message).await;
+                state
+                    .agent
+                    .resolve_reply_for_device(device_id, message)
+                    .await;
             } else {
                 tracing::debug!("Orialis Hermes plugin acknowledged receipt");
             }
         }
-        Ok(protocol::GatewayMessage::CapabilitiesHello { resume_from, capabilities, .. }) => {
-            state.agent.set_peer_capabilities(device_id, capabilities).await;
+        Ok(protocol::GatewayMessage::CapabilitiesHello {
+            resume_from,
+            capabilities,
+            ..
+        }) => {
+            state
+                .agent
+                .set_peer_capabilities(device_id, capabilities)
+                .await;
             let resume_from = resume_from.unwrap_or(0);
             let acknowledgement = state.agent.capabilities_ack(device_id, resume_from).await;
             if send_message(socket, &acknowledgement).await.is_err() {
@@ -459,12 +475,23 @@ async fn handle_text(
             match disposition {
                 EventDisposition::Accepted => {
                     let raw = serde_json::from_str::<Value>(&text).ok();
-                    let kind = raw.as_ref().and_then(|value| value.get("type")).and_then(Value::as_str).unwrap_or("event");
+                    let kind = raw
+                        .as_ref()
+                        .and_then(|value| value.get("type"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("event");
                     tracing::info!(%device_id, %event_id, seq, kind, "accepted Agent event");
-                    if let Some(conversation_id) = serde_json::from_str::<Value>(&text).ok()
-                        .and_then(|raw| raw.get("conversation_id").and_then(Value::as_str).map(ToOwned::to_owned))
+                    if let Some(conversation_id) =
+                        serde_json::from_str::<Value>(&text).ok().and_then(|raw| {
+                            raw.get("conversation_id")
+                                .and_then(Value::as_str)
+                                .map(ToOwned::to_owned)
+                        })
                     {
-                        state.agent.touch_message_activity(device_id, &conversation_id).await;
+                        state
+                            .agent
+                            .touch_message_activity(device_id, &conversation_id)
+                            .await;
                     }
                     if matches!(
                         &message,
@@ -517,8 +544,15 @@ async fn handle_text(
                     .await;
                 }
                 EventDisposition::StaleSession => {
-                    let _ = send_message(socket, &protocol::agent_ack(event_id, seq, "unknown", None)).await;
-                    let _ = send_error(socket, "STALE_SESSION", "event belongs to a retired Agent process session").await;
+                    let _ =
+                        send_message(socket, &protocol::agent_ack(event_id, seq, "unknown", None))
+                            .await;
+                    let _ = send_error(
+                        socket,
+                        "STALE_SESSION",
+                        "event belongs to a retired Agent process session",
+                    )
+                    .await;
                 }
             }
         }
@@ -703,7 +737,13 @@ pub(crate) async fn dispatch_message(
             }
         };
     let Some(mut active_device_id) = active_device_id else {
-        fail_delivery(&state, &message_id, attempts, "conversation has no explicit Agent destination".into()).await;
+        fail_delivery(
+            &state,
+            &message_id,
+            attempts,
+            "conversation has no explicit Agent destination".into(),
+        )
+        .await;
         return;
     };
     if let Err(error) = sqlx::query("UPDATE conversations SET agent_device_id=? WHERE user_id=? AND id=? AND deleted_at IS NULL AND agent_device_id IS NULL")
@@ -714,7 +754,16 @@ pub(crate) async fn dispatch_message(
     }
     match crate::conversation_agent_device(&state.pool, &user_id, &conversation_id).await {
         Ok(Some(device)) => active_device_id = device,
-        _ => { fail_delivery(&state, &message_id, attempts, "conversation destination unavailable".into()).await; return; }
+        _ => {
+            fail_delivery(
+                &state,
+                &message_id,
+                attempts,
+                "conversation destination unavailable".into(),
+            )
+            .await;
+            return;
+        }
     }
     // A mobile POST can race the final handshake bookkeeping on a freshly
     // connected Agent. Give that connection a short grace window before
@@ -745,7 +794,15 @@ pub(crate) async fn dispatch_message(
         fail_delivery(&state, &message_id, attempts, error.to_string()).await;
         return;
     };
-    let reply = match wait_for_message_reply(&state.agent, &message_id, receiver, DEBUG_REPLY_TIMEOUT, MAX_MESSAGE_REPLY_TIMEOUT).await {
+    let reply = match wait_for_message_reply(
+        &state.agent,
+        &message_id,
+        receiver,
+        DEBUG_REPLY_TIMEOUT,
+        MAX_MESSAGE_REPLY_TIMEOUT,
+    )
+    .await
+    {
         Ok(Ok(reply)) => reply,
         Ok(Err(_)) => {
             tracing::warn!(%message_id, "Hermes disconnected before replying to mobile message");
@@ -789,7 +846,9 @@ async fn wait_for_message_reply(
     let mut remaining_idle = idle;
     loop {
         let remaining_total = maximum.saturating_sub(started.elapsed());
-        if remaining_total.is_zero() { return Err(()); }
+        if remaining_total.is_zero() {
+            return Err(());
+        }
         tokio::select! {
             result = &mut receiver => return Ok(result),
             _ = tokio::time::sleep(remaining_idle.min(remaining_total)) => {
@@ -811,14 +870,29 @@ pub(crate) async fn persist_message_reply(
     message: &protocol::GatewayMessage,
 ) -> Result<(), sqlx::Error> {
     let protocol::GatewayMessage::MessageReply {
-        message_id, reply_to, conversation_id, content, attachments, ..
-    } = message else { return Err(sqlx::Error::Protocol("not a message reply".into())); };
-    let attachments_json = canonical_reply_attachments(state, user_id, conversation_id, attachments).await?;
-    let mut transaction = state.pool.begin().await?;
+        message_id,
+        reply_to,
+        conversation_id,
+        content,
+        attachments,
+        ..
+    } = message
+    else {
+        return Err(sqlx::Error::Protocol("not a message reply".into()));
+    };
+    let attachments_json =
+        canonical_reply_attachments(state, user_id, conversation_id, attachments).await?;
+    // Acquire the WAL writer before reading authorization so concurrent replies
+    // wait instead of failing a deferred read-to-write transaction upgrade.
+    let mut transaction = state.pool.begin_with("BEGIN IMMEDIATE").await?;
     let authorized: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM messages m JOIN conversations c ON c.user_id=m.user_id AND c.id=m.conversation_id JOIN agent_devices d ON d.user_id=c.user_id AND d.device_id=c.agent_device_id WHERE m.id=? AND m.user_id=? AND m.conversation_id=? AND m.role='user' AND c.deleted_at IS NULL AND c.agent_device_id=?)"
     ).bind(reply_to).bind(user_id).bind(conversation_id).bind(device_id).fetch_one(&mut *transaction).await?;
-    if !authorized { return Err(sqlx::Error::Protocol("reply anchor or destination mismatch".into())); }
+    if !authorized {
+        return Err(sqlx::Error::Protocol(
+            "reply anchor or destination mismatch".into(),
+        ));
+    }
     let inserted = sqlx::query(
         "INSERT INTO messages (id,user_id,conversation_id,role,content,attachments_json,reply_to_message_id) VALUES (?,?,?,'assistant',?,?,?) ON CONFLICT(id) DO NOTHING"
     ).bind(message_id).bind(user_id).bind(conversation_id).bind(content).bind(&attachments_json).bind(reply_to)
@@ -826,11 +900,25 @@ pub(crate) async fn persist_message_reply(
     let stored = sqlx::query_as::<_, (String,String,String,String,String,Option<String>,String,i64)>(
         "SELECT user_id,conversation_id,role,content,attachments_json,reply_to_message_id,created_at,version FROM messages WHERE id=?"
     ).bind(message_id).fetch_one(&mut *transaction).await?;
-    if stored.0 != user_id || stored.1 != *conversation_id || stored.2 != "assistant"
-        || stored.3 != *content || stored.4 != attachments_json || stored.5.as_deref() != Some(reply_to)
-    { return Err(sqlx::Error::Protocol("reply id was already used with different data".into())); }
-    sqlx::query("DELETE FROM agent_delivery_queue WHERE message_id=? AND user_id=? AND conversation_id=?")
-        .bind(reply_to).bind(user_id).bind(conversation_id).execute(&mut *transaction).await?;
+    if stored.0 != user_id
+        || stored.1 != *conversation_id
+        || stored.2 != "assistant"
+        || stored.3 != *content
+        || stored.4 != attachments_json
+        || stored.5.as_deref() != Some(reply_to)
+    {
+        return Err(sqlx::Error::Protocol(
+            "reply id was already used with different data".into(),
+        ));
+    }
+    sqlx::query(
+        "DELETE FROM agent_delivery_queue WHERE message_id=? AND user_id=? AND conversation_id=?",
+    )
+    .bind(reply_to)
+    .bind(user_id)
+    .bind(conversation_id)
+    .execute(&mut *transaction)
+    .await?;
     transaction.commit().await?;
     if inserted {
         state.mobile.notify(user_id, protocol::mobile_message(serde_json::json!({
@@ -849,22 +937,41 @@ pub(crate) async fn accept_message_reply(
     message: protocol::GatewayMessage,
 ) -> Result<protocol::GatewayMessage, sqlx::Error> {
     let id = message.message_id().unwrap_or_default().to_owned();
-    let protocol::GatewayMessage::MessageReply { reply_to, conversation_id, .. } = &message else {
+    let protocol::GatewayMessage::MessageReply {
+        reply_to,
+        conversation_id,
+        ..
+    } = &message
+    else {
         return Err(sqlx::Error::Protocol("not a message reply".into()));
     };
-    let pending = state.agent.pending_message_matches(reply_to, device_id, conversation_id).await;
+    let pending = state
+        .agent
+        .pending_message_matches(reply_to, device_id, conversation_id)
+        .await;
     // The development-only debug endpoint deliberately has no persisted user
     // anchor; keep that isolated contract out of production followup handling.
     if state.metadata.environment == "development" && pending {
-        let anchor_exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM messages WHERE id=?)")
-            .bind(reply_to).fetch_one(&state.pool).await?;
+        let anchor_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM messages WHERE id=?)")
+                .bind(reply_to)
+                .fetch_one(&state.pool)
+                .await?;
         if !anchor_exists {
-            state.agent.resolve_reply_for_device(device_id, message).await;
+            state
+                .agent
+                .resolve_reply_for_device(device_id, message)
+                .await;
             return Ok(protocol::ack(id));
         }
     }
     persist_message_reply(state, user_id, device_id, &message).await?;
-    if pending { state.agent.resolve_reply_for_device(device_id, message).await; }
+    if pending {
+        state
+            .agent
+            .resolve_reply_for_device(device_id, message)
+            .await;
+    }
     Ok(protocol::ack(id))
 }
 
@@ -872,13 +979,35 @@ pub(crate) async fn accept_message_reply(
 mod reply_activity_tests {
     use super::*;
 
-    async fn waiting() -> (super::super::AgentRegistry, tokio::sync::oneshot::Receiver<protocol::GatewayMessage>) {
+    async fn waiting() -> (
+        super::super::AgentRegistry,
+        tokio::sync::oneshot::Receiver<protocol::GatewayMessage>,
+    ) {
         let agent = super::super::AgentRegistry::default();
         let (tx, mut rx) = mpsc::channel(2);
-        agent.register_connection("connection".into(),"owner".into(),"device".into(),"test".into(),tx).await;
-        let receiver = agent.send_request_for_user("owner",Some("device"),protocol::GatewayMessage::MessageSend {
-            version:1,message_id:"anchor".into(),conversation_id:"chat".into(),content:"test".into(),attachments:vec![],
-        }).await.unwrap();
+        agent
+            .register_connection(
+                "connection".into(),
+                "owner".into(),
+                "device".into(),
+                "test".into(),
+                tx,
+            )
+            .await;
+        let receiver = agent
+            .send_request_for_user(
+                "owner",
+                Some("device"),
+                protocol::GatewayMessage::MessageSend {
+                    version: 1,
+                    message_id: "anchor".into(),
+                    conversation_id: "chat".into(),
+                    content: "test".into(),
+                    attachments: vec![],
+                },
+            )
+            .await
+            .unwrap();
         rx.recv().await.unwrap();
         // The initial request was actually enqueued before testing its waiter.
         (agent, receiver)
@@ -886,35 +1015,51 @@ mod reply_activity_tests {
 
     #[tokio::test]
     async fn active_stream_outlives_idle_window_but_not_absolute_deadline() {
-        let (agent, receiver)=waiting().await;
-        let active=agent.clone();
-        let keepalive=tokio::spawn(async move {
+        let (agent, receiver) = waiting().await;
+        let active = agent.clone();
+        let keepalive = tokio::spawn(async move {
             for _ in 0..20 {
                 tokio::time::sleep(Duration::from_millis(15)).await;
-                active.touch_message_activity("device","chat").await;
+                active.touch_message_activity("device", "chat").await;
             }
         });
-        let start=tokio::time::Instant::now();
-        assert!(wait_for_message_reply(&agent,"anchor",receiver,Duration::from_millis(80),Duration::from_millis(180)).await.is_err());
-        assert!(start.elapsed()>=Duration::from_millis(160));
-        assert!(start.elapsed()<Duration::from_secs(1));
+        let start = tokio::time::Instant::now();
+        assert!(wait_for_message_reply(
+            &agent,
+            "anchor",
+            receiver,
+            Duration::from_millis(80),
+            Duration::from_millis(180)
+        )
+        .await
+        .is_err());
+        assert!(start.elapsed() >= Duration::from_millis(160));
+        assert!(start.elapsed() < Duration::from_secs(1));
         keepalive.abort();
     }
 
     #[tokio::test]
     async fn unrelated_device_or_conversation_cannot_extend_idle_timeout() {
-        let (agent, receiver)=waiting().await;
-        let active=agent.clone();
-        let unrelated=tokio::spawn(async move {
+        let (agent, receiver) = waiting().await;
+        let active = agent.clone();
+        let unrelated = tokio::spawn(async move {
             for _ in 0..20 {
                 tokio::time::sleep(Duration::from_millis(10)).await;
-                active.touch_message_activity("other-device","chat").await;
-                active.touch_message_activity("device","other-chat").await;
+                active.touch_message_activity("other-device", "chat").await;
+                active.touch_message_activity("device", "other-chat").await;
             }
         });
-        let start=tokio::time::Instant::now();
-        assert!(wait_for_message_reply(&agent,"anchor",receiver,Duration::from_millis(60),Duration::from_millis(300)).await.is_err());
-        assert!(start.elapsed()<Duration::from_millis(250));
+        let start = tokio::time::Instant::now();
+        assert!(wait_for_message_reply(
+            &agent,
+            "anchor",
+            receiver,
+            Duration::from_millis(60),
+            Duration::from_millis(300)
+        )
+        .await
+        .is_err());
+        assert!(start.elapsed() < Duration::from_millis(250));
         unrelated.abort();
     }
 }
@@ -927,7 +1072,10 @@ async fn claim_delivery(state: &AppState, message_id: &str) -> Option<i64> {
          SET attempts=attempts+1,next_attempt_at=?,updated_at=?
          WHERE message_id=? AND next_attempt_at<=?",
     )
-    .bind((current + ChronoDuration::seconds(MAX_MESSAGE_REPLY_TIMEOUT.as_secs() as i64 + 5)).to_rfc3339())
+    .bind(
+        (current + ChronoDuration::seconds(MAX_MESSAGE_REPLY_TIMEOUT.as_secs() as i64 + 5))
+            .to_rfc3339(),
+    )
     .bind(&now)
     .bind(message_id)
     .bind(&now)

@@ -1,0 +1,1 @@
+restrict,command="/usr/bin/python3 /opt/hermes-profile-sync/profile_sync.py hub --store /var/lib/hermes-profile-sync" ssh-ed25519 REPLACE_WITH_DEDICATED_PUBLIC_KEY profile-sync-client

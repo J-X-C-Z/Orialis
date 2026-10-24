@@ -113,7 +113,9 @@ class MemoryCoordinator {
         for (final record in records.reversed) {
           if (!current()) return;
           if (record.analysisStatus == 'pending' ||
-              record.analysisStatus == 'analyzing') {
+              record.analysisStatus == 'analyzing' ||
+              (record.analysisStatus == 'completed' &&
+                  record.category == null)) {
             await analyzer.analyze(record, isCurrent: current);
           }
         }

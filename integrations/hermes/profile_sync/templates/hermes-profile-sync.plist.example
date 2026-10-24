@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>local.hermes.profile-sync</string>
+  <key>ProgramArguments</key><array>
+    <string>/absolute/path/to/python3</string>
+    <string>/absolute/path/to/profile_sync.py</string>
+    <string>sync</string><string>--config</string>
+    <string>/absolute/path/to/private/config.json</string>
+  </array>
+  <key>StartInterval</key><integer>60</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/absolute/path/to/private/sync.log</string>
+  <key>StandardErrorPath</key><string>/absolute/path/to/private/sync-error.log</string>
+</dict></plist>

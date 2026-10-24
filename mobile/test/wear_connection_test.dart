@@ -255,7 +255,7 @@ void main() {
         () => WearProtocol.splitSnapshot({
           'transferId': 'too-big',
           'revision': 0,
-          'title': '🙂' * 5000,
+          'title': '🙂' * (WearProtocol.maxSnapshotBytes ~/ 4 + 1),
         }),
         throwsFormatException,
       );

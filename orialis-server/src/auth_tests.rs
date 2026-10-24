@@ -4,6 +4,10 @@ use tokio::{
     net::{TcpListener, TcpStream},
 };
 
+// Fixtures share the real process-wide hash admission limit. Serialize fixture
+// authentication so unrelated HTTP scenarios do not become overload traffic.
+pub(crate) static AUTH_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn isolated_pool() -> SqlitePool {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
@@ -61,6 +65,7 @@ fn json(body: &[u8]) -> Value {
 
 #[tokio::test]
 async fn auth_http_contract_sessions_expiry_gate_and_agent_ownership() {
+    let _auth_guard = AUTH_TEST_LOCK.lock().await;
     let pool = isolated_pool().await;
     let state = Arc::new(AppState {
         metadata: metadata(VERSION, "test", "http://localhost"),
@@ -310,4 +315,18 @@ async fn state_for_owner(pool: &SqlitePool, owner: Option<&str>, token: &str) ->
         public_url: "http://localhost".into(),
         upload_dir: PathBuf::from("/tmp"),
     }
+}
+
+#[tokio::test]
+async fn authentication_hash_overload_remains_a_busy_error() {
+    let _auth_guard = AUTH_TEST_LOCK.lock().await;
+    let _capacity = auth::AUTH_HASH_ADMISSION.acquire_many(4).await.unwrap();
+    assert!(
+        matches!(auth::password_hash_blocking("Password-123".into()).await,
+        Err(AppError::ServiceUnavailable(message)) if message == "authentication capacity is busy")
+    );
+    assert!(
+        matches!(auth::verify_password_blocking("Password-123".into(), "unused".into()).await,
+        Err(AppError::ServiceUnavailable(message)) if message == "authentication capacity is busy")
+    );
 }

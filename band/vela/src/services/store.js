@@ -6,6 +6,7 @@ const STATUS = { online: '在线', offline: '离线', unknown: '未知' }
 const TASK_STATUS = { running: '进行中', working: '进行中', pending: '待开始', waiting: '等待确认', done: '已完成', failed: '失败', cancelled: '已取消' }
 const COMMAND_STATUS = { ready: '待接入', confirming: '待确认', waiting: '等待结果', done: '手机回报完成', failed: '失败', unavailable: '待接入' }
 const listeners = []
+let cacheLoading = true
 let snapshot = null
 let restored = false
 let receivedAt = ''
@@ -86,7 +87,7 @@ function view() {
   const tasks = empty ? [] : list(data.tasks, 'task')
   const organizerData = demo ? demoOrganizer : organizer.normalize(empty ? null : data.organizer)
   return {
-    demo, compact, haptics, reducedMotion, stale, mock, organizer: organizerData, hasSnapshot: !!current, tasks, commands: empty ? [] : list(data.commands, 'command'), devices: empty ? [] : deviceList,
+    cacheLoading: cacheLoading && !current, demo, compact, haptics, reducedMotion, stale, mock, organizer: organizerData, hasSnapshot: !!current, tasks, commands: empty ? [] : list(data.commands, 'command'), devices: empty ? [] : deviceList,
     title: text(current && current.title, 80), targetId, previewTargetId: previewId,
     sourceShort: demo ? '演示数据' : mock ? '手机演示数据' : empty ? '无数据' : current ? (stale ? '缓存数据' : '手机同步') : '无数据',
     targetName: target ? target.name : targetId ? '目标资料待同步' : '尚未选择目标',
@@ -113,9 +114,10 @@ function acceptSnapshot(value, options) {
   receivedAt = restored ? '' : new Date().toISOString()
   emit()
 }
-function clearSnapshot() { demo = false; demoOrganizer = null; undoOrganizer = null; snapshot = null; restored = false; receivedAt = ''; previewTargetId = ''; emit() }
+function clearSnapshot() { cacheLoading = false; demo = false; demoOrganizer = null; undoOrganizer = null; snapshot = null; restored = false; receivedAt = ''; previewTargetId = ''; emit() }
 module.exports = {
   view, acceptSnapshot, clearSnapshot, scopeKey,
+  setCacheLoading(value) { cacheLoading = !!value; emit() },
   generation() { return scopeGeneration },
   assertSnapshot(value) {
     if (!value || typeof value !== 'object') throw new Error('invalid snapshot')

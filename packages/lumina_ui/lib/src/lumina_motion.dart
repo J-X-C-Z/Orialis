@@ -96,8 +96,8 @@ class LuminaSpring extends AnimationController {
   }
 }
 
-/// Stateful branch navigators stay mounted. Each branch keeps its own live
-/// opacity/position, so rapid navigation never restarts an entrance at zero.
+/// Keep branch state mounted, but paint only the destination during navigation.
+/// A short paint-only entrance avoids blending two full-screen glass surfaces.
 class LuminaBranchTransition extends StatefulWidget {
   const LuminaBranchTransition({
     required this.index,
@@ -111,102 +111,77 @@ class LuminaBranchTransition extends StatefulWidget {
 }
 
 class _LuminaBranchTransitionState extends State<LuminaBranchTransition>
-    with TickerProviderStateMixin {
-  late final visibility = [
-    for (var i = 0; i < widget.children.length; i++)
-      LuminaSpring(vsync: this, value: i == widget.index ? 1 : 0),
-  ];
-  late final positions = [
-    for (var i = 0; i < widget.children.length; i++)
-      LuminaSpring(vsync: this, value: 0),
-  ];
-  late final animation = Listenable.merge([...visibility, ...positions]);
+    with SingleTickerProviderStateMixin {
+  late final controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+    value: 1,
+  );
+  late final progress = controller.drive(CurveTween(curve: luminaEaseOut));
+  Animation<Offset> position = const AlwaysStoppedAnimation(Offset.zero);
+
   @override
   void didUpdateWidget(LuminaBranchTransition oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.index == widget.index) return;
     final reduced = LuminaTheme.motionReducedOf(context);
     final direction = widget.index > oldWidget.index ? 1.0 : -1.0;
-    for (var i = 0; i < visibility.length; i++) {
-      final selected = i == widget.index;
-      if (!selected &&
-          visibility[i].value <= .001 &&
-          !visibility[i].isAnimating) {
-        continue;
-      }
-      if (reduced) {
-        positions[i].settle(0, reducedMotion: true);
-        visibility[i].animateTo(
-          selected ? 1 : 0,
-          duration: const Duration(milliseconds: 140),
-          curve: luminaEaseOut,
-        );
-      } else {
-        if (selected &&
-            visibility[i].value < .001 &&
-            !visibility[i].isAnimating) {
-          positions[i].value = direction * .035;
-        }
-        positions[i].settle(selected ? 0 : -direction * .035);
-        visibility[i].settle(selected ? 1 : 0);
-      }
-    }
+    final start = controller.isAnimating
+        ? position.value
+        : Offset(direction * .025, 0);
+    position = reduced
+        ? const AlwaysStoppedAnimation(Offset.zero)
+        : Tween<Offset>(begin: start, end: Offset.zero).animate(progress);
+    controller.duration = Duration(milliseconds: reduced ? 140 : 220);
+    controller.forward(from: 0);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (LuminaTheme.motionReducedOf(context)) {
-      for (final position in positions) {
-        position.settle(0, reducedMotion: true);
-      }
+      position = const AlwaysStoppedAnimation(Offset.zero);
     }
   }
 
   @override
   void dispose() {
-    for (final controller in [...visibility, ...positions]) {
-      controller.dispose();
-    }
+    controller.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: animation,
-    builder: (context, _) => Stack(
-      fit: StackFit.expand,
-      children: [
-        for (var i = 0; i < widget.children.length; i++)
-          Positioned.fill(
-            key: ValueKey(i),
-            child: Offstage(
-              offstage:
-                  i != widget.index &&
-                  visibility[i].value <= .001 &&
-                  !visibility[i].isAnimating,
-              child: TickerMode(
-                enabled: i == widget.index,
-                child: IgnorePointer(
-                  ignoring: i != widget.index,
-                  child: ExcludeFocus(
-                    excluding: i != widget.index,
-                    child: ExcludeSemantics(
+  Widget build(BuildContext context) => FadeTransition(
+    opacity: LuminaTheme.motionReducedOf(context)
+        ? Tween<double>(begin: .96, end: 1).animate(progress)
+        : const AlwaysStoppedAnimation(1),
+    child: SlideTransition(
+      position: position,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          for (var i = 0; i < widget.children.length; i++)
+            Positioned.fill(
+              key: ValueKey(i),
+              child: Offstage(
+                offstage: i != widget.index,
+                child: TickerMode(
+                  enabled: i == widget.index,
+                  child: IgnorePointer(
+                    ignoring: i != widget.index,
+                    child: ExcludeFocus(
                       excluding: i != widget.index,
-                      child: Opacity(
-                        opacity: visibility[i].value.clamp(0.0, 1.0),
-                        child: FractionalTranslation(
-                          translation: Offset(positions[i].value, 0),
-                          child: RepaintBoundary(child: widget.children[i]),
-                        ),
+                      child: ExcludeSemantics(
+                        excluding: i != widget.index,
+                        child: RepaintBoundary(child: widget.children[i]),
                       ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     ),
   );
 }

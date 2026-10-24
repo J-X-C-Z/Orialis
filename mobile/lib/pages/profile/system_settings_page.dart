@@ -4,9 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app.dart';
+import '../../features/chat/domain/chat_transcript.dart';
+
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show OrialisPageScaffold;
+
 import '../chat/chat_page.dart' show agentChatServiceProvider;
 import '../shared/page_parts.dart';
 
@@ -77,14 +80,22 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
     for (final conversation in conversations) {
       final target = await service.target(conversation.id);
       if (!service.isAllowedTarget(target)) continue;
-      final messages = await repository.watchMessages(conversation.id).first;
+      final messages = (await repository.watchMessages(conversation.id).first)
+          .where(
+            (message) =>
+                message.role == 'assistant' && isVisibleChatMessage(message),
+          )
+          .toList();
       if (messages.isEmpty) continue;
       return system.notifyChatMessage({
         'notificationId': 'test-${DateTime.now().microsecondsSinceEpoch}',
         'messageId': messages.last.id,
         'conversationId': conversation.id,
+        'role': 'assistant',
         'sender': 'Orialis 测试消息',
-        'content': '点击此通知可打开 ${conversation.title} 的最新消息',
+        'content': messages.last.content,
+        'createdAt': messages.last.createdAt,
+        'replyToMessageId': messages.last.replyToMessageId,
       }, testEvent: true);
     }
     if (mounted) {

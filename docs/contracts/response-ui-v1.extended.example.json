@@ -1,0 +1,235 @@
+{
+  "version": 1,
+  "title": "扩展能力示例（演示数据）",
+  "fallback": "本卡片展示复习流程、正弦公式、示例专注趋势、复习时间线、傅里叶参数演示、学习偏好表单、数学60分钟与英语30分钟的表格、项目来源、计划修改、附件占位和任务日程草案。图表为演示数据；附件ID需替换为真实授权附件。表单只填入草稿，任务日程需确认后保存本地并等待同步。",
+  "blocks": [
+    {
+      "type": "diagram",
+      "title": "复习流程",
+      "layout": "flow",
+      "items": [
+        {
+          "id": "review",
+          "label": "复习概念",
+          "detail": "先回忆定义和适用条件。"
+        },
+        {
+          "id": "practice",
+          "label": "练习与反馈",
+          "detail": "根据错题调整下一轮复习。",
+          "parent": "review"
+        }
+      ],
+      "edges": [
+        {
+          "from": "review",
+          "to": "practice",
+          "label": "然后"
+        }
+      ]
+    },
+    {
+      "type": "math",
+      "items": [
+        {
+          "label": "正弦函数",
+          "source": "f(x)=A\\sin(\\omega x)"
+        }
+      ]
+    },
+    {
+      "type": "plot",
+      "kind": "line",
+      "items": [
+        {
+          "label": "示例专注时间",
+          "points": [
+            {
+              "x": 1,
+              "y": 30
+            },
+            {
+              "x": 2,
+              "y": 45
+            },
+            {
+              "x": 3,
+              "y": 40
+            }
+          ]
+        },
+        {
+          "label": "示例目标",
+          "points": [
+            {
+              "x": 1,
+              "y": 40
+            },
+            {
+              "x": 2,
+              "y": 40
+            },
+            {
+              "x": 3,
+              "y": 40
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "timeline",
+      "items": [
+        {
+          "label": "复习",
+          "time": "2030-01-02T09:00:00+08:00",
+          "detail": "回忆上节课内容。"
+        },
+        {
+          "label": "练习",
+          "time": "2030-01-02T09:30:00+08:00",
+          "detail": "完成三道题。"
+        }
+      ]
+    },
+    {
+      "type": "simulation",
+      "items": [
+        {
+          "label": "傅里叶方波叠加演示",
+          "kind": "fourier",
+          "terms": 5,
+          "amplitude": 1,
+          "frequency": 1
+        }
+      ]
+    },
+    {
+      "type": "form",
+      "title": "补充学习偏好",
+      "prompt": "请根据下面的信息安排学习：",
+      "items": [
+        {
+          "id": "subject",
+          "label": "科目",
+          "kind": "text",
+          "required": true
+        },
+        {
+          "id": "date",
+          "label": "学习日期",
+          "kind": "date",
+          "value": "2030-01-02"
+        },
+        {
+          "id": "mode",
+          "label": "学习方式",
+          "kind": "select",
+          "options": [
+            "复习",
+            "练习"
+          ],
+          "value": "复习"
+        },
+        {
+          "id": "topics",
+          "label": "重点",
+          "kind": "multiselect",
+          "options": [
+            "公式",
+            "概念",
+            "错题"
+          ],
+          "value": [
+            "公式"
+          ]
+        },
+        {
+          "id": "minutes",
+          "label": "可用分钟",
+          "kind": "slider",
+          "min": 10,
+          "max": 120,
+          "value": 45
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "columns": [
+        "科目",
+        "分钟"
+      ],
+      "items": [
+        {
+          "label": "数学安排",
+          "cells": [
+            "数学",
+            60
+          ]
+        },
+        {
+          "label": "英语安排",
+          "cells": [
+            "英语",
+            30
+          ]
+        }
+      ]
+    },
+    {
+      "type": "sources",
+      "items": [
+        {
+          "label": "Orialis 项目",
+          "url": "https://github.com/J-X-C-Z/Orialis",
+          "sourceId": "S1",
+          "excerpt": "此条仅展示来源卡片的格式，不代表已经读取该页面。"
+        }
+      ]
+    },
+    {
+      "type": "diff",
+      "items": [
+        {
+          "label": "示例计划调整",
+          "before": "复习 30 分钟\n练习 30 分钟",
+          "after": "复习 20 分钟\n练习 40 分钟"
+        }
+      ]
+    },
+    {
+      "type": "media",
+      "items": [
+        {
+          "label": "示例附件（需替换为实际附件 ID）",
+          "id": "attachment-example",
+          "name": "学习资料.pdf",
+          "mimeType": "application/pdf"
+        }
+      ]
+    },
+    {
+      "type": "actions",
+      "items": [
+        {
+          "id": "study-task",
+          "label": "添加复习任务",
+          "kind": "task",
+          "title": "复习傅里叶级数",
+          "notes": "演示草案，确认后才会保存。",
+          "due": "2030-01-02"
+        },
+        {
+          "id": "study-schedule",
+          "label": "添加练习日程",
+          "kind": "schedule",
+          "title": "傅里叶练习",
+          "startAt": "2030-01-02T09:00:00+08:00",
+          "endAt": "2030-01-02T09:30:00+08:00",
+          "location": "自习室"
+        }
+      ]
+    }
+  ]
+}
