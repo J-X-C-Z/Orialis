@@ -43,6 +43,7 @@ class AppConfig {
   static const _compatAuthUsernameKey = 'orialis.compatAuthUsername';
   static const _highPerformanceModeKey = 'orialis.highPerformanceMode';
   static const _appearanceModeKey = 'orialis.appearanceMode';
+  static const _neumorphismKey = 'orialis.mobile.neumorphism';
   FlutterSecureStorage get _secureStorage {
     if (desktop) {
       return const FlutterSecureStorage(
@@ -110,6 +111,18 @@ class AppConfig {
   Future<void> setAppearanceMode(String value) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(_appearanceModeKey, value);
+  }
+
+  /// The new mobile visual style is the branch default; disable it from
+  /// Profile > Appearance to restore the untouched Lumina style immediately.
+  Future<bool> mobileNeumorphism() async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getBool(_neumorphismKey) ?? true;
+  }
+
+  Future<void> setMobileNeumorphism(bool enabled) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_neumorphismKey, enabled);
   }
 
   Future<String> deviceId() async {
