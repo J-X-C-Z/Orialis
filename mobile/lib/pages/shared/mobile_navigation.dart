@@ -62,8 +62,11 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
                       listenable: LuminaBlurPolicy.instance.chromeListenable,
                       builder: (context, _) => LuminaSurface(
                         depth: LuminaSurfaceDepth.raised,
-                        glass: true,
-                        backdrop: true,
+                        glass: !theme.colors.neumorphic,
+                        backdrop: !theme.colors.neumorphic,
+                        color: theme.colors.neumorphic
+                            ? theme.colors.raisedSurface
+                            : null,
                         radius: LuminaControlSize.capsuleRadius,
                         padding: const EdgeInsets.all(6),
                         child: LuminaSlidingSelection(
@@ -81,7 +84,10 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
                                     label: destinations[i].label,
                                     child: LuminaSurface(
                                       radius: LuminaControlSize.capsuleRadius,
-                                      color: const Color(0x00000000),
+                                      color: theme.colors.neumorphic &&
+                                              selectedIndex == i
+                                          ? theme.colors.accentSoft
+                                          : const Color(0x00000000),
                                       padding: const EdgeInsets.symmetric(
                                         vertical: 10,
                                         horizontal: 2,
