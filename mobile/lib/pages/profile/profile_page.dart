@@ -271,6 +271,26 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         }
                       },
                     ),
+                    if (!ref.watch(desktopModeProvider))
+                      LuminaListRow(
+                        title: '轻拟态界面',
+                        subtitle: '柔和凸起卡片、内凹控件；关闭可恢复原版 Lumina',
+                        leading: const LuminaIcon(LuminaIcons.image),
+                        trailing: LuminaSwitch(
+                          value: ref.watch(mobileNeumorphismProvider),
+                          onChanged: (enabled) async {
+                            try {
+                              await ref
+                                  .read(mobileNeumorphismProvider.notifier)
+                                  .setEnabled(enabled);
+                            } catch (_) {
+                              if (context.mounted) {
+                                showLuminaMessage(context, '界面风格未能保存');
+                              }
+                            }
+                          },
+                        ),
+                      ),
                     LuminaListRow(
                       title: '高性能模式',
                       subtitle: '减少实时玻璃模糊，保留色彩、阴影与自然动效',

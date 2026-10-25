@@ -240,33 +240,49 @@ class _LuminaMaterial extends CustomPainter {
             ..addPath(path, Offset.zero),
         );
       }
-      // One drop-shadow blur only; the top-left rim comes from the final
-      // gradient stroke so list/control surfaces do not stack two blurs.
-      // High-performance mode swaps the blur for a flat offset wash —
-      // MaskFilter.blur forces an offscreen layer per surface.
-      final shadowPaint = Paint()
-        ..color = shade.withValues(
-          alpha: glass ? .14 : colors.toneValue(.22, .28),
-        );
-      if (!cheapShadow) {
-        shadowPaint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
-      }
-      if (cheapShadow && physicalShadow) {
-        // Group cards retain a soft shadow in performance mode without a
-        // per-card mask-filter layer. Individual inset rows stay inexpensive.
-        canvas.drawShadow(path, shade.withValues(alpha: .32), 4, false);
-      } else {
-        canvas.drawPath(path.shift(Offset(2, pressed ? 1 : 5)), shadowPaint);
-      }
-      if (cheapShadow && !physicalShadow) {
+      if (colors.neumorphic && !glass) {
+        // Two opposite, diffuse ambient shadows give the raised material its
+        // soft-touch depth. Avoid expensive blur layers in performance mode.
+        final topLight = Paint()
+          ..color = light.withValues(alpha: colors.toneValue(.90, .09));
+        final contactShadow = Paint()
+          ..color = shade.withValues(alpha: colors.toneValue(.37, .47));
+        if (!cheapShadow) {
+          topLight.maskFilter = const MaskFilter.blur(BlurStyle.normal, 9);
+          contactShadow.maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+        }
         canvas.drawPath(
-          path.shift(Offset(1, pressed ? 0 : 2)),
-          Paint()..color = shade.withValues(alpha: .10),
+          path.shift(Offset(pressed ? -1 : -4, pressed ? -1 : -4)),
+          topLight,
         );
+        canvas.drawPath(
+          path.shift(Offset(pressed ? 1 : 5, pressed ? 1 : 6)),
+          contactShadow,
+        );
+      } else {
+        // Original Lumina material remains pixel-for-pixel unchanged.
+        final shadowPaint = Paint()
+          ..color = shade.withValues(
+            alpha: glass ? .14 : colors.toneValue(.22, .28),
+          );
+        if (!cheapShadow) {
+          shadowPaint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+        }
+        if (cheapShadow && physicalShadow) {
+          canvas.drawShadow(path, shade.withValues(alpha: .32), 4, false);
+        } else {
+          canvas.drawPath(path.shift(Offset(2, pressed ? 1 : 5)), shadowPaint);
+        }
+        if (cheapShadow && !physicalShadow) {
+          canvas.drawPath(
+            path.shift(Offset(1, pressed ? 0 : 2)),
+            Paint()..color = shade.withValues(alpha: .10),
+          );
+        }
       }
       canvas.restore();
     }
-    if (!inset && !glass && !contrast) {
+    if (!inset && !glass && !contrast && !colors.neumorphic) {
       // A narrow solid lower edge adds material thickness without another blur.
       canvas.drawPath(
         path.shift(Offset(0, pressed ? 1 : 3)),
@@ -274,7 +290,7 @@ class _LuminaMaterial extends CustomPainter {
       );
     }
     final bodyKey =
-        '${colors.darkProgress}|$glass|$diffuseGlass|$inset|$contrast|${tint.toARGB32()}|${colors.surface.toARGB32()}|${colors.accent.toARGB32()}|${rect.width.toStringAsFixed(1)}x${rect.height.toStringAsFixed(1)}';
+        '${colors.darkProgress}|${colors.neumorphic}|$glass|$diffuseGlass|$inset|$contrast|${tint.toARGB32()}|${colors.surface.toARGB32()}|${colors.accent.toARGB32()}|${rect.width.toStringAsFixed(1)}x${rect.height.toStringAsFixed(1)}';
     canvas.drawPath(
       path,
       Paint()
@@ -318,7 +334,7 @@ class _LuminaMaterial extends CustomPainter {
     );
     canvas.save();
     canvas.clipPath(path);
-    if (!glass && !contrast) {
+    if (!glass && !contrast && !colors.neumorphic) {
       canvas.drawRect(
         rect,
         Paint()
@@ -389,9 +405,21 @@ class _LuminaMaterial extends CustomPainter {
         ..strokeWidth = 7
         ..color = shade.withValues(alpha: .34);
       if (!cheapShadow) {
-        insetPaint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
+        insetPaint.maskFilter = MaskFilter.blur(
+          BlurStyle.normal,
+          colors.neumorphic ? 3.5 : 2,
+        );
       }
       canvas.drawPath(path.shift(const Offset(1.5, 2)), insetPaint);
+      if (colors.neumorphic) {
+        canvas.drawPath(
+          path.shift(const Offset(-1, -1.5)),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3
+            ..color = light.withValues(alpha: colors.toneValue(.65, .24)),
+        );
+      }
       canvas.drawPath(
         path,
         Paint()
@@ -409,7 +437,7 @@ class _LuminaMaterial extends CustomPainter {
             ? null
             : _cachedGradient(
                 _rimGradientCache,
-                'edge|${colors.darkProgress}|$inset|$glass|${rect.size}',
+                'edge|${colors.darkProgress}|${colors.neumorphic}|$inset|$glass|${rect.size}',
                 () => ui.Gradient.linear(rect.topLeft, rect.bottomRight, [
                   light.withValues(
                     alpha: inset

@@ -307,13 +307,93 @@ class _TodayPageState extends ConsumerState<TodayPage>
                           LuminaNavigationInset.of(context) +
                           MediaQuery.paddingOf(context).bottom,
                     ),
-                    children: [ContentStack(gap: 24, children: sections)],
+                    children: [
+                      if (LuminaTheme.of(context).colors.neumorphic) ...[
+                        Text(
+                          '把今天安排得刚刚好',
+                          style: LuminaTheme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '先处理重要的事，其他交给 Orialis。',
+                          style: LuminaTheme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 18),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _softStat(
+                                '待办',
+                                pending.length,
+                                LuminaCardPalette.ocean.tint,
+                                () => context.go('/events'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _softStat(
+                                '优先',
+                                focus.length,
+                                LuminaCardPalette.amber.tint,
+                                () => context.go('/events'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _softStat(
+                                '日程',
+                                remaining.length,
+                                LuminaCardPalette.lavender.tint,
+                                () => context.go('/calendar'),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 28),
+                      ],
+                      ContentStack(gap: 24, children: sections),
+                    ],
                   );
                 },
               );
             },
           );
         },
+      ),
+    );
+  }
+
+  /// Compact, tappable summaries are only part of the new phone skin.
+  /// Values are derived from the same live streams as the existing sections.
+  Widget _softStat(
+    String label,
+    int value,
+    Color accent,
+    VoidCallback onTap,
+  ) {
+    final theme = LuminaTheme.of(context);
+    return LuminaSurface(
+      onTap: onTap,
+      depth: LuminaSurfaceDepth.raised,
+      radius: 22,
+      padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 9,
+            height: 9,
+            decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            '$value',
+            style: theme.textTheme.headlineSmall.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          Text(label, style: theme.textTheme.bodySmall),
+        ],
       ),
     );
   }
