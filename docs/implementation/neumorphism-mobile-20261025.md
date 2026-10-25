@@ -24,8 +24,8 @@
 - Surface: `#F0F4FA` / `#202B3A`
 - Raised: `#F2F6FC` / `#293447`
 - Inset: `#DFE7F3` / `#172131`
-- Accent: `#477BE0` / `#9CC2FF`
-- Ink: `#243046` / `#F1F5FC`
+- Accent: `#3267C6` / `#9CC2FF`
+- Muted: `#566B87` / `#A8B5C9`\n- Ink: `#243046` / `#F1F5FC`
 
 ## 开启、回退与隔离
 
