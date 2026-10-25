@@ -203,6 +203,38 @@ final appearanceModeProvider =
       (ref) => AppearanceModeController(ref.watch(appConfigProvider)),
     );
 
+/// Mobile-only, persisted rollback switch. Desktop and News remain original.
+class MobileNeumorphismController extends StateNotifier<bool> {
+  MobileNeumorphismController(this._config) : super(true) {
+    unawaited(_load());
+  }
+
+  final AppConfig _config;
+  int _revision = 0;
+
+  Future<void> _load() async {
+    final saved = await _config.mobileNeumorphism();
+    if (mounted && _revision == 0) state = saved;
+  }
+
+  Future<void> setEnabled(bool value) async {
+    final previous = state;
+    final revision = ++_revision;
+    state = value;
+    try {
+      await _config.setMobileNeumorphism(value);
+    } catch (_) {
+      if (mounted && revision == _revision) state = previous;
+      rethrow;
+    }
+  }
+}
+
+final mobileNeumorphismProvider =
+    StateNotifierProvider<MobileNeumorphismController, bool>(
+      (ref) => MobileNeumorphismController(ref.watch(appConfigProvider)),
+    );
+
 final eventRepositoryProvider = Provider<EventRepository>((ref) {
   return EventRepository(
     database: ref.watch(databaseProvider),
@@ -389,6 +421,8 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
     });
     final highPerformanceMode = ref.watch(highPerformanceModeProvider);
     final appearanceMode = ref.watch(appearanceModeProvider);
+    final isDesktop = ref.watch(desktopModeProvider);
+    final mobileNeumorphism = ref.watch(mobileNeumorphismProvider);
     LuminaBlurPolicy.instance.ensureFrameWatcher();
     if (_lastPerformanceMode != highPerformanceMode) {
       _lastPerformanceMode = highPerformanceMode;
@@ -413,7 +447,12 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
         return AnimatedLuminaTheme(
           brightness: brightness,
           highPerformanceMode: highPerformanceMode,
-          data: LuminaThemeData(liquidGlass: ref.watch(desktopModeProvider)),
+          data: LuminaThemeData(
+            liquidGlass: isDesktop,
+            visualStyle: !isDesktop && mobileNeumorphism
+                ? LuminaVisualStyle.neumorphism
+                : LuminaVisualStyle.original,
+          ),
           child: LuminaMaterialBridge(
             child: Builder(
               builder: (context) => DefaultTextStyle(
