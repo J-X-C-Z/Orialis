@@ -87,7 +87,7 @@ class LuminaColors {
       );
   Color get accent => tint == null
       ? (neumorphic
-            ? tone(const Color(0xFF477BE0), const Color(0xFF9CC2FF))
+            ? tone(const Color(0xFF3267C6), const Color(0xFF9CC2FF))
             : tone(LuminaBaseColors.accent, LuminaTokenDark.accent))
       : tone(
           Color.lerp(tint, LuminaBaseColors.ink, .25)!,
@@ -100,7 +100,7 @@ class LuminaColors {
         .30,
       );
   Color get muted => neumorphic
-      ? tone(const Color(0xFF74839A), const Color(0xFFA8B5C9))
+      ? tone(const Color(0xFF566B87), const Color(0xFFA8B5C9))
       : tone(LuminaBaseColors.muted, LuminaTokenDark.muted);
   Color get danger => neumorphic
       ? tone(const Color(0xFFC85462), const Color(0xFFF89AA1))
