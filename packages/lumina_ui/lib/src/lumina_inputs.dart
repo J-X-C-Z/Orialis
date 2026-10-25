@@ -82,10 +82,26 @@ class _LuminaTextFieldState extends State<LuminaTextField> {
               ),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: BorderRadius.circular(16),
+                color: colors.neumorphic ? null : colors.surface,
+                gradient: colors.neumorphic
+                    ? LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          colors.recessedSurface,
+                          colors.surface,
+                        ],
+                      )
+                    : null,
+                borderRadius: BorderRadius.circular(
+                  colors.neumorphic ? 18 : 16,
+                ),
                 border: Border.all(
-                  color: focus.hasFocus ? colors.accent : colors.outline,
+                  color: focus.hasFocus
+                      ? colors.accent
+                      : colors.neumorphic
+                          ? colors.outline.withValues(alpha: .65)
+                          : colors.outline,
                   width: focus.hasFocus ? 1.5 : 1,
                 ),
               ),
