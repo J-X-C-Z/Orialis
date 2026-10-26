@@ -417,6 +417,21 @@ class _MarkdownSectionView extends StatelessWidget {
   );
 }
 
+// Weak keys follow the existing bounded Markdown cache without retaining an
+// account, widget, callback, or a second unbounded collection of message text.
+final _responseBlockMemo = Expando<_ParsedResponseBlock>();
+
+class _ParsedResponseBlock {
+  _ParsedResponseBlock(MarkdownBlock block) : source = block.lines.join('\n') {
+    document = ResponseUiDocument.parse(source);
+  }
+  final String source;
+  late final ResponseUiDocument? document;
+  late final String fingerprint = sha256
+      .convert(utf8.encode(source))
+      .toString();
+}
+
 class _BlockView extends StatelessWidget {
   const _BlockView({
     required this.block,
@@ -454,8 +469,11 @@ class _BlockView extends StatelessWidget {
               child: Text('正在生成交互内容…'),
             );
           }
-          final source = block.lines.join('\n');
-          final document = ResponseUiDocument.parse(source);
+          final parsed = _responseBlockMemo[block] ??= _ParsedResponseBlock(
+            block,
+          );
+          final source = parsed.source;
+          final document = parsed.document;
           if (document != null) {
             return ResponseUiView(
               key: ValueKey(source),
@@ -463,7 +481,7 @@ class _BlockView extends StatelessWidget {
               onPromptSelected: onPromptSelected,
               actionScope: actionScope == null
                   ? null
-                  : '$actionScope:${sha256.convert(utf8.encode(source))}',
+                  : '$actionScope:${parsed.fingerprint}',
             );
           }
         }

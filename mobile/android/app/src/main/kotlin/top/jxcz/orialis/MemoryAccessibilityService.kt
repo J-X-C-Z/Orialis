@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -12,6 +13,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Toast
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 /** Reads one screen only after the user taps the memory shortcut. */
 class MemoryAccessibilityService : AccessibilityService() {
@@ -30,7 +32,9 @@ class MemoryAccessibilityService : AccessibilityService() {
     }
 
     private val main = Handler(Looper.getMainLooper())
-    private val worker = Executors.newSingleThreadExecutor()
+    private val worker = Executors.newSingleThreadExecutor { task ->
+        Thread({ Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND); task.run() }, "orialis-accessibility-memory")
+    }
 
     override fun onServiceConnected() { super.onServiceConnected(); instance = this }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
@@ -71,14 +75,14 @@ class MemoryAccessibilityService : AccessibilityService() {
 
     private fun captureScreen(scope: String, shadeChecksRemaining: Int = 5) {
         if (Build.VERSION.SDK_INT < 30 || instance !== this || MemoryStore.scope(this) != scope) {
-            complete(null, "账号或截屏授权已变更，请重新记录")
+            complete(scope, null, "账号或截屏授权已变更，请重新记录")
             return
         }
         val activePackage = try { rootInActiveWindow?.packageName?.toString() } catch (_: Exception) { null }
         if (activePackage == "com.android.systemui") {
             if (shadeChecksRemaining > 0)
                 main.postDelayed({ captureScreen(scope, shadeChecksRemaining - 1) }, 150)
-            else complete(null, "请收起控制中心后重新记住屏幕")
+            else complete(scope, null, "请收起控制中心后重新记住屏幕")
             return
         }
         val visible = try { visibleScreen() } catch (_: Exception) { VisibleScreen() }
@@ -86,42 +90,60 @@ class MemoryAccessibilityService : AccessibilityService() {
             takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(screenshot: ScreenshotResult) {
                     if (instance !== this@MemoryAccessibilityService) { screenshot.hardwareBuffer.close(); return }
-                    var wrapped: Bitmap? = null
-                    val bitmap = try {
-                        wrapped = Bitmap.wrapHardwareBuffer(screenshot.hardwareBuffer, screenshot.colorSpace)
-                        wrapped?.copy(Bitmap.Config.ARGB_8888, false) ?: error("无法读取本次截图")
-                    } catch (_: Exception) {
-                        complete(null, "无法读取本次截图，请重试")
-                        return
-                    } finally { wrapped?.recycle(); screenshot.hardwareBuffer.close() }
-                    worker.execute {
+                    try { worker.execute {
+                        var bitmap: Bitmap? = null
                         var image: File? = null
                         try {
-                            check(MemoryFrame.hasVisibleContent(bitmap.width, bitmap.height, bitmap::getPixel)) { "当前画面未允许截屏" }
+                            val copied = screenshot.hardwareBuffer.use { buffer ->
+                                if (instance !== this@MemoryAccessibilityService) return@execute
+                                if (MemoryStore.scope(this@MemoryAccessibilityService) != scope) {
+                                    complete(scope, null, "账号或截屏授权已变更，请重新记录")
+                                    return@execute
+                                }
+                                var wrapped: Bitmap? = null
+                                try {
+                                    wrapped = Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)
+                                    wrapped?.copy(Bitmap.Config.ARGB_8888, false) ?: error("无法读取本次截图")
+                                } catch (_: Exception) {
+                                    complete(scope, null, "无法读取本次截图，请重试")
+                                    return@execute
+                                } finally { wrapped?.recycle() }
+                            }
+                            bitmap = copied
+                            check(MemoryFrame.hasVisibleContent(copied.width, copied.height, copied::getPixel)) { "当前画面未允许截屏" }
                             val id = MemoryStore.newId()
                             val file = MemoryStore.imageFile(this@MemoryAccessibilityService, scope, id)
                             image = file
-                            file.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                            file.outputStream().use { check(copied.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                            check(instance === this@MemoryAccessibilityService)
                             MemoryStore.save(this@MemoryAccessibilityService, scope, id, visible.sourcePackage,
                                 visible.sourceLabel, visible.text, imagePath = file.absolutePath)
-                            complete(id, null)
+                            complete(scope, id, null)
                         } catch (_: Exception) {
                             image?.delete()
-                            complete(null, "本次截图未保存，请检查当前应用是否允许截屏后重试")
-                        } finally { bitmap.recycle() }
+                            complete(scope, null, "本次截图未保存，请检查当前应用是否允许截屏后重试")
+                        } finally { bitmap?.recycle() }
+                    } } catch (_: RejectedExecutionException) {
+                        screenshot.hardwareBuffer.close()
+                        complete(scope, null, "辅助截屏未连接，请在截屏设置中重新启用")
                     }
                 }
                 override fun onFailure(errorCode: Int) {
-                    complete(null, if (errorCode == ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT)
+                    complete(scope, null, if (errorCode == ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT)
                         "操作过快，请稍后再记住屏幕" else "当前画面无法截屏，请检查辅助截屏授权后重试")
                 }
             })
-        } catch (_: Exception) { complete(null, "辅助截屏未连接，请在截屏设置中重新启用") }
+        } catch (_: Exception) { complete(scope, null, "辅助截屏未连接，请在截屏设置中重新启用") }
     }
 
-    private fun complete(id: String?, error: String?) {
+    private fun complete(scope: String, id: String?, error: String?) {
         main.post {
+            if (instance !== this) return@post
             capturing = false
+            if (MemoryStore.scope(this) != scope) {
+                Toast.makeText(this, "账号或截屏授权已变更，请重新记录", Toast.LENGTH_SHORT).show()
+                return@post
+            }
             if (id != null) MemoryBridge.notifyChanged(id)
             Toast.makeText(this, if (id != null) "已存入 Orialis 记忆" else error ?: "截屏未完成", Toast.LENGTH_SHORT).show()
         }

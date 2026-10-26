@@ -24,6 +24,20 @@ class LuminaGlassWell extends StatelessWidget {
       tint ?? theme.colors.surface,
       .32,
     )!;
+    Widget frost = ColoredBox(
+      color: backing.withValues(alpha: opaque ? 1 : .16),
+    );
+    if (!opaque && !theme.highPerformanceMode) {
+      // Normal mode softens the well's own gradient. The performance path
+      // keeps the painted frost without a per-control backdrop sampling pass.
+      frost = BackdropFilter(
+        filter: ui.ImageFilter.blur(
+          sigmaX: theme.highPerformanceMode ? 2 : 4,
+          sigmaY: theme.highPerformanceMode ? 2 : 4,
+        ),
+        child: frost,
+      );
+    }
     return CustomPaint(
       painter: _LuminaMaterial(
         colors: theme.colors,
@@ -43,16 +57,7 @@ class LuminaGlassWell extends StatelessWidget {
             child: IgnorePointer(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(radius),
-                child: BackdropFilter(
-                  enabled: !opaque,
-                  filter: ui.ImageFilter.blur(
-                    sigmaX: theme.highPerformanceMode ? 2 : 4,
-                    sigmaY: theme.highPerformanceMode ? 2 : 4,
-                  ),
-                  child: ColoredBox(
-                    color: backing.withValues(alpha: opaque ? 1 : .16),
-                  ),
-                ),
+                child: frost,
               ),
             ),
           ),

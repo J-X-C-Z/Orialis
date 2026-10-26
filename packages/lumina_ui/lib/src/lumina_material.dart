@@ -44,7 +44,11 @@ class _LuminaCardBoxPainter extends BoxPainter {
     canvas.save();
     canvas.translate(offset.dx, offset.dy);
     double? shoulderWidth;
-    if (decoration.shoulder && decoration.title != null) {
+    if (decoration.shoulder &&
+        !decoration.colors.neumorphic &&
+        decoration.title != null &&
+        size.width >= 160 &&
+        size.height >= 64) {
       final titlePainter =
           TextPainter(
             text: TextSpan(
@@ -169,8 +173,8 @@ class _LuminaMaterial extends CustomPainter {
 
   // Gradient construction is not free; list scrolling repaints many surfaces
   // with the same tint/radius/size, so keep the last few shader builds around.
-  static final Map<String, ui.Gradient> _bodyGradientCache = {};
-  static final Map<String, ui.Gradient> _rimGradientCache = {};
+  static final Map<Object, ui.Gradient> _bodyGradientCache = {};
+  static final Map<Object, ui.Gradient> _rimGradientCache = {};
   static const int _gradientCacheLimit = 64;
   // One small repeated texture, rather than thousands of points regenerated
   // for every intermediate card height during a fold.
@@ -211,8 +215,8 @@ class _LuminaMaterial extends CustomPainter {
   }
 
   static ui.Gradient _cachedGradient(
-    Map<String, ui.Gradient> cache,
-    String key,
+    Map<Object, ui.Gradient> cache,
+    Object key,
     ui.Gradient Function() make,
   ) {
     final hit = cache.remove(key);
@@ -609,6 +613,7 @@ class _LuminaMaterial extends CustomPainter {
     final contact = Color.lerp(base, const Color(0xFF152337), .28)!;
     final height = pressed ? .35 : 1.4;
     final face = path.shift(Offset(0, pressed ? .15 : -.7));
+    final gradientKey = (rect.size, base, colors.accent, colors.darkProgress);
     canvas.save();
     canvas.clipPath(
       Path()
@@ -627,24 +632,32 @@ class _LuminaMaterial extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5
-        ..shader = ui.Gradient.linear(rect.topCenter, rect.bottomCenter, [
-          white.withValues(alpha: colors.toneValue(.38, .12)),
-          wall.withValues(alpha: colors.toneValue(.44, .64)),
-        ]),
+        ..shader = _cachedGradient(
+          _rimGradientCache,
+          ('embedded-wall', gradientKey),
+          () => ui.Gradient.linear(rect.topCenter, rect.bottomCenter, [
+            white.withValues(alpha: colors.toneValue(.38, .12)),
+            wall.withValues(alpha: colors.toneValue(.44, .64)),
+          ]),
+        ),
     );
     canvas.restore();
     canvas.drawPath(
       face,
       Paint()
-        ..shader = ui.Gradient.linear(
-          rect.topLeft,
-          rect.bottomRight,
-          [
-            white.withValues(alpha: colors.toneValue(.15, .065)),
-            wall.withValues(alpha: .025),
-            white.withValues(alpha: colors.toneValue(.055, .025)),
-          ],
-          [0, .48, 1],
+        ..shader = _cachedGradient(
+          _bodyGradientCache,
+          ('embedded-face', gradientKey),
+          () => ui.Gradient.linear(
+            rect.topLeft,
+            rect.bottomRight,
+            [
+              white.withValues(alpha: colors.toneValue(.15, .065)),
+              wall.withValues(alpha: .025),
+              white.withValues(alpha: colors.toneValue(.055, .025)),
+            ],
+            [0, .48, 1],
+          ),
         ),
     );
     canvas.drawPath(
@@ -652,15 +665,19 @@ class _LuminaMaterial extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.05
-        ..shader = ui.Gradient.linear(
-          rect.topLeft,
-          rect.bottomRight,
-          [
-            white.withValues(alpha: colors.toneValue(.86, .40)),
-            wall.withValues(alpha: colors.toneValue(.25, .40)),
-            white.withValues(alpha: colors.toneValue(.55, .20)),
-          ],
-          [0, .58, 1],
+        ..shader = _cachedGradient(
+          _rimGradientCache,
+          ('embedded-rim', gradientKey),
+          () => ui.Gradient.linear(
+            rect.topLeft,
+            rect.bottomRight,
+            [
+              white.withValues(alpha: colors.toneValue(.86, .40)),
+              wall.withValues(alpha: colors.toneValue(.25, .40)),
+              white.withValues(alpha: colors.toneValue(.55, .20)),
+            ],
+            [0, .58, 1],
+          ),
         ),
     );
   }
@@ -741,15 +758,19 @@ class _LuminaMaterial extends CustomPainter {
       path,
       inset && !contrast
           ? (Paint()
-              ..shader = ui.Gradient.linear(
-                rect.topLeft,
-                rect.bottomRight,
-                [
-                  Color.lerp(base, shade, .16)!,
-                  base,
-                  Color.lerp(base, light, .08)!,
-                ],
-                [0, .52, 1],
+              ..shader = _cachedGradient(
+                _bodyGradientCache,
+                ('well', rect.size, base, shade, light),
+                () => ui.Gradient.linear(
+                  rect.topLeft,
+                  rect.bottomRight,
+                  [
+                    Color.lerp(base, shade, .16)!,
+                    base,
+                    Color.lerp(base, light, .08)!,
+                  ],
+                  [0, .52, 1],
+                ),
               ))
           : (Paint()..color = tint),
     );

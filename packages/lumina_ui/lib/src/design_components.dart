@@ -119,26 +119,15 @@ class LuminaSurface extends StatefulWidget {
 
 class _LuminaSurfaceState extends State<LuminaSurface>
     with TickerProviderStateMixin {
-  // Interactive glass needs four springs; plain list rows and high-performance
-  // mode skip controller creation entirely so long lists stay cheap.
-  LuminaSpring? _spring, _driftX, _driftY, _film;
-  Listenable? _glassAnimation;
+  // Only animated taps allocate a controller; navigation owns its own springs.
+  LuminaSpring? _spring;
 
   LuminaSpring get spring => _spring ??= LuminaSpring(vsync: this);
-  LuminaSpring get driftX => _driftX ??= LuminaSpring(vsync: this);
-  LuminaSpring get driftY => _driftY ??= LuminaSpring(vsync: this);
-  LuminaSpring get film => _film ??= LuminaSpring(vsync: this);
-
-  Listenable get glassAnimation =>
-      _glassAnimation ??= Listenable.merge([spring, driftX, driftY, film]);
 
   Offset contact = Offset.zero;
   @override
   void dispose() {
     _spring?.dispose();
-    _driftX?.dispose();
-    _driftY?.dispose();
-    _film?.dispose();
     if (widget.backdrop) {
       LuminaBlurPolicy.instance.chromeListenable.removeListener(_blurChanged);
     }
@@ -224,7 +213,8 @@ class _LuminaSurfaceState extends State<LuminaSurface>
     final backdrop = widget.backdrop && glass && !opaque && blur.enabled;
     final blurFilter = backdrop ? LuminaBlurFilters.forConfig(blur) : null;
     final compensation = glass && !opaque ? blur.compensation : 0.0;
-    final useSprings = widget.onTap != null && !reduced;
+    final useSprings =
+        widget.onTap != null && !reduced && !theme.highPerformanceMode;
     Widget label = widget.child;
     Widget content = Padding(
       padding: widget.padding * theme.data.spacingScale,
@@ -244,7 +234,10 @@ class _LuminaSurfaceState extends State<LuminaSurface>
       content = LayoutBuilder(
         builder: (context, constraints) {
           double? shoulderWidth;
-          if (widget.shoulderTitle != null && constraints.hasBoundedWidth) {
+          if (widget.shoulder &&
+              !neumorphic &&
+              widget.shoulderTitle != null &&
+              constraints.hasBoundedWidth) {
             final painter =
                 TextPainter(
                   text: TextSpan(

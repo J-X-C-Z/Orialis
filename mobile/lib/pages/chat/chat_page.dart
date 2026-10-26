@@ -3017,6 +3017,7 @@ class _MessageBubble extends StatelessWidget {
       );
     }
     final attachments = _decodeAttachments(message.attachmentsJson);
+    final messageTime = _formatMessageTime(message.createdAt);
     final pending = message.syncStatus != 'synced';
     final cloudConfirmed = !pending && message.remoteVersion > 0;
     final colors = LuminaTheme.of(context).colors;
@@ -3041,7 +3042,7 @@ class _MessageBubble extends StatelessWidget {
     final canRetry = isUser && pending && !sending && onRetry != null;
     final metadata = Semantics(
       key: ValueKey('message-status-${message.id}'),
-      label: '${_formatMessageTime(message.createdAt)} $statusLabel',
+      label: '$messageTime $statusLabel',
       button: canRetry,
       excludeSemantics: true,
       child: LuminaTap(
@@ -3051,7 +3052,7 @@ class _MessageBubble extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              _formatMessageTime(message.createdAt),
+              messageTime,
               style: LuminaTheme.of(context).textTheme.labelSmall
                   .copyWith(color: colors.muted, fontSize: 11),
             ),
@@ -3136,6 +3137,7 @@ String _formatMessageTime(String value) {
 }
 
 List<Map<String, dynamic>> _decodeAttachments(String value) {
+  if (value == '[]') return const [];
   try {
     final decoded = jsonDecode(value) as List<dynamic>;
     return decoded

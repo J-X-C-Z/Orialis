@@ -20,6 +20,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
+import android.os.Process
 import android.os.ResultReceiver
 import android.util.DisplayMetrics
 import android.view.WindowManager
@@ -28,7 +29,7 @@ import android.widget.Toast
 /** One consent token, one virtual display, one saved screenshot; never reads app nodes. */
 class MemoryProjectionService : Service() {
     companion object { @Volatile var capturing = false; private set }
-    private val thread = HandlerThread("orialis-screen-memory")
+    private val thread = HandlerThread("orialis-screen-memory", Process.THREAD_PRIORITY_BACKGROUND)
     private lateinit var handler: Handler
     private val main = Handler(Looper.getMainLooper())
     private var projection: MediaProjection? = null

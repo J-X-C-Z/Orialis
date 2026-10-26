@@ -39,7 +39,7 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
     final neumorphicGlass = neumorphic && theme.data.neumorphicGlass;
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final showNavigation = visible && keyboardInset == 0;
-    Widget itemsAt(double position) => Row(
+    Widget itemsAt(Animation<double> position) => Row(
       children: [
         for (var i = 0; i < destinations.length; i++)
           Expanded(
@@ -141,7 +141,7 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
               longTravel: true,
               backdrop: false,
               onDragEnd: onDragEnd ?? onDestinationSelected,
-              child: itemsAt(selectedIndex.toDouble()),
+              child: itemsAt(AlwaysStoppedAnimation(selectedIndex.toDouble())),
             ),
     );
     final navigationBar = RepaintBoundary(
@@ -207,7 +207,7 @@ class _NeumorphicNavigationSelection extends StatefulWidget {
   final List<bool> enabled;
   final bool glass;
   final ValueChanged<int> onSelectionChanged;
-  final Widget Function(double position) builder;
+  final Widget Function(Animation<double> position) builder;
 
   @override
   State<_NeumorphicNavigationSelection> createState() =>
@@ -359,15 +359,15 @@ class _NeumorphicNavigationSelectionState
     onLongPressCancel: _cancelDrag,
     child: AnimatedBuilder(
       animation: _position,
-      builder: (context, _) {
-        final content = widget.builder(_position.value);
-        if (!widget.glass || _count == 0) return content;
+      child: widget.builder(_position),
+      builder: (context, content) {
+        if (!widget.glass || _count == 0) return content!;
         return OrialisNavigationGlassLens(
           position: _position.value,
           count: _count,
           child: Stack(
             fit: StackFit.passthrough,
-            children: [_movingWell(), content],
+            children: [_movingWell(), content!],
           ),
         );
       },
@@ -390,7 +390,7 @@ class _EtchedNavigationLabel extends StatelessWidget {
     required this.child,
   });
   final int index;
-  final double position;
+  final Animation<double> position;
   final bool enabled;
   final Widget child;
 
@@ -398,19 +398,25 @@ class _EtchedNavigationLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     final reduced = LuminaTheme.motionReducedOf(context);
     final active = enabled && !reduced && !MediaQuery.highContrastOf(context);
-    final distance = position - index;
-    final weight = active ? math.max(0.0, 1 - distance.abs()) : 0.0;
-    final depth = weight * weight * (3 - 2 * weight);
-    final transform = Matrix4.identity()
-      ..setEntry(0, 1, distance.clamp(-1.0, 1.0) * depth * .035)
-      ..translateByDouble(0, depth * 1.8, 0, 1)
-      ..scaleByDouble(1 - depth * .045, 1 - depth * .065, 1, 1);
-    return Transform(
-      key: ValueKey('nav-engraving-$index'),
-      alignment: Alignment.center,
-      transform: transform,
-      transformHitTests: false,
+    return AnimatedBuilder(
+      animation: position,
       child: child,
+      builder: (context, label) {
+        final distance = position.value - index;
+        final weight = active ? math.max(0.0, 1 - distance.abs()) : 0.0;
+        final depth = weight * weight * (3 - 2 * weight);
+        final transform = Matrix4.identity()
+          ..setEntry(0, 1, distance.clamp(-1.0, 1.0) * depth * .035)
+          ..translateByDouble(0, depth * 1.8, 0, 1)
+          ..scaleByDouble(1 - depth * .045, 1 - depth * .065, 1, 1);
+        return Transform(
+          key: ValueKey('nav-engraving-$index'),
+          alignment: Alignment.center,
+          transform: transform,
+          transformHitTests: false,
+          child: label,
+        );
+      },
     );
   }
 }

@@ -6,13 +6,18 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.os.Process
 import android.provider.OpenableColumns
 import android.widget.Toast
 import java.io.File
 import java.util.concurrent.Executors
 
 class MemoryShareActivity : Activity() {
-    companion object { private val worker = Executors.newSingleThreadExecutor() }
+    companion object {
+        private val worker = Executors.newSingleThreadExecutor { task ->
+            Thread({ Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND); task.run() }, "orialis-share-memory")
+        }
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState != null) { finish(); return }

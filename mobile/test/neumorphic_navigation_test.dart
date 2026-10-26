@@ -91,6 +91,7 @@ void main() {
       expect(find.byType(OrialisNavigationGlassFrame), findsOneWidget);
       expect(find.byType(OrialisNavigationGlassLens), findsOneWidget);
 
+      final originalLabel = tester.widget<Text>(find.text('Chat'));
       final raised = _engraving(tester, 0).transform;
       expect(raised.entry(1, 1), lessThan(1));
       expect(raised.entry(1, 3), greaterThan(0));
@@ -101,6 +102,10 @@ void main() {
       await drag.moveTo(tester.getCenter(find.text('Chat')));
       await tester.pump();
       expect(nav.selected(), 0);
+      expect(
+        identical(originalLabel, tester.widget<Text>(find.text('Chat'))),
+        isTrue,
+      );
       expect(tester.getRect(recess), tester.getRect(slider));
       expect(_engraving(tester, 0).transform.entry(1, 1), closeTo(1, .001));
       expect(_engraving(tester, 0).transform.entry(1, 3), closeTo(0, .001));
