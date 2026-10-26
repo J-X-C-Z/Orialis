@@ -27,7 +27,6 @@ The Android package is `1.1.2+22` with package ID `top.jxcz.orialis`. It retains
 Phone shell navigation now:
 
 - switches immediately, without a full-screen slide/fade animation;
-- lays out and paints only the active branch;
 - keeps inactive branch widgets, navigator state, drafts, and scroll positions mounted;
 - pauses hidden branch tickers, pointer handling, focus, semantics, and painting;
 - preserves the bottom navigation's own recess/glass-lens motion.
