@@ -1,5 +1,4 @@
 import 'package:flutter/physics.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
 import 'app_theme.dart';
@@ -164,21 +163,24 @@ class _LuminaBranchTransitionState extends State<LuminaBranchTransition>
 
   @override
   Widget build(BuildContext context) {
-    final branches = _LuminaActiveBranch(
-      activeIndex: widget.index,
+    final branches = Stack(
+      fit: StackFit.expand,
       children: [
         for (var i = 0; i < widget.children.length; i++)
-          KeyedSubtree(
+          Positioned.fill(
             key: ValueKey(i),
-            child: TickerMode(
-              enabled: i == widget.index,
-              child: IgnorePointer(
-                ignoring: i != widget.index,
-                child: ExcludeFocus(
-                  excluding: i != widget.index,
-                  child: ExcludeSemantics(
+            child: Offstage(
+              offstage: i != widget.index,
+              child: TickerMode(
+                enabled: i == widget.index,
+                child: IgnorePointer(
+                  ignoring: i != widget.index,
+                  child: ExcludeFocus(
                     excluding: i != widget.index,
-                    child: RepaintBoundary(child: widget.children[i]),
+                    child: ExcludeSemantics(
+                      excluding: i != widget.index,
+                      child: RepaintBoundary(child: widget.children[i]),
+                    ),
                   ),
                 ),
               ),
@@ -194,120 +196,4 @@ class _LuminaBranchTransitionState extends State<LuminaBranchTransition>
       child: SlideTransition(position: position, child: branches),
     );
   }
-}
-
-class _LuminaActiveBranch extends MultiChildRenderObjectWidget {
-  const _LuminaActiveBranch({
-    required this.activeIndex,
-    required super.children,
-  });
-
-  final int activeIndex;
-
-  @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _RenderLuminaActiveBranch(activeIndex);
-
-  @override
-  MultiChildRenderObjectElement createElement() =>
-      _LuminaActiveBranchElement(this);
-
-  @override
-  void updateRenderObject(
-    BuildContext context,
-    _RenderLuminaActiveBranch renderObject,
-  ) {
-    renderObject.activeIndex = activeIndex;
-  }
-}
-
-class _LuminaActiveBranchElement extends MultiChildRenderObjectElement {
-  _LuminaActiveBranchElement(_LuminaActiveBranch super.widget);
-
-  @override
-  _LuminaActiveBranch get widget => super.widget as _LuminaActiveBranch;
-
-  @override
-  void debugVisitOnstageChildren(ElementVisitor visitor) {
-    var index = 0;
-    for (final child in children) {
-      if (index++ == widget.activeIndex) {
-        visitor(child);
-        return;
-      }
-    }
-  }
-}
-
-class _LuminaBranchParentData extends ContainerBoxParentData<RenderBox> {}
-
-class _RenderLuminaActiveBranch extends RenderBox
-    with
-        ContainerRenderObjectMixin<RenderBox, _LuminaBranchParentData>,
-        RenderBoxContainerDefaultsMixin<RenderBox, _LuminaBranchParentData> {
-  _RenderLuminaActiveBranch(this._activeIndex);
-
-  int _activeIndex;
-
-  int get activeIndex => _activeIndex;
-
-  set activeIndex(int value) {
-    if (_activeIndex == value) return;
-    _activeIndex = value;
-    markNeedsLayout();
-  }
-
-  RenderBox? get _activeChild {
-    var index = 0;
-    var child = firstChild;
-    while (child != null && index < _activeIndex) {
-      final parentData = child.parentData! as _LuminaBranchParentData;
-      child = parentData.nextSibling;
-      index++;
-    }
-    return child;
-  }
-
-  @override
-  void setupParentData(RenderBox child) {
-    if (child.parentData is! _LuminaBranchParentData) {
-      child.parentData = _LuminaBranchParentData();
-    }
-  }
-
-  @override
-  void performLayout() {
-    final child = _activeChild;
-    if (child == null) {
-      size = constraints.smallest;
-      return;
-    }
-    child.layout(constraints, parentUsesSize: true);
-    size = constraints.constrain(child.size);
-  }
-
-  @override
-  Size computeDryLayout(BoxConstraints constraints) {
-    final child = _activeChild;
-    if (child == null) return constraints.smallest;
-    return constraints.constrain(child.getDryLayout(constraints));
-  }
-
-  @override
-  void paint(PaintingContext context, Offset offset) {
-    _activeChild?.paint(context, offset);
-  }
-
-  @override
-  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
-      _activeChild?.hitTest(result, position: position) ?? false;
-
-  @override
-  void visitChildrenForSemantics(void Function(RenderObject child) visitor) {
-    final child = _activeChild;
-    if (child != null) visitor(child);
-  }
-
-  @override
-  void applyPaintTransform(RenderBox child, Matrix4 transform) {}
 }
