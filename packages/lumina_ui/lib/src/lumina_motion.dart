@@ -209,11 +209,33 @@ class _LuminaActiveBranch extends MultiChildRenderObjectWidget {
       _RenderLuminaActiveBranch(activeIndex);
 
   @override
+  MultiChildRenderObjectElement createElement() =>
+      _LuminaActiveBranchElement(this);
+
+  @override
   void updateRenderObject(
     BuildContext context,
     _RenderLuminaActiveBranch renderObject,
   ) {
     renderObject.activeIndex = activeIndex;
+  }
+}
+
+class _LuminaActiveBranchElement extends MultiChildRenderObjectElement {
+  _LuminaActiveBranchElement(_LuminaActiveBranch super.widget);
+
+  @override
+  _LuminaActiveBranch get widget => super.widget as _LuminaActiveBranch;
+
+  @override
+  void debugVisitOnstageChildren(ElementVisitor visitor) {
+    var index = 0;
+    for (final child in children) {
+      if (index++ == widget.activeIndex) {
+        visitor(child);
+        return;
+      }
+    }
   }
 }
 
