@@ -1,4 +1,10 @@
-const interactiveResponseTypes = {'form', 'table', 'sources', 'diff'};
+const interactiveResponseTypes = {
+  'form',
+  'table',
+  'sources',
+  'diff',
+  'accordion',
+};
 
 bool _text(Object? value, int limit, {bool empty = false}) =>
     value is String &&
@@ -136,6 +142,8 @@ bool validateInteractiveResponseBlock(Map<String, dynamic> raw) {
             !_text(item['after'], 4000, empty: true)) {
           return false;
         }
+      case 'accordion':
+        if (!_text(item['content'], 4000)) return false;
     }
   }
   return true;
@@ -162,17 +170,22 @@ String? responseFormError(
   Map<String, Object?> values,
 ) {
   for (final item in data['items'] as List) {
-    final value = values[item['id']];
-    final empty =
-        value == null ||
-        (value is String && value.trim().isEmpty) ||
-        (value is List && value.isEmpty);
-    if (item['required'] == true && empty) return '请填写${item['label']}';
-    if (!empty &&
-        item['kind'] == 'date' &&
-        (value is! String || !responseDateIsValid(value))) {
-      return '${item['label']}请使用有效日期（YYYY-MM-DD）';
-    }
+    final error = responseFormFieldError(item, values[item['id']]);
+    if (error != null) return error;
+  }
+  return null;
+}
+
+String? responseFormFieldError(Map<String, dynamic> item, Object? value) {
+  final empty =
+      value == null ||
+      (value is String && value.trim().isEmpty) ||
+      (value is List && value.isEmpty);
+  if (item['required'] == true && empty) return '请填写${item['label']}';
+  if (!empty &&
+      item['kind'] == 'date' &&
+      (value is! String || !responseDateIsValid(value))) {
+    return '${item['label']}请使用有效日期（YYYY-MM-DD）';
   }
   return null;
 }

@@ -7,6 +7,7 @@ import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../domain/response_ui.dart';
+import '../../../app/design/chat_symbols.dart';
 import 'response_ui_view.dart';
 
 enum MarkdownBlockType {
@@ -428,6 +429,10 @@ class _BlockView extends StatelessWidget {
   final ValueChanged<String>? onPromptSelected;
   final String? actionScope;
 
+  Widget _heading(TextStyle style) => allowResponseUi
+      ? _headingWithSymbol(block.lines.single, style)
+      : _InlineText(text: block.lines.single, style: style);
+
   @override
   Widget build(BuildContext context) {
     switch (block.type) {
@@ -439,10 +444,7 @@ class _BlockView extends StatelessWidget {
         };
         return Padding(
           padding: const EdgeInsets.only(top: LuminaSpacing.compact, bottom: 4),
-          child: _InlineText(
-            text: block.lines.single,
-            style: style.copyWith(fontWeight: FontWeight.w700),
-          ),
+          child: _heading(style.copyWith(fontWeight: FontWeight.w700)),
         );
       case MarkdownBlockType.code:
         if (allowResponseUi && block.language == 'orialis-ui') {
@@ -625,6 +627,29 @@ class _BlockView extends StatelessWidget {
         );
     }
   }
+}
+
+Widget _headingWithSymbol(String text, TextStyle style) {
+  final match = RegExp(r'^(\S+)\s+(.+)$').firstMatch(text);
+  final kind = match == null ? null : chatSymbolForEmoji(match.group(1)!);
+  if (kind == null) return _InlineText(text: text, style: style);
+  return Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Padding(
+        padding: const EdgeInsets.only(top: 2, right: 8),
+        child: ChatSymbol(
+          kind,
+          size: style.fontSize ?? 22,
+          animated: false,
+          semanticLabel: match!.group(1),
+        ),
+      ),
+      Expanded(
+        child: _InlineText(text: match.group(2)!, style: style),
+      ),
+    ],
+  );
 }
 
 class _InlineText extends StatefulWidget {

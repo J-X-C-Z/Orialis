@@ -20,6 +20,30 @@ import '../../pages/profile/system_settings_page.dart';
 import '../../news/news_app.dart';
 import '../../features/web_services/web_services_page.dart';
 
+StatefulShellBranch _chatBranch() => StatefulShellBranch(
+  routes: [
+    GoRoute(
+      path: '/chat',
+      builder: (context, state) => Consumer(
+        builder: (context, ref, _) {
+          final conversationId =
+              state.uri.queryParameters['conversationId'] ?? 'default';
+          return ChatPage(
+            key: ValueKey((
+              ref.watch(desktopDatabaseNameProvider),
+              conversationId,
+            )),
+            repository: ref.watch(chatRepositoryProvider),
+            conversationId: conversationId,
+            messageId: state.uri.queryParameters['messageId'],
+            shareId: state.uri.queryParameters['shareId'],
+          );
+        },
+      ),
+    ),
+  ],
+);
+
 GoRouter buildRouter({bool desktop = false}) {
   return GoRouter(
     initialLocation: '/today',
@@ -74,31 +98,7 @@ GoRouter buildRouter({bool desktop = false}) {
                 ),
               ],
             ),
-          if (!desktop)
-            StatefulShellBranch(
-              routes: [
-                GoRoute(
-                  path: '/chat',
-                  builder: (context, state) => Consumer(
-                    builder: (context, ref, _) {
-                      final conversationId =
-                          state.uri.queryParameters['conversationId'] ??
-                          'default';
-                      return ChatPage(
-                        key: ValueKey((
-                          ref.watch(desktopDatabaseNameProvider),
-                          conversationId,
-                        )),
-                        repository: ref.watch(chatRepositoryProvider),
-                        conversationId: conversationId,
-                        messageId: state.uri.queryParameters['messageId'],
-                        shareId: state.uri.queryParameters['shareId'],
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
+          if (!desktop) _chatBranch(),
           StatefulShellBranch(
             routes: [
               GoRoute(
@@ -160,6 +160,7 @@ GoRouter buildRouter({bool desktop = false}) {
                 ),
               ],
             ),
+            _chatBranch(),
           ],
         ],
       ),

@@ -1,6 +1,8 @@
 """The host receives generation guidance through its supported system hook."""
 import asyncio
+from datetime import date
 import json
+import math
 from pathlib import Path
 import re
 from types import SimpleNamespace
@@ -8,13 +10,13 @@ import unittest
 from unittest.mock import Mock, patch
 from xml.etree import ElementTree
 
-from ..adapter import register
 from ..response_ui import PLATFORM_HINT, RESPONSE_UI
 from ..tools import handle_capabilities
 
 
 class ResponseUiTests(unittest.TestCase):
     def test_registered_platform_hint_reaches_actual_hermes_prompt_hook(self):
+        from ..adapter import register
         from agent.system_prompt import platform_hint
         from gateway.platform_registry import platform_registry
 
@@ -38,6 +40,8 @@ class ResponseUiTests(unittest.TestCase):
         examples.append(fixture.read_text(encoding='utf-8'))
         extended_fixture = fixture.with_name('response-ui-v1.extended.example.json')
         examples.append(extended_fixture.read_text(encoding='utf-8'))
+        board_fixture = fixture.with_name('response-ui-v1.board.example.json')
+        examples.append(board_fixture.read_text(encoding='utf-8'))
         for raw in examples:
             doc = json.loads(raw)
             self.assertEqual(doc['version'], RESPONSE_UI['version'])
@@ -64,9 +68,72 @@ class ResponseUiTests(unittest.TestCase):
                 for item in block['items']:
                     self.assertTrue(item['label'].strip())
                     if block['type'] == 'plot':
+                        self.assertIn(block['kind'], RESPONSE_UI['plot_kinds'])
                         self.assertLessEqual(len(item['points']), RESPONSE_UI['limits']['points'])
                     if block['type'] == 'math':
                         self.assertLessEqual(len(item['source']), RESPONSE_UI['limits']['math_source'])
+
+    def test_board_fixture_covers_additions_with_authored_bounded_data(self):
+        fixture = Path(__file__).resolve().parents[4] / 'docs/contracts/response-ui-v1.board.example.json'
+        doc = json.loads(fixture.read_text(encoding='utf-8'))
+        blocks = doc['blocks']
+        self.assertEqual([block['type'] for block in blocks],
+                         ['progress', 'heatmap', 'accordion', 'plot', 'plot', 'plot'])
+        self.assertEqual({b['kind'] for b in blocks if b['type'] == 'plot'},
+                         {'area', 'bar', 'radar'})
+        self.assertIn('演示数据', doc['fallback'])
+        self.assertEqual(blocks[0]['style'], 'ring')
+        self.assertTrue(any('max' not in item for item in blocks[0]['items']))
+        for item in blocks[0]['items']:
+            maximum = item.get('max', 100)
+            self.assertTrue(math.isfinite(maximum) and 0 < maximum <= 1e6)
+            self.assertTrue(math.isfinite(item['value']) and 0 <= item['value'] <= maximum)
+            self.assertLessEqual(len(item.get('detail', '')), 240)
+        for item in blocks[1]['items']:
+            self.assertRegex(item['date'], r'^\d{4}-\d{2}-\d{2}$')
+            self.assertEqual(date.fromisoformat(item['date']).isoformat(), item['date'])
+            self.assertTrue(math.isfinite(item['value']) and 0 <= item['value'] <= 1e6)
+        self.assertEqual(len({item['date'] for item in blocks[1]['items']}),
+                         len(blocks[1]['items']))
+        for item in blocks[2]['items']:
+            self.assertTrue(item['content'].strip())
+            self.assertLessEqual(len(item['content']), 4000)
+        radar = next(block for block in blocks if block.get('kind') == 'radar')
+        axes = [p['x'] for p in radar['items'][0]['points']]
+        self.assertGreaterEqual(len(axes), 3)
+        self.assertLessEqual(len(axes), RESPONSE_UI['limits']['points'])
+        for series in radar['items']:
+            self.assertEqual([p['x'] for p in series['points']], axes)
+            self.assertTrue(all(math.isfinite(p['y']) and 0 <= p['y'] <= 1e6
+                                for p in series['points']))
+
+    def test_server_and_plugin_discovery_do_not_drift(self):
+        health = Path(__file__).resolve().parents[4] / 'orialis-server/src/health.rs'
+        match = re.search(r'response_ui: serde_json::json!\((\{.*?\})\),',
+                          health.read_text(encoding='utf-8'), re.S)
+        self.assertIsNotNone(match)
+        # This discovery literal is JSON with Rust's permitted trailing commas.
+        server = json.loads(re.sub(r',(\s*[}\]])', r'\1', match.group(1)))
+        self.assertEqual(server, RESPONSE_UI)
+
+    def test_board_guidance_keeps_client_limits_and_confirmation_boundary(self):
+        self.assertEqual(len(RESPONSE_UI['block_types']), 20)
+        self.assertEqual(RESPONSE_UI['plot_kinds'],
+                         ['line', 'scatter', 'pie', 'area', 'bar', 'radar'])
+        self.assertEqual(RESPONSE_UI['version'], 1)
+        self.assertEqual(RESPONSE_UI['limits']['blocks'], 12)
+        self.assertEqual(RESPONSE_UI['limits']['json_bytes'], 32768)
+        for instruction in (
+            'multiple separate closed fences',
+            'Output only\nthe client-supported types',
+            'Never fabricate quota, task completion, or live progress',
+            'observed or user-provided data',
+            'author-supplied data or verified service state',
+            'does not create, send, save or execute anything',
+            'the user must open and confirm each card',
+            'do not automatically send',
+        ):
+            self.assertIn(instruction, PLATFORM_HINT)
 
     def test_capabilities_distinguish_plugin_format_from_server_discovery(self):
         with patch.dict('os.environ', {'ORIALIS_SERVER_URL': 'https://example.test'}), \

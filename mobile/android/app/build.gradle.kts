@@ -11,6 +11,8 @@ val newsApp = providers.gradleProperty("newsApp").map(String::toBoolean).getOrEl
 val jointAcceptance = providers.gradleProperty("jointAcceptance").map(String::toBoolean).getOrElse(false)
 // Disposable acceptance package with separate Android storage.
 val systemAcceptance = providers.gradleProperty("systemAcceptance").map(String::toBoolean).getOrElse(false)
+// Side-by-side UI experiment; keeps the production app and its storage intact.
+val neumorphicApp = providers.gradleProperty("neumorphicApp").map(String::toBoolean).getOrElse(false)
 // Public Xiaomi identifiers, never secrets. Opt in only for the registered production package.
 val xiaomiAppId = providers.gradleProperty("xiaomiAppId").getOrElse("")
 val xiaomiFocusBusiness = providers.gradleProperty("xiaomiFocusBusiness").getOrElse("")
@@ -41,20 +43,22 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = when {
+            neumorphicApp -> "top.jxcz.orialis.neumorphic"
             newsApp -> "top.jxcz.orialis.news"
             systemAcceptance -> "top.jxcz.orialis.systemacceptance"
             jointAcceptance -> "top.jxcz.orialis.jointacceptance"
             else -> "top.jxcz.orialis"
         }
         manifestPlaceholders["appLabel"] = when {
+            neumorphicApp -> "Orialis 轻拟态"
             newsApp -> "Orialis 资讯"
             systemAcceptance -> "Orialis 系统验收"
             jointAcceptance -> "Orialis 联合验收"
             else -> "Orialis"
         }
         manifestPlaceholders["appIcon"] = if (newsApp) "@mipmap/ic_launcher_news" else "@mipmap/ic_launcher"
-        manifestPlaceholders["xiaomiAppId"] = if (newsApp || jointAcceptance || systemAcceptance) "" else xiaomiAppId
-        manifestPlaceholders["xiaomiFocusBusiness"] = if (newsApp || jointAcceptance || systemAcceptance) "" else xiaomiFocusBusiness
+        manifestPlaceholders["xiaomiAppId"] = if (newsApp || jointAcceptance || systemAcceptance || neumorphicApp) "" else xiaomiAppId
+        manifestPlaceholders["xiaomiFocusBusiness"] = if (newsApp || jointAcceptance || systemAcceptance || neumorphicApp) "" else xiaomiFocusBusiness
         manifestPlaceholders["xiaomiDebugBuild"] = false
         manifestPlaceholders["newsCleartextTraffic"] = "false"
         // You can update the following values to match your application needs.

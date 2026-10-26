@@ -13,6 +13,8 @@ class LuminaThemeData {
     this.radiusScale = 1,
     this.motionScale = 1,
     this.liquidGlass = false,
+    this.neumorphic = false,
+    this.neumorphicGlass = false,
   }) : assert(fontScale > 0),
        assert(spacingScale >= .8),
        assert(radiusScale > 0),
@@ -22,6 +24,12 @@ class LuminaThemeData {
 
   /// Clear, grain-free surfaces with diffuse shadows. Opt-in per application.
   final bool liquidGlass;
+
+  /// Opaque, same-material surfaces with paired soft shadows.
+  final bool neumorphic;
+
+  /// A frosted well and clear cover for interactive controls.
+  final bool neumorphicGlass;
 }
 
 /// Complete tonal families: raised body, recess, glass accent and text are
@@ -41,9 +49,14 @@ enum LuminaCardPalette {
 }
 
 class LuminaColors {
-  const LuminaColors({this.dark = false, this.tint, double? darkProgress})
-    : darkProgress = darkProgress ?? (dark ? 1 : 0);
+  const LuminaColors({
+    this.dark = false,
+    this.tint,
+    this.neumorphic = false,
+    double? darkProgress,
+  }) : darkProgress = darkProgress ?? (dark ? 1 : 0);
   final bool dark;
+  final bool neumorphic;
   final Color? tint;
   final double darkProgress;
   Color tone(Color light, Color dark) => Color.lerp(light, dark, darkProgress)!;
@@ -51,26 +64,46 @@ class LuminaColors {
       light + (dark - light) * darkProgress;
   Color _tone(Color base, double amount) =>
       tint == null ? base : Color.lerp(base, tint, amount)!;
-  Color get ink => tone(LuminaBaseColors.ink, LuminaTokenDark.ink);
-  Color get paper => tone(LuminaBaseColors.paper, LuminaTokenDark.paper);
+  Color get ink => neumorphic
+      ? _tone(tone(const Color(0xFF303947), const Color(0xFFE4E9EF)), .08)
+      : tone(LuminaBaseColors.ink, LuminaTokenDark.ink);
+  Color get paper => neumorphic
+      ? tone(const Color(0xFFE1E4E8), const Color(0xFF292F36))
+      : tone(LuminaBaseColors.paper, LuminaTokenDark.paper);
   Color get canvas => paper;
-  Color get surface =>
-      _tone(tone(LuminaBaseColors.surface, LuminaTokenDark.surface), .10);
-  Color get raisedSurface =>
-      _tone(tone(const Color(0xFFEDF2F7), const Color(0xFF283746)), .13);
-  Color get recessedSurface =>
-      _tone(tone(const Color(0xFFE1E8F1), const Color(0xFF141E2A)), .23);
+  Color get surface => neumorphic
+      ? _tone(paper, tint == null ? .05 : .20)
+      : _tone(tone(LuminaBaseColors.surface, LuminaTokenDark.surface), .10);
+  Color get raisedSurface => neumorphic
+      ? surface
+      : _tone(tone(const Color(0xFFEDF2F7), const Color(0xFF283746)), .13);
+  Color get recessedSurface => neumorphic
+      ? surface
+      : _tone(tone(const Color(0xFFE1E8F1), const Color(0xFF141E2A)), .23);
   Color get accent => tint == null
-      ? tone(LuminaBaseColors.accent, LuminaTokenDark.accent)
+      ? neumorphic
+            ? tone(const Color(0xFF385DAD), const Color(0xFFACC4FF))
+            : tone(LuminaBaseColors.accent, LuminaTokenDark.accent)
       : tone(
           Color.lerp(tint, LuminaBaseColors.ink, .25)!,
           Color.lerp(tint, const Color(0xFFFFFFFF), .40)!,
         );
-  Color get accentSoft =>
-      _tone(tone(LuminaBaseColors.accentSoft, LuminaTokenDark.accentSoft), .30);
-  Color get muted => tone(LuminaBaseColors.muted, LuminaTokenDark.muted);
+  Color get accentSoft => neumorphic
+      ? _tone(
+          tone(const Color(0xFFCFD9EA), const Color(0xFF35435C)),
+          tint == null ? .12 : .24,
+        )
+      : _tone(
+          tone(LuminaBaseColors.accentSoft, LuminaTokenDark.accentSoft),
+          .30,
+        );
+  Color get muted => neumorphic
+      ? _tone(tone(const Color(0xFF4C5663), const Color(0xFFB2BAC7)), .08)
+      : tone(LuminaBaseColors.muted, LuminaTokenDark.muted);
   Color get danger => tone(LuminaBaseColors.danger, LuminaTokenDark.danger);
-  Color get outline => tone(LuminaBaseColors.outline, LuminaTokenDark.outline);
+  Color get outline => neumorphic
+      ? _tone(tone(LuminaBaseColors.outline, LuminaTokenDark.outline), .24)
+      : tone(LuminaBaseColors.outline, LuminaTokenDark.outline);
 }
 
 class LuminaTextTheme {
@@ -83,7 +116,7 @@ class LuminaTextTheme {
   double _size(double base) => base * data.fontScale;
   // A restrained rim suggests lettering cut into the glass. The principal
   // glyph remains fully opaque, including in dark and high-contrast themes.
-  List<Shadow> get _etched => data.liquidGlass
+  List<Shadow> get _etched => data.liquidGlass || data.neumorphic
       ? const []
       : [
           Shadow(
@@ -171,6 +204,7 @@ class LuminaTheme extends InheritedWidget {
     dark: brightness == Brightness.dark,
     tint: tint,
     darkProgress: darkProgress,
+    neumorphic: data.neumorphic,
   );
   LuminaTextTheme get textTheme => LuminaTextTheme(colors, data);
   static bool motionReducedOf(BuildContext context) =>

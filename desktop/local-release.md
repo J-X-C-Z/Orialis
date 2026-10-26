@@ -1,7 +1,7 @@
 # Local macOS release
 
 The product path owner runs this workflow after implementing `mobile/macos` and
-an explicit desktop entry that excludes chat startup and synchronization.
+the explicit desktop entry `lib/main_desktop.dart`. In the 2026-10-25 UI test branch, the desktop entry also supports chat, Intelligent UI and summary synchronization, as explicitly requested by the user.
 The wrapper does not create a host or choose a default mobile entry.
 
 From the authoritative repository root:
@@ -28,7 +28,7 @@ or notarization is performed by this wrapper.
 For local installation, extract the archive in a writable location, then open
 the extracted application in Finder. Retain the build evidence with the archive.
 Before handing it to the user, verify actual launch, offline task creation and
-restart persistence, account/session behavior, and absence of chat requests.
+restart persistence, account/session behavior, desktop chat delivery and summary folding.
 The full approved product matrix and real phone-to-desktop sync require separate
 acceptance evidence. Compilation and signature verification alone do not satisfy
 those checks.

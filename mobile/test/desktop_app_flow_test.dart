@@ -9,6 +9,7 @@ import 'package:orialis_mobile/core/config/app_config.dart';
 import 'package:orialis_mobile/core/database/app_database.dart';
 import 'package:orialis_mobile/core/sync/sync_coordinator.dart';
 import 'package:orialis_mobile/core/sync/sync_engine.dart';
+import 'package:orialis_mobile/features/chat/data/chat_repository.dart';
 import 'package:orialis_mobile/news/news_data.dart';
 
 class _DesktopNewsRepository extends NewsRepository {
@@ -70,17 +71,19 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
       final database = AppDatabase(executor: NativeDatabase.memory());
+      final chatRepository = ChatRepository(database: database);
       final config = _LocalConfig();
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             databaseProvider.overrideWithValue(database),
+            chatRepositoryProvider.overrideWithValue(chatRepository),
             desktopModeProvider.overrideWithValue(true),
             appConfigProvider.overrideWithValue(config),
             syncCoordinatorProvider.overrideWith(
               (ref) => _OfflineSync(
                 realtime: ref.read(realtimeClientProvider),
-                chatRepository: null,
+                chatRepository: chatRepository,
               ),
             ),
           ],
@@ -122,15 +125,14 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final database = AppDatabase(executor: NativeDatabase.memory());
+      final chatRepository = ChatRepository(database: database);
       final config = _LocalConfig();
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             databaseProvider.overrideWithValue(database),
+            chatRepositoryProvider.overrideWithValue(chatRepository),
             desktopModeProvider.overrideWithValue(true),
-            chatRepositoryProvider.overrideWith(
-              (ref) => throw StateError("Desktop must not create chat"),
-            ),
             appConfigProvider.overrideWithValue(config),
             newsConfigProvider.overrideWithValue(config),
             newsRepositoryProvider.overrideWithValue(
@@ -139,7 +141,7 @@ void main() {
             syncCoordinatorProvider.overrideWith(
               (ref) => _OfflineSync(
                 realtime: ref.read(realtimeClientProvider),
-                chatRepository: null,
+                chatRepository: chatRepository,
               ),
             ),
           ],
@@ -178,7 +180,6 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
       }
-      expect(find.text('聊天'), findsNothing);
       await tester.tap(find.text('项目').last);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
@@ -243,6 +244,8 @@ void main() {
           'Project',
           '我的',
         ]) {
+          await tester.ensureVisible(find.text(destination).last);
+          await tester.pumpAndSettle();
           await tester.tap(find.text(destination).last);
           await tester.pumpAndSettle();
           expect(

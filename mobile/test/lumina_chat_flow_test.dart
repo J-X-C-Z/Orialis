@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:orialis_mobile/app/app.dart';
+import 'package:orialis_mobile/app/design/chat_symbols.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/core/config/app_config.dart';
 import 'package:orialis_mobile/core/database/app_database.dart';
@@ -172,8 +173,18 @@ void main() {
       );
       final position = tester.state<ScrollableState>(scrollable.first).position;
       expect(position.extentAfter, lessThan(1));
-      expect(find.textContaining('↑'), findsWidgets);
-      expect(find.textContaining('✓'), findsNothing);
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is ChatSymbol && w.kind == ChatSymbolKind.send,
+        ),
+        findsWidgets,
+      );
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is ChatSymbol && w.kind == ChatSymbolKind.success,
+        ),
+        findsNothing,
+      );
       await tester.drag(find.byType(ListView), const Offset(0, 450));
       await tester.pumpAndSettle();
       final before = position.pixels;
@@ -221,7 +232,13 @@ void main() {
         '离线消息不会丢失',
       );
       final before = h.sync.attempts;
-      await tester.tap(find.text('!'));
+      await tester.tap(
+        find
+            .byWidgetPredicate(
+              (w) => w is ChatSymbol && w.kind == ChatSymbolKind.error,
+            )
+            .first,
+      );
       await tester.pumpAndSettle();
       expect(h.sync.attempts, before + 1);
       expect(
@@ -260,7 +277,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.getSize(bubble), sendingSize);
     expect(
-      find.descendant(of: bubble, matching: find.text('!')),
+      find.descendant(
+        of: bubble,
+        matching: find.byWidgetPredicate(
+          (w) => w is ChatSymbol && w.kind == ChatSymbolKind.error,
+        ),
+      ),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
@@ -296,7 +318,13 @@ void main() {
           tester.getTopLeft(find.text(content)) - tester.getTopLeft(bubble);
       expect(find.text('待发送 · 重试'), findsNothing);
       h.sync.gate = Completer<SyncState>();
-      await tester.tap(find.text('◷').last);
+      await tester.tap(
+        find
+            .byWidgetPredicate(
+              (w) => w is ChatSymbol && w.kind == ChatSymbolKind.working,
+            )
+            .last,
+      );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       expect(find.bySemanticsLabel(RegExp('发送中')), findsOneWidget);

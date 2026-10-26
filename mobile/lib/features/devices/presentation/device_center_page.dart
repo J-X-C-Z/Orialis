@@ -296,10 +296,13 @@ class _DeviceCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      shown.displayName,
-                      style: LuminaTheme.of(context).textTheme.titleMedium,
-                    ),
+                    if (LuminaGlassTitleScope.of(context))
+                      LuminaCardHeader(title: shown.displayName)
+                    else
+                      Text(
+                        shown.displayName,
+                        style: LuminaTheme.of(context).textTheme.titleMedium,
+                      ),
                     QuietLabel('${shown.platform} · ${_status(shown.status)}'),
                   ],
                 ),

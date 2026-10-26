@@ -198,7 +198,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     Row(
                       children: [
                         Image.asset(
-                          'assets/branding/orialis-schedule.png',
+                          'assets/branding/orialis-neumorphic.png',
                           width: 44,
                           height: 44,
                           excludeFromSemantics: true,

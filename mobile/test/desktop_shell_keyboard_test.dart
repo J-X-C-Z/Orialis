@@ -16,13 +16,15 @@ const _digits = [
   LogicalKeyboardKey.digit6,
   LogicalKeyboardKey.digit7,
   LogicalKeyboardKey.digit8,
+  LogicalKeyboardKey.digit9,
+  LogicalKeyboardKey.digit0,
 ];
 
 Future<GoRouter> _mountShell(WidgetTester tester, Size size) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = size;
   addTearDown(tester.view.reset);
-  final controllers = List.generate(8, (_) => TextEditingController());
+  final controllers = List.generate(10, (_) => TextEditingController());
   final router = GoRouter(
     initialLocation: '/destination0',
     routes: [
@@ -33,7 +35,7 @@ Future<GoRouter> _mountShell(WidgetTester tester, Size size) async {
       StatefulShellRoute.indexedStack(
         builder: (_, _, shell) => DesktopShell(navigationShell: shell),
         branches: List.generate(
-          8,
+          10,
           (index) => StatefulShellBranch(
             routes: [
               GoRoute(
@@ -112,9 +114,10 @@ Future<void> _withShell(
   Size size,
   Future<void> Function(GoRouter router) body, {
   bool semantics = false,
+  TargetPlatform platform = TargetPlatform.macOS,
 }) async {
   final previousPlatform = debugDefaultTargetPlatformOverride;
-  debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+  debugDefaultTargetPlatformOverride = platform;
   final handle = semantics ? tester.ensureSemantics() : null;
   try {
     final router = await _mountShell(tester, size);
@@ -134,14 +137,14 @@ void main() {
     'wide': const Size(1180, 800),
     'narrow': const Size(560, 800),
   }.entries) {
-    testWidgets('${layout.key}: Cmd+1..8 navigates and announces selection', (
+    testWidgets('${layout.key}: Cmd+1..0 navigates and announces selection', (
       tester,
     ) async {
       await _withShell(tester, layout.value, (router) async {
         _expectDestination(tester, router, 0);
         _expectNavigationSemantics(tester, 0);
         // Start away from the first branch so Cmd+1 is exercised as a change.
-        for (final index in [7, 0, 1, 2, 3, 4, 5, 6, 7]) {
+        for (final index in [7, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) {
           await _commandDigit(tester, index);
           _expectDestination(tester, router, index);
           _expectNavigationSemantics(tester, index);
@@ -201,6 +204,43 @@ void main() {
         _expectDestination(tester, router, 1);
         _expectNavigationSemantics(tester, 1);
       }, semantics: true);
+    });
+
+    testWidgets('${layout.key}: Control+1..0 reaches desktop destinations', (
+      tester,
+    ) async {
+      await _withShell(tester, layout.value, (router) async {
+        for (var index = 0; index < _digits.length; index++) {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+          await tester.sendKeyEvent(_digits[index]);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+          await tester.pumpAndSettle();
+          _expectDestination(tester, router, index);
+        }
+      }, platform: TargetPlatform.windows);
+    });
+
+    testWidgets('${layout.key}: Control digits preserve a focused editor', (
+      tester,
+    ) async {
+      await _withShell(tester, layout.value, (router) async {
+        final editor = find.descendant(
+          of: find.byKey(const ValueKey('editor0')),
+          matching: find.byType(EditableText),
+        );
+        await tester.enterText(editor, 'Keep this local draft');
+        for (final digit in _digits) {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+          await tester.sendKeyEvent(digit);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+          await tester.pumpAndSettle();
+          _expectDestination(tester, router, 0);
+          expect(
+            tester.widget<EditableText>(editor).controller.text,
+            'Keep this local draft',
+          );
+        }
+      }, platform: TargetPlatform.windows);
     });
 
     testWidgets('${layout.key}: authentication route blocks shell shortcuts', (

@@ -6,7 +6,9 @@ RESPONSE_UI = {
     "transport": "content_fence",
     "block_types": ["metrics", "chart", "tabs", "checklist", "choices", "svg",
                     "diagram", "math", "plot", "timeline", "simulation",
-                    "form", "table", "sources", "diff", "media", "actions"],
+                    "form", "table", "sources", "diff", "media", "actions",
+                    "progress", "heatmap", "accordion"],
+    "plot_kinds": ["line", "scatter", "pie", "area", "bar", "radar"],
     "limits": {
         "json_bytes": 32768, "blocks": 12, "items": 12, "title": 80,
         "fallback": 4000, "label": 120, "value": 120, "detail": 240,
@@ -28,6 +30,9 @@ Use only a closed Markdown code fence labelled orialis-ui containing valid JSON:
 {version:1,title?:string,fallback:string,blocks:[...]}. Always include a nonempty
 fallback that explains all the information in readable text. Add a brief useful
 plain-text introduction outside the fence for clients that cannot render it.
+Compose a larger answer from multiple separate closed fences when useful; each
+document independently keeps the 12-block and 32768-byte limits. Output only
+the client-supported types described here; never invent a block type or kind.
 The JSON must use double-quoted keys/strings, no comments, no trailing commas.
 Each block has type, optional title, and a nonempty items array. Supported shapes:
 metrics: items [{label:string,value:string,detail?:string}];
@@ -78,7 +83,10 @@ PLATFORM_HINT += r"""
 Additional native blocks (all use 1..12 labelled items):
 diagram: optional layout flow|mindmap|graph; items [{id:string,label:string,detail?:string,parent?:node id}], edges?:[{from:node id,to:node id,label?:string}]. IDs unique <=40 chars, details <=1000, edges <=24; parent tree must be acyclic. Use native diagrams for labelled flows, mindmaps and relationships, including Chinese labels.
 math: items [{label:string,source:TeX string <=4000 chars}]. No surrounding dollar delimiters. Invalid formula source remains readable/copyable.
-plot: kind line|scatter|pie; items [{label:string,points:[{x:number,y:number}]}]. 1..120 points per series, finite coordinates with absolute value <=1000000. Pie sums each series' y values: y>=0 and combined total>0. Users may select series and inspect values. Label illustrative data.
+plot: kind line|scatter|pie|area|bar|radar; items [{label:string,points:[{x:number,y:number,label?:string <=120}]}]. Optional block xLabel/yLabel <=80 chars and xUnit <=32. 1..120 points per series, finite coordinates with absolute value <=1000000. Pie sums each series' y values: y>=0 and combined total>0. Area points use increasing unique x coordinates; bar points use unique x coordinates. Radar uses 3..120 points per series, nonnegative y, unique x coordinates, and exactly the same ordered x coordinates and optional point labels across series. Users may select series and inspect values. Label illustrative data.
+progress: optional block style linear|ring (default linear); items [{label:string,value:finite number,max?:finite positive number <=1000000,detail?:string <=240}]. Max defaults to 100; 0<=value<=max. Show author-supplied data or verified service state only. Never fabricate quota, task completion, or live progress; clearly label illustrative data, and never present it as the current task's status. This block cannot change service state.
+heatmap: items [{label:string,value:finite number 0..1000000,date:string}]. Dates must be unique within the block and real calendar dates strictly YYYY-MM-DD. Use 1..12 items; one labelled date/value per item, with no nested cells or generated activity.
+accordion: items [{label:string,content:nonempty string <=4000}]. Expand/collapse readable text locally; opening a section does not create, send, save or execute anything.
 timeline: items [{label:string,detail?:string <=1000,time?:ISO8601 string}]. Authored order is preserved.
 simulation: exactly one item {label:string,kind:sine|fourier,terms?:integer 1..25,amplitude?:number 0.1..5,frequency?:number 0.1..5}. User controls update a deterministic native plot. Use fourier for odd-harmonic square-wave synthesis, sine for A*sin(f*x). No executable expressions.
 form: optional prompt:string <=1000; items [{id:string,label:string,kind:text|date|select|multiselect|slider,required?:boolean,value?:typed initial value,options?:string[],min?:number,max?:number}]. Unique IDs match [A-Za-z][A-Za-z0-9_-]{0,39}. Text <=1000 chars, dates strictly YYYY-MM-DD; select/multiselect require 1..12 unique options <=120 chars; slider requires finite min<max with absolute bounds<=1000000. Values must match the field kind and supplied options/range. Submit fills the composer for review; it does not automatically send.

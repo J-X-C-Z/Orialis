@@ -7,10 +7,14 @@ class MainFlutterWindow: NSWindow {
     // settings already saved by the direct-distribution app.
     DesktopWebServices.preservePreferences()
     let flutterViewController = FlutterViewController()
-    let windowFrame = NSRect(x: self.frame.origin.x, y: self.frame.origin.y, width: 1180, height: 800)
+    let available = (self.screen ?? NSScreen.main)?.visibleFrame.size
+    let size = NSSize(width: min(1440, available?.width ?? 1440),
+                      height: min(900, available?.height ?? 900))
+    let windowFrame = NSRect(origin: self.frame.origin, size: size)
     self.minSize = NSSize(width: 560, height: 600)
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
+    self.center()
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 

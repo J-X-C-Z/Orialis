@@ -63,7 +63,8 @@ pub(crate) async fn capabilities() -> Json<CapabilitiesResponse> {
         // UI is opaque assistant content: clients validate and fall back to text.
         response_ui: serde_json::json!({
             "format": "orialis-ui", "version": 1, "transport": "content_fence",
-            "block_types": ["metrics", "chart", "tabs", "checklist", "choices", "svg", "diagram", "math", "plot", "timeline", "simulation", "form", "table", "sources", "diff", "media", "actions"],
+            "block_types": ["metrics", "chart", "tabs", "checklist", "choices", "svg", "diagram", "math", "plot", "timeline", "simulation", "form", "table", "sources", "diff", "media", "actions", "progress", "heatmap", "accordion"],
+            "plot_kinds": ["line", "scatter", "pie", "area", "bar", "radar"],
             "limits": {
                 "json_bytes": 32768, "blocks": 12, "items": 12, "title": 80,
                 "fallback": 4000, "label": 120, "value": 120, "detail": 240,
@@ -115,8 +116,15 @@ mod tests {
                 "sources",
                 "diff",
                 "media",
-                "actions"
+                "actions",
+                "progress",
+                "heatmap",
+                "accordion"
             ])
+        );
+        assert_eq!(
+            ui["plot_kinds"],
+            serde_json::json!(["line", "scatter", "pie", "area", "bar", "radar"])
         );
         assert_eq!(ui["limits"]["json_bytes"], 32768);
         assert_eq!(ui["limits"]["blocks"], 12);

@@ -6,6 +6,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
+import 'response_chart_plot.dart';
+import 'response_dashboard_blocks.dart';
+
 class ResponseVisualBlock extends StatelessWidget {
   const ResponseVisualBlock({required this.data, super.key});
   final Map<String, dynamic> data;
@@ -19,7 +22,9 @@ class ResponseVisualBlock extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [for (final item in items) _Formula(item: item)],
       ),
-      'plot' => _Plot(data: data),
+      'plot' => ResponseChartPlot(data: data),
+      'progress' => ResponseDashboardProgress(data: data),
+      'heatmap' => ResponseDashboardHeatmap(data: data),
       'timeline' => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -331,159 +336,6 @@ class _EdgesPainter extends CustomPainter {
       edges != oldDelegate.edges ||
       color != oldDelegate.color ||
       textStyle != oldDelegate.textStyle;
-}
-
-class _Plot extends StatefulWidget {
-  const _Plot({required this.data});
-  final Map<String, dynamic> data;
-  @override
-  State<_Plot> createState() => _PlotState();
-}
-
-class _PlotState extends State<_Plot> {
-  int _selected = 0;
-  String? _inspection;
-
-  @override
-  void didUpdateWidget(_Plot oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (_selected >= (widget.data['items'] as List).length) _selected = 0;
-    if (oldWidget.data != widget.data) _inspection = null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final items = (widget.data['items'] as List).cast<Map<String, dynamic>>();
-    final kind = widget.data['kind'];
-    final item = items[_selected];
-    final points = (item['points'] as List).cast<Map<String, dynamic>>();
-    final color = LuminaTheme.of(context).colors.accent;
-    final spots = [
-      for (final point in points)
-        FlSpot((point['x'] as num).toDouble(), (point['y'] as num).toDouble()),
-    ];
-    final chart = kind == 'pie'
-        ? PieChart(
-            PieChartData(
-              sections: [
-                for (var i = 0; i < items.length; i++)
-                  PieChartSectionData(
-                    value: (items[i]['points'] as List).fold<double>(
-                      0,
-                      (total, point) => total + (point['y'] as num).toDouble(),
-                    ),
-                    title: '${i + 1}',
-                    color: HSVColor.fromColor(color)
-                        .withHue((HSVColor.fromColor(color).hue + i * 47) % 360)
-                        .toColor(),
-                    radius: i == _selected ? 78 : 65,
-                  ),
-              ],
-              pieTouchData: PieTouchData(
-                touchCallback: (event, response) {
-                  final index = response?.touchedSection?.touchedSectionIndex;
-                  if (index != null && index >= 0 && index < items.length) {
-                    setState(() => _selected = index);
-                  }
-                },
-              ),
-            ),
-            duration: Duration.zero,
-          )
-        : kind == 'scatter'
-        ? ScatterChart(
-            ScatterChartData(
-              scatterSpots: [
-                for (final spot in spots)
-                  ScatterSpot(
-                    spot.x,
-                    spot.y,
-                    dotPainter: FlDotCirclePainter(radius: 4, color: color),
-                  ),
-              ],
-              titlesData: const FlTitlesData(show: false),
-              scatterTouchData: ScatterTouchData(
-                touchCallback: (event, response) {
-                  final spot = response?.touchedSpot?.spot;
-                  if (spot != null) {
-                    setState(
-                      () => _inspection =
-                          '${item['label']}: x=${spot.x.toStringAsPrecision(4)}, y=${spot.y.toStringAsPrecision(4)}',
-                    );
-                  }
-                },
-              ),
-            ),
-            duration: Duration.zero,
-          )
-        : LineChart(
-            LineChartData(
-              lineBarsData: [
-                LineChartBarData(
-                  spots: spots,
-                  color: color,
-                  isCurved: false,
-                  barWidth: 2,
-                  dotData: FlDotData(show: points.length == 1),
-                ),
-              ],
-              titlesData: const FlTitlesData(show: false),
-              borderData: FlBorderData(show: true),
-              lineTouchData: LineTouchData(
-                touchCallback: (event, response) {
-                  final touched = response?.lineBarSpots;
-                  if (touched != null && touched.isNotEmpty) {
-                    final spot = touched.first;
-                    setState(
-                      () => _inspection =
-                          '${item['label']}: x=${spot.x.toStringAsPrecision(4)}, y=${spot.y.toStringAsPrecision(4)}',
-                    );
-                  }
-                },
-              ),
-            ),
-            duration: Duration.zero,
-          );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (var i = 0; i < items.length; i++)
-              LuminaButton(
-                primary: i == _selected,
-                onPressed: () => setState(() {
-                  _selected = i;
-                  _inspection = null;
-                }),
-                child: Text(
-                  '${kind == 'pie' ? '${i + 1}. ' : ''}${items[i]['label']}',
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Semantics(
-          label: '${item['label']}，点击图表查看数值',
-          child: SizedBox(height: 230, child: chart),
-        ),
-        if (_inspection != null) Text(_inspection!),
-        if (kind == 'pie')
-          Text(
-            '${item['label']}: ${points.fold<double>(0, (sum, p) => sum + (p['y'] as num).toDouble())}',
-          ),
-        ExpansionTile(
-          title: const Text('查看数据'),
-          children: [
-            for (final point in points)
-              Text('x=${point['x']}, y=${point['y']}'),
-          ],
-        ),
-      ],
-    );
-  }
 }
 
 /// Bounded, deterministic teaching functions; no generated code is evaluated.

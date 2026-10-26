@@ -1,6 +1,7 @@
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 import '../domain/agent_event_state.dart';
+import '../../../app/design/chat_symbols.dart';
 import '../domain/chat_transcript.dart';
 
 String? chatThinkingLabel(AgentEventStore store) {
@@ -99,49 +100,56 @@ class _ChatThinkingIndicatorState extends State<ChatThinkingIndicator>
   @override
   Widget build(BuildContext context) {
     final theme = LuminaTheme.of(context);
+    final reduced = LuminaTheme.motionReducedOf(context);
     final style = theme.textTheme.bodySmall.copyWith(color: theme.colors.ink);
     final text = Text(widget.label, style: style);
+    final content = reduced
+        ? Text(
+            widget.label,
+            style: style.copyWith(
+              color: theme.colors.ink.withValues(alpha: .45),
+            ),
+          )
+        : AnimatedBuilder(
+            animation: _phase,
+            child: text,
+            builder: (context, child) => ShaderMask(
+              blendMode: BlendMode.srcIn,
+              shaderCallback: (bounds) =>
+                  LinearGradient(
+                    colors: [
+                      theme.colors.ink.withValues(alpha: .32),
+                      theme.colors.ink.withValues(alpha: .72),
+                      theme.colors.ink.withValues(alpha: .32),
+                    ],
+                  ).createShader(
+                    Rect.fromLTWH(
+                      bounds.left + bounds.width * (_phase.value * 3 - 1),
+                      bounds.top,
+                      bounds.width,
+                      bounds.height,
+                    ),
+                  ),
+              child: child,
+            ),
+          );
+    final kind = widget.label.contains('回复')
+        ? ChatSymbolKind.send
+        : widget.label.contains('等待')
+        ? ChatSymbolKind.working
+        : ChatSymbolKind.thinking;
     return Semantics(
       liveRegion: true,
       label: widget.label,
       excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: RepaintBoundary(
-            child: LuminaTheme.motionReducedOf(context)
-                ? Text(
-                    widget.label,
-                    style: style.copyWith(
-                      color: theme.colors.ink.withValues(alpha: .45),
-                    ),
-                  )
-                : AnimatedBuilder(
-                    animation: _phase,
-                    child: text,
-                    builder: (context, child) => ShaderMask(
-                      blendMode: BlendMode.srcIn,
-                      shaderCallback: (bounds) =>
-                          LinearGradient(
-                            colors: [
-                              theme.colors.ink.withValues(alpha: .32),
-                              theme.colors.ink.withValues(alpha: .72),
-                              theme.colors.ink.withValues(alpha: .32),
-                            ],
-                          ).createShader(
-                            Rect.fromLTWH(
-                              bounds.left +
-                                  bounds.width * (_phase.value * 3 - 1),
-                              bounds.top,
-                              bounds.width,
-                              bounds.height,
-                            ),
-                          ),
-                      child: child,
-                    ),
-                  ),
-          ),
+        child: Row(
+          children: [
+            ChatSymbol(kind, size: 18, animated: !reduced),
+            const SizedBox(width: 8),
+            Expanded(child: RepaintBoundary(child: content)),
+          ],
         ),
       ),
     );

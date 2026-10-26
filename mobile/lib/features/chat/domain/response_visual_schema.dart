@@ -4,6 +4,8 @@ const visualResponseTypes = {
   'plot',
   'timeline',
   'simulation',
+  'progress',
+  'heatmap',
 };
 
 bool _text(Object? value, int limit) =>
@@ -72,23 +74,96 @@ bool validateVisualResponseBlock(Map<String, dynamic> raw) {
     case 'math':
       return items.every((item) => _text(item['source'], 4000));
     case 'plot':
-      if (!const {'line', 'scatter', 'pie'}.contains(raw['kind'])) return false;
+      final kind = raw['kind'];
+      if (!const {
+            'line',
+            'scatter',
+            'pie',
+            'area',
+            'bar',
+            'radar',
+          }.contains(kind) ||
+          !_optionalText(raw['xLabel'], 80) ||
+          !_optionalText(raw['yLabel'], 80) ||
+          !_optionalText(raw['xUnit'], 32)) {
+        return false;
+      }
       var pieTotal = 0.0;
+      List<dynamic>? radarAxes;
       for (final item in items) {
         final points = item['points'];
         if (points is! List || points.isEmpty || points.length > 120) {
           return false;
         }
+        if (kind == 'radar' && points.length < 3) {
+          return false;
+        }
+        final coordinates = <num>{};
+        num? previousX;
         for (final point in points) {
           if (point is! Map<String, dynamic> ||
               !_number(point['x'], -1e6, 1e6) ||
-              !_number(point['y'], raw['kind'] == 'pie' ? 0 : -1e6, 1e6)) {
+              !_number(
+                point['y'],
+                kind == 'pie' || kind == 'radar' ? 0 : -1e6,
+                1e6,
+              ) ||
+              !_optionalText(point['label'], 120)) {
             return false;
           }
+          final x = point['x'] as num;
+          if (const {'area', 'bar', 'radar'}.contains(kind) &&
+              !coordinates.add(x)) {
+            return false;
+          }
+          if (kind == 'area' && previousX != null && x <= previousX) {
+            return false;
+          }
+          previousX = x;
           pieTotal += (point['y'] as num).toDouble();
         }
+        if (kind == 'radar') {
+          final axes = radarAxes;
+          if (axes != null &&
+              (points.length != axes.length ||
+                  List.generate(points.length, (i) => i).any(
+                    (i) =>
+                        points[i]['x'] != axes[i]['x'] ||
+                        points[i]['label'] != axes[i]['label'],
+                  ))) {
+            return false;
+          }
+          radarAxes ??= points;
+        }
       }
-      return raw['kind'] != 'pie' || pieTotal > 0;
+      return kind != 'pie' || pieTotal > 0;
+    case 'progress':
+      if (raw['style'] != null &&
+          !const {'linear', 'ring'}.contains(raw['style'])) {
+        return false;
+      }
+      return items.every((item) {
+        final max = item['max'] ?? 100;
+        return _number(max, double.minPositive, 1e6) &&
+            _number(item['value'], 0, (max as num).toDouble()) &&
+            _optionalText(item['detail'], 240);
+      });
+    case 'heatmap':
+      final dates = <String>{};
+      return items.every((item) {
+        final date = item['date'];
+        if (date is! String ||
+            !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date) ||
+            !_number(item['value'], 0, 1e6) ||
+            !dates.add(date)) {
+          return false;
+        }
+        // DateTime.parse normalizes overflow dates; require an exact calendar date.
+        final parsed = DateTime.tryParse(date);
+        return parsed != null &&
+            parsed.year >= 1 &&
+            parsed.toIso8601String().substring(0, 10) == date;
+      });
     case 'timeline':
       return items.every(
         (item) =>

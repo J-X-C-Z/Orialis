@@ -1,6 +1,6 @@
 # Orialis response UI v1
 
-Assistant replies may mix ordinary Markdown with closed code fences whose language is exactly `orialis-ui`. Each fence contains one JSON document. The document is stored unchanged in the ordinary message `content`; existing Gateway replies, final stream snapshots, sync and history carry the same content. No database migration or separate UI event is required.
+Assistant replies may mix ordinary Markdown with closed code fences whose language is exactly `orialis-ui`. Each fence contains one JSON document. Multiple fences compose a larger answer; each document independently retains the 12-block and 32,768-byte limits. The document is stored unchanged in the ordinary message `content`; existing Gateway replies, final stream snapshots, sync and history carry the same content. No database migration or separate UI event is required.
 
 Use this format when interaction helps a comparison, data summary or plan. Simple answers remain ordinary text. The mobile implementation uses existing Lumina components and does not execute generated HTML or JavaScript.
 
@@ -18,7 +18,7 @@ See [the shared all-components example](response-ui-v1.example.json). Required f
 | `choices` | `label`, `prompt` | Appends a suggested follow-up to the existing draft; user sends explicitly |
 | `diagram` | `id`, `label`, optional `detail`, `parent` | Native labelled flow, mindmap or relationship graph; node details and zoom |
 | `math` | `label`, TeX `source` | Formula rendering, source copying and readable error fallback |
-| `plot` | `label`, `points: [{x,y}]` | Line/scatter/pie charts with series selection and value inspection |
+| `plot` | `label`, `points: [{x,y}]`; block `kind` | Line/scatter/pie/area/bar/radar charts with series selection and value inspection |
 | `timeline` | `label`, optional `time`, `detail` | Ordered schedule or milestone preview |
 | `simulation` | `label`, `kind`, optional `terms`, `amplitude`, `frequency` | Native sine/Fourier plot with live parameter controls |
 | `form` | `id`, `label`, `kind`, optional initial `value` and constraints | Text/date/single/multiple choice/sliders; validated results fill the composer |
@@ -27,13 +27,17 @@ See [the shared all-components example](response-ui-v1.example.json). Required f
 | `diff` | `label`, `before`, `after` | Expand text/code differences and copy proposed text |
 | `media` | `label`, attachment `id`, `mimeType`, optional `name` | Authenticated image/PDF/text/file preview, save and share |
 | `actions` | `label`, `id`, `kind`, `title` and creation fields | Explicit confirmation, local task/schedule creation, receipt and sync status |
+| `progress` | `label`, numeric `value`, optional `max`, `detail`; block optional `style` | Linear or ring display of authored data or verified service state |
+| `heatmap` | `label`, numeric `value`, `date` | Dated values with readable labels and intensity from data |
+| `accordion` | `label`, `content` | Expand/collapse plain text locally |
 
 Maximum UTF-8 document size is 32,768 bytes; 1–12 blocks and 1–12 items per block. Character limits: document/block title 80, fallback 4000, label 120, metric value 120, detail 240, tab content 4000, prompt 1000, unit 32, SVG source 16000. Strings must be nonempty when provided. The phone validates these limits before rendering.
 
-See [the extended example](response-ui-v1.extended.example.json) for all eleven
-new block types. The original shared example remains the six-type compatibility
-fixture. Together the two examples cover the advertised vocabulary; they are
-separate documents because the per-document block limit remains twelve.
+The original shared example remains the six-type compatibility fixture. See
+[the extended example](response-ui-v1.extended.example.json) for the next eleven
+types and [the Board example](response-ui-v1.board.example.json) for `progress`,
+`heatmap`, `accordion` and the three added plot kinds. Together these fixtures
+cover all twenty advertised types; each is a separate bounded v1 document.
 
 ## Extended block constraints
 
@@ -44,10 +48,32 @@ separate documents because the per-document block limit remains twelve.
   details are at most 1000 characters. Labels are native text, including Chinese.
 - `math`: each source is nonempty TeX up to 4000 characters, without `$`
   delimiters. Invalid TeX shows copyable source rather than breaking the message.
-- `plot`: required block `kind` is `line`, `scatter` or `pie`. Each series has
+- `plot`: required block `kind` is `line`, `scatter`, `pie`, `area`, `bar` or
+  `radar`. Each series has
   1–120 points, finite numeric coordinates with absolute values at most 1e6.
   Pie slices use each series' sum of `y`; values must be nonnegative with a
-  positive combined total. Numerical data remains available below the chart.
+  positive combined total. Area points use strictly increasing unique `x` values;
+  bar points use unique `x` values. Radar requires 3–120 points per series,
+  nonnegative `y`, unique `x` values, and identical ordered `x` coordinates and
+  optional point labels across every series. Optional point `label` has at most
+  120 characters; block `xLabel`/`yLabel` have at most 80 and `xUnit` at most 32.
+  Numerical data remains available below the chart.
+- `progress`: `value` is finite and numeric with `0 <= value <= max`. Optional
+  `max` is finite and positive, at most 1e6, defaulting to 100. Optional `detail` is nonempty
+  text up to 240 characters. Optional block `style` is `linear` (default) or
+  `ring`; style applies to the block, not individual items. Values represent
+  author-supplied data or verified service state. They must not invent account
+  quota, task completion or live progress. Illustrative values must be labelled
+  and never presented as the current task's actual state. These displays do not
+  mutate server status.
+- `heatmap`: every item has a real calendar `date` strictly in `YYYY-MM-DD`
+  format and a finite numeric `value` in the inclusive range 0–1e6. The existing
+  1–12 item limit applies directly; dates must be unique within the block and
+  there is no nested cell array. Labels remain
+  readable independently of color. Do not generate fictitious activity records.
+- `accordion`: each `content` is nonempty plain text up to 4000 characters.
+  Opening or closing a section only changes local presentation, without sending
+  a message, creating a record or executing an action.
 - `timeline`: optional `time` is an ISO8601 timestamp; `detail` is at most 1000
   characters. Display order follows the authored item order.
 - `simulation`: exactly one item with `kind: sine|fourier`; optional `terms` is an
@@ -133,6 +159,6 @@ Hermes plugin together for automatic SVG generation.
 - Unsupported positive versions show `fallback`; malformed v1 documents remain selectable code. Ordinary code fences retain their existing rendering and copy behavior.
 - Conversation previews, quotes, text selection, copying and transcript export substitute the authored fallback for valid UI fences. Stored content remains unchanged.
 - Tab selection and checklist edits survive rebuilds of the current card. Leaving/recreating the view restores the authored initial state; local interaction is not synchronized across devices.
-- Hermes receives generation guidance through its supported `platform_hint` system context, keeping inbound user text and native retry identity intact. The HTTP capabilities response and the plugin capability tool expose `response_ui` with format, version, block types and limits.
+- Hermes receives generation guidance through its supported `platform_hint` system context, keeping inbound user text and native retry identity intact. The HTTP capabilities response and the plugin capability tool expose `response_ui` with format, version, block types, `plot_kinds` and limits. Generation must use only these client-supported types and kinds.
 
 Provide a useful introduction outside the fence and an accurate fallback covering the card's information. UI formatting is not evidence that the underlying numbers are correct.
