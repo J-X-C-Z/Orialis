@@ -33,6 +33,7 @@ class TurnUpdatesTests(unittest.IsolatedAsyncioTestCase):
             return "模型说明请求仍在处理中，当前没有新增结果。"
         update = TurnUpdates(initial or AsyncMock(), emit or AsyncMock(),
                              summarize or AsyncMock(side_effect=generated))
+        update.public_notes = ["已确认请求的第一项事实，正在核对下一项。"]
         self.updates.append(update)
         return update
 
@@ -70,8 +71,9 @@ class TurnUpdatesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(facts['phase'], 'tool')
         self.assertEqual(facts['activity'], '查找资料')
         self.assertEqual(facts['stage_history'], [{'phase': 'tool', 'activity': '查找资料'}])
-        self.assertEqual(facts['public_notes'], [])
+        self.assertEqual(facts['public_notes'], ['已确认请求的第一项事实，正在核对下一项。'])
         self.now = 62
+        update.public_notes.append("已确认第二项事实。")
         update.observe("returned")
         await update.report()
         self.assertEqual(emit.await_args.args[0], "相关查询已返回，我接着整理适合周末出行的比较。")
@@ -100,6 +102,27 @@ class TurnUpdatesTests(unittest.IsolatedAsyncioTestCase):
         await update.report()
         self.assertEqual(summarize.await_count, 3)
         self.assertEqual(emit.await_count, 1)
+
+    async def test_no_facts_or_unchanged_facts_never_call_summary_model(self):
+        model, emit = AsyncMock(return_value='新发现对目标有帮助。'), AsyncMock()
+        update = self.start(emit=emit, summarize=model)
+        update.public_notes = []
+        self.now = 31
+        update.observe('tool', 'web_search')
+        await update.report()
+        model.assert_not_awaited()
+        update.public_notes = ['已确认高铁比自驾快。']
+        await update.report()
+        model.assert_awaited_once()
+        self.now = 62
+        update.observe('returned')
+        await update.report()
+        model.assert_awaited_once()  # A stage change alone adds no finding.
+        update.public_output('停车费用已核实，自驾仍然更贵。')
+        update.observe('tool', 'read_file')
+        self.now = 93
+        await update.report()
+        self.assertEqual(model.await_count, 2)
 
     async def test_no_generator_means_no_fixed_fallback(self):
         emit = AsyncMock()
@@ -142,7 +165,7 @@ class TurnUpdatesTests(unittest.IsolatedAsyncioTestCase):
         self.now = 31
         await update.report()
         facts = summarize.await_args.args[0]
-        self.assertEqual(facts['public_notes'], ['已经确认入口位于 adapter.py。'])
+        self.assertEqual(facts['public_notes'][-1], '已经确认入口位于 adapter.py。')
         self.assertEqual(facts['stage_history'], [{'phase': 'tool', 'activity': '查看文件和资料'}])
         self.assertNotIn('result', facts)
         self.assertNotIn('args', facts)
@@ -164,6 +187,7 @@ class TurnUpdatesTests(unittest.IsolatedAsyncioTestCase):
         self.now = 100
         await update.report()
         self.assertEqual(emit.await_count, 1)
+        update.public_notes.append("已确认第二项事实。")
         update.observe("returned")
         await update.report()
         self.assertEqual(emit.await_count, 2)
@@ -388,7 +412,7 @@ class AdapterProgressPhaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(updates.paused)
         self.assertTrue(await self.adapter.send_stream_frame(
             "完整结果", chat_id="orialis:chat", reply_to=event.message_id,
-            turn_id="native-final", finalize=True,
+            turn_id="native-final", finalize=True, is_turn_final=True,
         ))
         self.assertTrue(updates.closed)
         await self.adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
@@ -424,6 +448,7 @@ class AdapterProgressPhaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(updates.task, pump)
         self.assertFalse(pump.done())
         self.assertFalse(pump.cancelling())
+        updates.public_notes = ["已确认请求的一部分，继续处理剩余步骤。"]
         updates.last_public -= 31
         await updates.report()
         progress = [frame for frame in self.frames
@@ -448,7 +473,7 @@ class AdapterProgressPhaseTests(unittest.IsolatedAsyncioTestCase):
                              for frame in self.frames), 1)
         self.assertTrue(await self.adapter.send_stream_frame(
             "现在开始整理完整结果：已经完成。", chat_id="orialis:chat", reply_to=event.message_id,
-            turn_id="body", finalize=True,
+            turn_id="body", finalize=True, is_turn_final=True,
         ))
         self.assertTrue(updates.closed)
         await self.adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)

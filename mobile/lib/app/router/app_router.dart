@@ -73,6 +73,7 @@ GoRouter buildRouter({bool desktop = false}) {
         navigatorContainerBuilder: (context, shell, children) =>
             LuminaBranchTransition(
               index: shell.currentIndex,
+              animate: desktop,
               children: children,
             ),
         builder: (context, state, navigationShell) => desktop

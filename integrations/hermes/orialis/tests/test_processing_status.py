@@ -65,3 +65,30 @@ class ProcessingStatusTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.query())['status'], 'running')
         await self.adapter.on_processing_complete(new, ProcessingOutcome.SUCCESS)
         self.assertEqual((await self.query())['status'], 'completed')
+
+    async def test_localized_nonconversational_heartbeat_is_only_transient_status(self):
+        self.adapter._server_capabilities.add('agent_state')
+        event = SimpleNamespace(message_id='actual-user', source=SimpleNamespace(chat_id='orialis:chat'))
+        await self.adapter.on_processing_start(event)
+        self.frames.clear()
+        content = '⏳ 正在处理——3 分钟 — 第 1/500 轮迭代, terminal'
+        result = await self.adapter.send('orialis:chat', content,
+                                         metadata={'non_conversational': True})
+        self.assertTrue(result.success)
+        self.assertIsNone(result.message_id)
+        self.assertEqual([frame['type'] for frame in self.frames], ['agent.status'])
+        self.assertEqual(self.frames[0]['message'], content)
+        self.assertEqual(self.frames[0]['run_id'], event.message_id)
+        self.assertFalse(any(frame['type'] == 'message.reply' for frame in self.frames))
+
+    async def test_localized_heartbeat_text_without_internal_marker_remains_an_assistant_reply(self):
+        content = '⏳ 正在处理——3 分钟 — 第 1/500 轮迭代, terminal'
+        for text, metadata in [(content, None),
+                               ('说明：' + content, {'non_conversational': True})]:
+            self.frames.clear()
+            result = await self.adapter.send('orialis:chat', text, metadata=metadata)
+            self.assertTrue(result.success)
+            replies = [frame for frame in self.frames if frame['type'] == 'message.reply']
+            self.assertEqual(len(replies), 1)
+            self.assertEqual(replies[0]['content'], text)
+            self.assertFalse(any(frame['type'] == 'agent.status' for frame in self.frames))

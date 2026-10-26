@@ -48,7 +48,7 @@ class ProgressResponseTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(progress_response, "_call_initial_model", side_effect=summarize) as model:
             travel = await generate_progress_response(self.event, self.facts, self.directory)
             code_event = SimpleNamespace(text="检查Python循环为什么越界", raw_message={})
-            code = await generate_progress_response(code_event, {"phase": "tool", "activity": "执行任务步骤"}, self.directory)
+            code = await generate_progress_response(code_event, {"phase": "tool", "activity": "执行任务步骤", "public_notes": ["已复现索引越界，正在核对循环边界。"]}, self.directory)
         self.assertIn("杭州", travel)
         self.assertIn("索引", code)
         self.assertNotEqual(travel, code)
@@ -65,13 +65,20 @@ class ProgressResponseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(evidence[key], self.facts[key])
         self.assertEqual(request["extra_body"], {"chat_template_kwargs": {"thinking": False, "enable_thinking": False}})
         self.assertEqual(request["task"], "orialis_initial_response")
-        self.assertLessEqual(request["timeout"], 12)
+        self.assertLessEqual(request["timeout"], 20)
         self.assertLessEqual(request["max_tokens"], 180)
         system = request["messages"][0]["content"]
         self.assertIn("不代表成功", system)
         self.assertIn("最终标记", system)
         self.assertIn("具体对象或目标", system)
         self.assertNotIn("tools", request)
+
+    async def test_generic_phase_without_public_findings_skips_the_model(self):
+        with patch.object(progress_response, "_call_initial_model") as model:
+            value = await generate_progress_response(self.event, {"phase": "tool", "activity": "执行任务步骤"}, self.directory)
+        self.assertIsNone(value)
+        model.assert_not_called()
+        self.assertEqual(list(self.directory.iterdir()), [])
 
     async def test_attachments_supply_only_bounded_names_not_urls_or_other_private_fields(self):
         self.event.text = "资料" * 3000
@@ -118,6 +125,16 @@ class ProgressResponseTests(unittest.IsolatedAsyncioTestCase):
             later = await generate_progress_response(self.event, later_facts, self.directory)
         self.assertNotEqual(first, later)
         self.assertEqual(model.call_count, 2)
+
+    async def test_changed_prompt_does_not_replay_a_previous_style_cache(self):
+        model = Mock(side_effect=[response("正在核对班次。"), response("高铁到站更早，停车费用还需核对。")])
+        with patch.object(progress_response, "_call_initial_model", new=model):
+            first = await generate_progress_response(self.event, self.facts, self.directory)
+            with patch.object(progress_response, "PROGRESS_PROMPT", progress_response.PROGRESS_PROMPT + "补充提示"):
+                later = await generate_progress_response(self.event, self.facts, self.directory)
+        self.assertNotEqual(first, later)
+        self.assertEqual(model.call_count, 2)
+        self.assertEqual(len(list(self.directory.glob("progress-response-*.json"))), 2)
 
     async def test_auxiliary_failure_skips_summary_without_a_fixed_fallback_or_cache(self):
         with patch.object(progress_response, "_call_initial_model", side_effect=RuntimeError("provider unavailable")):

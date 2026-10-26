@@ -1,4 +1,5 @@
 import 'package:flutter/physics.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
 import 'app_theme.dart';
@@ -96,16 +97,21 @@ class LuminaSpring extends AnimationController {
   }
 }
 
-/// Keep branch state mounted, but paint only the destination during navigation.
-/// A short paint-only entrance avoids blending two full-screen glass surfaces.
+/// Keep branch state mounted, but lay out and paint only the active branch.
+/// `Offstage` still lays out hidden navigators, which makes phone page switches
+/// unnecessarily expensive when every branch contains a full-sized surface.
 class LuminaBranchTransition extends StatefulWidget {
   const LuminaBranchTransition({
     required this.index,
     required this.children,
+    this.animate = true,
     super.key,
   });
   final int index;
   final List<Widget> children;
+
+  /// Disables the entrance without changing the retained branch widget tree.
+  final bool animate;
   @override
   State<LuminaBranchTransition> createState() => _LuminaBranchTransitionState();
 }
@@ -123,6 +129,12 @@ class _LuminaBranchTransitionState extends State<LuminaBranchTransition>
   @override
   void didUpdateWidget(LuminaBranchTransition oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!widget.animate) {
+      controller.stop();
+      position = const AlwaysStoppedAnimation(Offset.zero);
+      controller.value = 1;
+      return;
+    }
     if (oldWidget.index == widget.index) return;
     final reduced = LuminaTheme.motionReducedOf(context);
     final direction = widget.index > oldWidget.index ? 1.0 : -1.0;
@@ -151,37 +163,129 @@ class _LuminaBranchTransitionState extends State<LuminaBranchTransition>
   }
 
   @override
-  Widget build(BuildContext context) => FadeTransition(
-    opacity: LuminaTheme.motionReducedOf(context)
-        ? Tween<double>(begin: .96, end: 1).animate(progress)
-        : const AlwaysStoppedAnimation(1),
-    child: SlideTransition(
-      position: position,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          for (var i = 0; i < widget.children.length; i++)
-            Positioned.fill(
-              key: ValueKey(i),
-              child: Offstage(
-                offstage: i != widget.index,
-                child: TickerMode(
-                  enabled: i == widget.index,
-                  child: IgnorePointer(
-                    ignoring: i != widget.index,
-                    child: ExcludeFocus(
-                      excluding: i != widget.index,
-                      child: ExcludeSemantics(
-                        excluding: i != widget.index,
-                        child: RepaintBoundary(child: widget.children[i]),
-                      ),
-                    ),
+  Widget build(BuildContext context) {
+    final branches = _LuminaActiveBranch(
+      activeIndex: widget.index,
+      children: [
+        for (var i = 0; i < widget.children.length; i++)
+          KeyedSubtree(
+            key: ValueKey(i),
+            child: TickerMode(
+              enabled: i == widget.index,
+              child: IgnorePointer(
+                ignoring: i != widget.index,
+                child: ExcludeFocus(
+                  excluding: i != widget.index,
+                  child: ExcludeSemantics(
+                    excluding: i != widget.index,
+                    child: RepaintBoundary(child: widget.children[i]),
                   ),
                 ),
               ),
             ),
-        ],
-      ),
-    ),
-  );
+          ),
+      ],
+    );
+    if (!widget.animate) return branches;
+    return FadeTransition(
+      opacity: LuminaTheme.motionReducedOf(context)
+          ? Tween<double>(begin: .96, end: 1).animate(progress)
+          : const AlwaysStoppedAnimation(1),
+      child: SlideTransition(position: position, child: branches),
+    );
+  }
+}
+
+class _LuminaActiveBranch extends MultiChildRenderObjectWidget {
+  const _LuminaActiveBranch({
+    required this.activeIndex,
+    required super.children,
+  });
+
+  final int activeIndex;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderLuminaActiveBranch(activeIndex);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderLuminaActiveBranch renderObject,
+  ) {
+    renderObject.activeIndex = activeIndex;
+  }
+}
+
+class _LuminaBranchParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderLuminaActiveBranch extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _LuminaBranchParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _LuminaBranchParentData> {
+  _RenderLuminaActiveBranch(this._activeIndex);
+
+  int _activeIndex;
+
+  int get activeIndex => _activeIndex;
+
+  set activeIndex(int value) {
+    if (_activeIndex == value) return;
+    _activeIndex = value;
+    markNeedsLayout();
+  }
+
+  RenderBox? get _activeChild {
+    var index = 0;
+    var child = firstChild;
+    while (child != null && index < _activeIndex) {
+      final parentData = child.parentData! as _LuminaBranchParentData;
+      child = parentData.nextSibling;
+      index++;
+    }
+    return child;
+  }
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _LuminaBranchParentData) {
+      child.parentData = _LuminaBranchParentData();
+    }
+  }
+
+  @override
+  void performLayout() {
+    final child = _activeChild;
+    if (child == null) {
+      size = constraints.smallest;
+      return;
+    }
+    child.layout(constraints, parentUsesSize: true);
+    size = constraints.constrain(child.size);
+  }
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) {
+    final child = _activeChild;
+    if (child == null) return constraints.smallest;
+    return constraints.constrain(child.getDryLayout(constraints));
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    _activeChild?.paint(context, offset);
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      _activeChild?.hitTest(result, position: position) ?? false;
+
+  @override
+  void visitChildrenForSemantics(void Function(RenderObject child) visitor) {
+    final child = _activeChild;
+    if (child != null) visitor(child);
+  }
+
+  @override
+  void applyPaintTransform(RenderBox child, Matrix4 transform) {}
 }

@@ -79,7 +79,7 @@ ATTACHMENT_DOWNLOAD_TIMEOUT_SECONDS = 15
 ATTACHMENT_UPLOAD_TIMEOUT_SECONDS = 30
 _SAFE_NAME = re.compile(r"[^\w. ()\-\u4e00-\u9fff]+", re.UNICODE)
 _EXCLUDED_MIME_PREFIXES = ("audio/", "video/")
-_LONG_RUNNING_HEARTBEAT = re.compile(r"^\s*⏳\s*Working\s+—\s+\d+\s+min(?:\s|$)", re.IGNORECASE)
+_LONG_RUNNING_HEARTBEAT = re.compile(r"^\s*⏳\s*(?:Working\s*[—–-]\s*\d+\s+min(?:\s|$)|正在处理\s*[—–-]+\s*\d+\s*分钟(?:\s|$))", re.IGNORECASE)
 _BACKGROUND_REVIEW_NOTICE = re.compile(r"^\s*💾\s*Self-improvement review:\s+\S[\s\S]*$", re.IGNORECASE)
 
 
@@ -208,6 +208,7 @@ def _platform_name() -> str:
 class OrialisAdapter(BasePlatformAdapter):
     """Thin WebSocket bridge; Hermes remains responsible for agent execution."""
 
+    SKIP_EMPTY_STREAM_PLACEHOLDER = True
     supports_code_blocks = False
     supports_status_text = True
     interactive_resume = False
@@ -1019,7 +1020,7 @@ class OrialisAdapter(BasePlatformAdapter):
         # progress is a transient status event, and background review summaries
         # are intentionally not persisted as assistant replies. Match only these
         # known formats; other non-conversational sends still use the normal path.
-        if metadata.get("non_conversational") and not metadata.get("attachments"):
+        if (metadata.get("non_conversational") or metadata.get("_interim_send")) and not metadata.get("attachments"):
             if _LONG_RUNNING_HEARTBEAT.match(str(content or "")):
                 snapshot = self._processing_status.get(chat_id)
                 run_id = snapshot.get("run_id") if snapshot else None
@@ -1039,7 +1040,9 @@ class OrialisAdapter(BasePlatformAdapter):
         if not reply_to:
             return SendResult(success=False, error="Orialis reply is missing reply_to message id")
         updates = self._turn_updates.get(reply_to)
-        is_setup_notice = str(content).startswith("📬 No home channel is set for Orialis.")
+        is_setup_notice = str(content).startswith((
+            "📬 No home channel is set for Orialis.", "📬 Orialis 尚未设置主频道。",
+        ))
         if updates and not metadata.get("non_conversational") and not is_setup_notice and content.strip() != "✅":
             updates.public_output(content if metadata.get("_interim_send") else None)
             if metadata.get("notify") and not metadata.get("_interim_send"):
@@ -1047,7 +1050,17 @@ class OrialisAdapter(BasePlatformAdapter):
         conversation_id = conversation_id_for_chat_id(chat_id)
         attachments = metadata.get("attachments")
         message_id = (self._stream_reply_ids.get((chat_id, reply_to, content))
-                      if not attachments else None) or f"msg_{uuid.uuid4().hex[:12]}"
+                      if not attachments else None)
+        if metadata.get("_interim_send") and not attachments and not message_id:
+            message_id = "progress_" + hashlib.sha256(
+                f"{chat_id}\0{reply_to}\0{content}".encode()
+            ).hexdigest()[:24]
+        if (metadata.get("notify") and not metadata.get("_interim_send")
+                and not metadata.get("non_conversational") and not is_setup_notice):
+            # Persist the true turn-final distinction without changing the message schema.
+            identity = json.dumps([chat_id, reply_to, content, attachments], ensure_ascii=False, sort_keys=True)
+            message_id = "final_" + hashlib.sha256(identity.encode()).hexdigest()[:24]
+        message_id = message_id or f"msg_{uuid.uuid4().hex[:12]}"
         scope = self._reply_scope.get()
         command_id = scope[2] if scope and scope[0] == chat_id else self._command_anchors.get(chat_id)
         if command_id != reply_to:
@@ -1172,20 +1185,27 @@ class OrialisAdapter(BasePlatformAdapter):
 
     async def send_stream_frame(
         self, content: str, *, finalize: bool = False, chat_id: str, reply_to: Optional[str] = None,
-        turn_id: Optional[str] = None,
+        turn_id: Optional[str] = None, is_turn_final: bool = False,
     ) -> bool:
         """Hermes supplies cumulative snapshots; only persisted final replies count as delivered."""
         if not self.supports_native_streaming(chat_id=chat_id):
             return False
+        is_turn_final = bool(finalize and is_turn_final and content)
         updates = self._turn_updates.get(reply_to or self._reply_anchor(chat_id))
         # Native frames also carry tool chrome; it must not mute long-tool updates.
         if (updates and content and content != "✅"
                 and (finalize or updates.phase[0] != "tool")):
             updates.public_output()
-            if finalize:
+            if is_turn_final:
                 updates.close()
         turn_id = turn_id or uuid.uuid4().hex
         context = self._active_streams.get(turn_id)
+        if finalize and not content and (context is None or not context["content"]):
+            # Empty native abandonment is not a reply or a completed user task.
+            self._active_streams.pop(turn_id, None)
+            if context and self._stream_context.get("run_id") == context["run_id"]:
+                self._stream_context = {}
+            return True
         # Decline Hermes' ambiguous empty-stream sentinel. Real literal checkmark
         # answers still use the native consumer's regular send() fallback.
         if finalize and content == "✅" and (context is None or not context["content"]):
@@ -1241,10 +1261,13 @@ class OrialisAdapter(BasePlatformAdapter):
                     self._stream_reply_ids[key] = context["final_message_id"]
                     while len(self._stream_reply_ids) > 512:
                         self._stream_reply_ids.popitem(last=False)
-                    result = await self.send(chat_id, content, reply_to=reply_to)
+                    result = await self.send(chat_id, content, reply_to=reply_to,
+                                             metadata={"notify": True} if is_turn_final else None)
                     if not result.success:
                         return False
                     final_message_id = result.message_id
+                    context["final_message_id"] = final_message_id
+                    self._stream_reply_ids[key] = final_message_id
                 frame = protocol.agent_complete(
                     conversation_id=context["conversation_id"], run_id=context["run_id"],
                     session_id=self._session_id, seq=self._next_event_seq(), content=context["content"],

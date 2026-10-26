@@ -33,6 +33,7 @@ class TurnUpdates:
         self._reporting = False
         self.phase = ("processing", "")
         self.last_report = None
+        self.reported_notes = []
         self.last_public = time.monotonic()
         self.paused = False
         self.closed = False
@@ -76,6 +77,7 @@ class TurnUpdates:
 
     async def report(self) -> None:
         if (self.closed or self.paused or self._reporting or not self.summarize
+                or not self.public_notes or self.public_notes == self.reported_notes
                 or self.revision == self.last_report
                 or time.monotonic() - max(self.last_public, self.last_attempt) < PROGRESS_INTERVAL):
             return
@@ -98,6 +100,7 @@ class TurnUpdates:
             self.last_public = time.monotonic()
             self.previous_updates = (self.previous_updates + [text])[-3:]
             await self.emit(text, self.sequence)
+            self.reported_notes = facts["public_notes"]
         except asyncio.CancelledError:
             raise
         except Exception:

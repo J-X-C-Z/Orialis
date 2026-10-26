@@ -137,6 +137,7 @@ class ParallelUpdatesTests(unittest.IsolatedAsyncioTestCase):
         await self.adapter.on_processing_start(event)
         updates = self.adapter._turn_updates[event.message_id]
         await updates.initial_task
+        updates.public_notes = ["已确认第一阶段结果，正在核对后续资料。"]
         updates.last_public -= 31
         updates.observe("tool", "web_search")
 
@@ -256,6 +257,7 @@ class ParallelUpdatesTests(unittest.IsolatedAsyncioTestCase):
             await self.adapter.on_processing_start(event)
             updates = self.adapter._turn_updates[event.message_id]
             await updates.initial_task
+            updates.public_notes = ['已确认第一阶段结果，正在核对后续资料。']
             updates.last_public -= 31
             updates.observe('tool', 'web_search')
             await asyncio.wait_for(entered.wait(), .2)

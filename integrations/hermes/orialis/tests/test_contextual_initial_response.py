@@ -1,6 +1,6 @@
 """Contextual, non-thinking initial calls and stable retry content."""
 import asyncio
-import time
+import threading
 import json
 import tempfile
 import unittest
@@ -85,16 +85,29 @@ class ContextualInitialResponseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(self.cache.read_text(encoding="utf-8"))["mode"], "fallback")
 
     async def test_blocked_sdk_does_not_block_gateway_or_timeout(self):
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+
         def blocked(**kwargs):
-            time.sleep(.15)
-            return {"choices": [{"message": {"content": "迟到的回复"}}]}
+            entered.set()
+            try:
+                release.wait()
+                return {"choices": [{"message": {"content": "迟到的回复"}}]}
+            finally:
+                finished.set()
+
         with patch("agent.auxiliary_client.call_llm", side_effect=blocked), patch(
             "integrations.hermes.orialis.initial_response.INITIAL_RESPONSE_TIMEOUT", .02
         ):
-            started = time.monotonic()
-            text = await generate_initial_response(self.event, self.cache)
-            self.assertLess(time.monotonic() - started, .12)
-            self.assertNotEqual(text, "迟到的回复")
-            self.assertEqual(json.loads(self.cache.read_text())["mode"], "fallback")
-            await asyncio.sleep(.18)
+            pending = asyncio.create_task(generate_initial_response(self.event, self.cache))
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 3))
+                text = await asyncio.wait_for(pending, 3)
+                # The gateway returned while the SDK is still blocked, independent of host load.
+                self.assertFalse(finished.is_set())
+                self.assertNotEqual(text, "迟到的回复")
+                self.assertEqual(json.loads(self.cache.read_text())["mode"], "fallback")
+            finally:
+                release.set()
+                self.assertTrue(await asyncio.to_thread(finished.wait, 3))
+                await asyncio.gather(pending, return_exceptions=True)
             self.assertEqual(json.loads(self.cache.read_text())["content"], text)
