@@ -59,94 +59,112 @@ class _LuminaTextFieldState extends State<LuminaTextField> {
         ],
         ListenableBuilder(
           listenable: Listenable.merge([focus, widget.controller]),
-          builder: (context, _) => GestureDetector(
-            onTap: widget.enabled
-                ? () {
-                    // Android may hide the IME while this field keeps focus.
-                    // Request the editor connection again, including when the
-                    // tap lands in the input's padding rather than its text.
-                    if (widget.readOnly) {
-                      focus.requestFocus();
-                    } else {
-                      _editorKey.currentState?.requestKeyboard();
+          builder: (context, _) {
+            final neumorphic = LuminaTheme.of(context).data.neumorphic;
+            final field = GestureDetector(
+              onTap: widget.enabled
+                  ? () {
+                      // Android may hide the IME while this field keeps focus.
+                      // Request the editor connection again, including when the
+                      // tap lands in the input's padding rather than its text.
+                      if (widget.readOnly) {
+                        focus.requestFocus();
+                      } else {
+                        _editorKey.currentState?.requestKeyboard();
+                      }
+                      widget.onTap?.call();
                     }
-                    widget.onTap?.call();
-                  }
-                : null,
-            child: AnimatedContainer(
-              duration: LuminaTheme.motionReducedOf(context)
-                  ? Duration.zero
-                  : LuminaMotion.fast,
-              constraints: const BoxConstraints(
-                minHeight: LuminaControlSize.minimum,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: focus.hasFocus ? colors.accent : colors.outline,
-                  width: focus.hasFocus ? 1.5 : 1,
+                  : null,
+              child: AnimatedContainer(
+                duration: LuminaTheme.motionReducedOf(context)
+                    ? Duration.zero
+                    : LuminaMotion.fast,
+                constraints: const BoxConstraints(
+                  minHeight: LuminaControlSize.minimum,
                 ),
-              ),
-              child: Stack(
-                children: [
-                  if (widget.controller.text.isEmpty)
-                    IgnorePointer(
-                      child: Text(
-                        widget.hintText ?? widget.hint ?? '',
-                        style: LuminaTheme.of(context).textTheme.bodyMedium
-                            .copyWith(color: colors.muted),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: neumorphic ? const Color(0x00000000) : colors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: focus.hasFocus
+                        ? colors.accent
+                        : neumorphic
+                        ? const Color(0x00000000)
+                        : colors.outline,
+                    width: focus.hasFocus ? 1.5 : 1,
+                  ),
+                ),
+                child: Stack(
+                  children: [
+                    if (widget.controller.text.isEmpty)
+                      IgnorePointer(
+                        child: Text(
+                          widget.hintText ?? widget.hint ?? '',
+                          style: LuminaTheme.of(context).textTheme.bodyMedium
+                              .copyWith(color: colors.muted),
+                        ),
                       ),
-                    ),
-                  Semantics(
-                    label: widget.label,
-                    enabled: widget.enabled,
-                    onFocus: widget.enabled
-                        ? () {
-                            if (widget.readOnly) {
-                              focus.requestFocus();
-                            } else {
-                              _editorKey.currentState?.requestKeyboard();
+                    Semantics(
+                      label: widget.label,
+                      enabled: widget.enabled,
+                      onFocus: widget.enabled
+                          ? () {
+                              if (widget.readOnly) {
+                                focus.requestFocus();
+                              } else {
+                                _editorKey.currentState?.requestKeyboard();
+                              }
                             }
-                          }
-                        : null,
-                    child: ExcludeFocus(
-                      excluding: !widget.enabled,
-                      child: IgnorePointer(
-                        ignoring: !widget.enabled,
-                        child: EditableText(
-                          key: _editorKey,
-                          controller: widget.controller,
-                          focusNode: focus,
-                          style: LuminaTheme.of(context).textTheme.bodyMedium,
-                          cursorColor: colors.accent,
-                          backgroundCursorColor: colors.outline,
-                          selectionColor: colors.accentSoft,
-                          autofocus: widget.autofocus,
-                          readOnly: widget.readOnly || !widget.enabled,
-                          obscureText: widget.obscureText,
-                          maxLines: widget.obscureText ? 1 : widget.maxLines,
-                          minLines: widget.minLines,
-                          keyboardType: widget.keyboardType,
-                          textInputAction: widget.textInputAction,
-                          onChanged: widget.onChanged,
-                          onSubmitted: widget.onSubmitted,
-                          inputFormatters: widget.maxLength == null
-                              ? null
-                              : [
-                                  LengthLimitingTextInputFormatter(
-                                    widget.maxLength,
-                                  ),
-                                ],
+                          : null,
+                      child: ExcludeFocus(
+                        excluding: !widget.enabled,
+                        child: IgnorePointer(
+                          ignoring: !widget.enabled,
+                          child: EditableText(
+                            key: _editorKey,
+                            controller: widget.controller,
+                            focusNode: focus,
+                            style: LuminaTheme.of(context).textTheme.bodyMedium,
+                            cursorColor: colors.accent,
+                            backgroundCursorColor: colors.outline,
+                            selectionColor: colors.accentSoft,
+                            autofocus: widget.autofocus,
+                            readOnly: widget.readOnly || !widget.enabled,
+                            obscureText: widget.obscureText,
+                            maxLines: widget.obscureText ? 1 : widget.maxLines,
+                            minLines: widget.minLines,
+                            keyboardType: widget.keyboardType,
+                            textInputAction: widget.textInputAction,
+                            onChanged: widget.onChanged,
+                            onSubmitted: widget.onSubmitted,
+                            inputFormatters: widget.maxLength == null
+                                ? null
+                                : [
+                                    LengthLimitingTextInputFormatter(
+                                      widget.maxLength,
+                                    ),
+                                  ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ),
+            );
+            return neumorphic
+                ? LuminaSurface(
+                    depth: LuminaSurfaceDepth.recessed,
+                    radius: 16,
+                    padding: EdgeInsets.zero,
+                    child: field,
+                  )
+                : field;
+          },
         ),
       ],
     );
@@ -423,7 +441,9 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
     required MagnifierDecoration decoration,
     required Widget child,
   }) {
-    if (LuminaCardScope.of(context) || LuminaTheme.motionReducedOf(context)) {
+    if (LuminaTheme.of(context).data.neumorphic ||
+        LuminaCardScope.of(context) ||
+        LuminaTheme.motionReducedOf(context)) {
       return SizedBox.fromSize(size: size, child: child);
     }
     return RawMagnifier(
@@ -447,6 +467,62 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
             onLongPressCancel: _cancelDrag,
             child: widget.child,
           );
+    if (LuminaTheme.of(context).data.neumorphicGlass) {
+      Widget movingLayer({required bool cover}) => Positioned.fill(
+        child: IgnorePointer(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth / widget.count;
+              final rtl = Directionality.of(context) == TextDirection.rtl;
+              return AnimatedBuilder(
+                animation: position,
+                builder: (context, _) {
+                  final value = position.value.clamp(0.0, widget.count - 1.0);
+                  return Align(
+                    alignment: Alignment.centerLeft,
+                    child: Transform.translate(
+                      offset: Offset(
+                        (rtl ? widget.count - 1 - value : value) * width,
+                        0,
+                      ),
+                      child: SizedBox(
+                        width: width,
+                        height: constraints.maxHeight,
+                        child: cover
+                            ? const LuminaGlassCoat()
+                            : LuminaGlassWell(
+                                tint: widget.confirmed
+                                    ? LuminaTheme.of(context).colors.accentSoft
+                                    : null,
+                                child: widget.confirmed
+                                    ? Center(
+                                        child: LuminaIcon(
+                                          LuminaIcons.check,
+                                          size: 16,
+                                          color: LuminaTheme.of(context)
+                                              .colors
+                                              .ink,
+                                        ),
+                                      )
+                                    : const SizedBox.expand(),
+                              ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      );
+      return Stack(
+        children: [
+          movingLayer(cover: false),
+          content,
+          movingLayer(cover: true),
+        ],
+      );
+    }
     final lens = Positioned.fill(
       child: IgnorePointer(
         child: LayoutBuilder(
@@ -472,8 +548,13 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
                 child: CustomPaint(
                   key: const ValueKey('lumina-selection-lens'),
                   painter: _LuminaMaterial(
+                    neumorphic: LuminaTheme.of(context).data.neumorphic,
                     colors: LuminaTheme.of(context).colors,
-                    tint: LuminaCardScope.of(context)
+                    tint: LuminaTheme.of(context).data.neumorphic
+                        ? (widget.confirmed
+                              ? LuminaTheme.of(context).colors.accentSoft
+                              : LuminaTheme.of(context).colors.surface)
+                        : LuminaCardScope.of(context)
                         ? (widget.confirmed
                               ? LuminaTheme.of(context).colors.accent
                               : LuminaTheme.of(context).colors.accentSoft)
@@ -504,7 +585,8 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
                             LuminaIcons.check,
                             size: 16,
                             color:
-                                MediaQuery.highContrastOf(context) ||
+                                LuminaTheme.of(context).data.neumorphic ||
+                                    MediaQuery.highContrastOf(context) ||
                                     LuminaTheme.of(context).reduceTransparency
                                 ? LuminaTheme.of(context).colors.ink
                                 : LuminaTheme.of(context).colors.surface,
@@ -559,7 +641,8 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
     );
     // Opaque card lenses cannot magnify the label beneath them. Paint their
     // selection surface first, keeping the interactive label above it.
-    final card = LuminaCardScope.of(context);
+    final card =
+        LuminaCardScope.of(context) || LuminaTheme.of(context).data.neumorphic;
     return Stack(
       children: [
         Positioned.fill(child: _LuminaSelectionWell(backdrop: widget.backdrop)),
@@ -590,7 +673,10 @@ class _LuminaSelectionWell extends StatelessWidget {
     final theme = LuminaTheme.of(context);
     final card = LuminaCardScope.of(context);
     final opaque =
-        card || theme.reduceTransparency || MediaQuery.highContrastOf(context);
+        card ||
+        theme.data.neumorphic ||
+        theme.reduceTransparency ||
+        MediaQuery.highContrastOf(context);
     final config =
         theme.highPerformanceMode &&
             budget.level.index > LuminaBlurLevel.blurS.index
@@ -618,6 +704,7 @@ class _LuminaSelectionWell extends StatelessWidget {
               key: const ValueKey('lumina-selection-well'),
               painter: _LuminaMaterial(
                 colors: theme.colors,
+                neumorphic: theme.data.neumorphic,
                 tint: theme.colors.recessedSurface.withValues(
                   alpha: opaque ? 1 : .36,
                 ),

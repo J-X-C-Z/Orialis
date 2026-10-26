@@ -28,6 +28,7 @@ part 'lumina_completion.dart';
 part 'lumina_patterns.dart';
 part 'lumina_reorder.dart';
 part 'lumina_calendar.dart';
+part 'lumina_glass_sandwich.dart';
 
 /// Standard glass: backdrop diffusion, body tint, soft film and contact depth.
 /// Accessibility replaces transparency and motion without changing semantics.
@@ -172,6 +173,7 @@ class _LuminaSurfaceState extends State<LuminaSurface>
   @override
   Widget build(BuildContext context) {
     if (widget.depth == LuminaSurfaceDepth.recessed &&
+        !LuminaTheme.of(context).data.neumorphic &&
         !LuminaCardHost.of(context)) {
       return LuminaSurface(
         depth: LuminaSurfaceDepth.raised,
@@ -199,8 +201,11 @@ class _LuminaSurfaceState extends State<LuminaSurface>
     final theme = LuminaTheme.of(context);
     final opaque = contrast || theme.reduceTransparency;
     final card = LuminaCardScope.of(context);
-    final glass = widget.glass && !card;
-    final liquidGlass = !card && (widget.liquidGlass ?? theme.data.liquidGlass);
+    final neumorphic = theme.data.neumorphic;
+    final sandwich = neumorphic && theme.data.neumorphicGlass && widget.glass;
+    final glass = widget.glass && !card && !neumorphic;
+    final liquidGlass =
+        !neumorphic && !card && (widget.liquidGlass ?? theme.data.liquidGlass);
     final colors = theme.colors;
     final tint =
         widget.color ??
@@ -225,7 +230,16 @@ class _LuminaSurfaceState extends State<LuminaSurface>
       padding: widget.padding * theme.data.spacingScale,
       child: label,
     );
-    if (!transparent || focused) {
+    if (sandwich) {
+      content = LuminaGlassSandwich(
+        radius: widget.radius * theme.data.radiusScale,
+        padding: widget.padding * theme.data.spacingScale,
+        tint: widget.color,
+        focused: focused,
+        pressed: pressed,
+        child: label,
+      );
+    } else if (!transparent || focused) {
       final materialChild = content;
       content = LayoutBuilder(
         builder: (context, constraints) {
@@ -264,11 +278,12 @@ class _LuminaSurfaceState extends State<LuminaSurface>
                 glass: glass && !opaque,
                 diffuseGlass: widget.diffuseGlass,
                 liquidGlass: liquidGlass,
+                neumorphic: neumorphic,
                 radius: widget.radius >= LuminaControlSize.capsuleRadius
                     ? widget.radius
                     : widget.radius * theme.data.radiusScale,
                 depth: widget.depth,
-                shoulder: widget.shoulder,
+                shoulder: widget.shoulder && !neumorphic,
                 shoulderWidth: shoulderWidth,
                 contrast: contrast || (liquidGlass && opaque),
                 focused: focused,
@@ -805,6 +820,27 @@ class LuminaListRow extends StatelessWidget {
   );
 }
 
+/// Opt-in title material for a host's pages and modal routes.
+class LuminaGlassTitleScope extends InheritedWidget {
+  const LuminaGlassTitleScope({
+    required this.enabled,
+    required super.child,
+    super.key,
+  });
+
+  final bool enabled;
+
+  static bool of(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<LuminaGlassTitleScope>()
+          ?.enabled ??
+      false;
+
+  @override
+  bool updateShouldNotify(LuminaGlassTitleScope oldWidget) =>
+      enabled != oldWidget.enabled;
+}
+
 /// Shared heading for large content cards. The text starts at the same
 /// top-left inset even when the opposite side has a tall action control.
 class LuminaCardHeader extends StatelessWidget {
@@ -813,58 +849,81 @@ class LuminaCardHeader extends StatelessWidget {
     this.trailing,
     this.onTitleTap,
     this.expanded,
+    this.glassTitle,
     super.key,
   });
   final String title;
   final Widget? trailing;
   final VoidCallback? onTitleTap;
   final bool? expanded;
+  final bool? glassTitle;
   @override
-  Widget build(BuildContext context) => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Expanded(
-        child: Semantics(
-          header: true,
-          expanded: expanded,
-          child: LuminaTap(
-            onTap: onTitleTap,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: onTitleTap == null ? 0 : LuminaControlSize.minimum,
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Flexible(
-                    child: Text(
-                      title,
-                      style: LuminaTheme.of(context).textTheme.cardTitle,
-                    ),
-                  ),
-                  if (expanded != null) ...[
-                    const SizedBox(width: 8),
-                    AnimatedRotation(
-                      turns: expanded! ? .25 : 0,
-                      duration: LuminaTheme.motionReducedOf(context)
-                          ? Duration.zero
-                          : LuminaMotion.standard,
-                      curve: luminaEaseOut,
-                      child: const Padding(
-                        padding: EdgeInsets.only(top: 4),
-                        child: LuminaIcon(LuminaIcons.chevronRight, size: 18),
-                      ),
-                    ),
-                  ],
-                ],
+  Widget build(BuildContext context) {
+    final relief =
+        (glassTitle ?? LuminaGlassTitleScope.of(context)) &&
+        LuminaTheme.of(context).data.neumorphic &&
+        !MediaQuery.highContrastOf(context);
+    Widget heading = Row(
+      mainAxisSize: relief ? MainAxisSize.min : MainAxisSize.max,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Flexible(
+          child: Text(
+            title,
+            style: LuminaTheme.of(context).textTheme.cardTitle,
+          ),
+        ),
+        if (expanded != null) ...[
+          const SizedBox(width: 8),
+          AnimatedRotation(
+            turns: expanded! ? .25 : 0,
+            duration: LuminaTheme.motionReducedOf(context)
+                ? Duration.zero
+                : LuminaMotion.standard,
+            curve: luminaEaseOut,
+            child: const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: LuminaIcon(LuminaIcons.chevronRight, size: 18),
+            ),
+          ),
+        ],
+      ],
+    );
+    if (relief) {
+      heading = Align(
+        alignment: AlignmentDirectional.topStart,
+        child: LuminaSurface(
+          key: const ValueKey('lumina-glass-card-title'),
+          glass: true,
+          depth: LuminaSurfaceDepth.recessed,
+          radius: 16,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: heading,
+        ),
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Semantics(
+            header: true,
+            expanded: expanded,
+            child: LuminaTap(
+              onTap: onTitleTap,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: onTitleTap == null ? 0 : LuminaControlSize.minimum,
+                ),
+                child: heading,
               ),
             ),
           ),
         ),
-      ),
-      ?trailing,
-    ],
-  );
+        ?trailing,
+      ],
+    );
+  }
 }
 
 class LuminaSection extends StatelessWidget {
@@ -873,6 +932,7 @@ class LuminaSection extends StatelessWidget {
     required this.child,
     this.trailing,
     this.raised = false,
+    this.glassTitle,
     this.padding = LuminaCardMetrics.contentInsets,
     super.key,
   });
@@ -880,6 +940,7 @@ class LuminaSection extends StatelessWidget {
   final Widget child;
   final Widget? trailing;
   final bool raised;
+  final bool? glassTitle;
   final EdgeInsetsGeometry padding;
   @override
   Widget build(BuildContext context) {
@@ -896,8 +957,27 @@ class LuminaSection extends StatelessWidget {
         storageId: 'section:$title',
         title: title,
         trailing: trailing,
+        glassTitle: glassTitle,
         padding: padding,
         child: child,
+      );
+    }
+    if ((glassTitle ?? LuminaGlassTitleScope.of(context)) &&
+        LuminaTheme.of(context).data.neumorphic) {
+      return LuminaSurface(
+        padding: padding,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            LuminaCardHeader(
+              title: title,
+              trailing: trailing,
+              glassTitle: glassTitle,
+            ),
+            const SizedBox(height: LuminaCardMetrics.titleToContent),
+            child,
+          ],
+        ),
       );
     }
     return Column(

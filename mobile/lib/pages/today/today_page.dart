@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -137,81 +139,108 @@ class _TodayPageState extends ConsumerState<TodayPage>
                       .toList()
                     ..sort((a, b) => a.startAt.compareTo(b.startAt));
               final next = remaining.firstOrNull;
+              final neumorphic = LuminaTheme.of(context).data.neumorphic;
+              final glassTitle =
+                  !ref.watch(desktopModeProvider) &&
+                  (defaultTargetPlatform == TargetPlatform.android ||
+                      defaultTargetPlatform == TargetPlatform.iOS);
+              Widget paletteSection(LuminaCardPalette palette, Widget child) =>
+                  neumorphic
+                  ? LuminaPalette(palette: palette, child: child)
+                  : child;
               final sections = <Widget>[
-                LuminaSection(
-                  title: '现在关注',
-                  raised: true,
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      QuietLabel('${focus.length} 项'),
-                      LuminaIconButton(
-                        tooltip: '恢复此列表默认排序',
-                        icon: const LuminaIcon(LuminaIcons.sync, size: 16),
-                        onPressed: () => ref
-                            .read(taskRepositoryProvider)
-                            .resetTaskOrder(
-                              focus.map((task) => task.id).toList(),
+                paletteSection(
+                  LuminaCardPalette.ocean,
+                  LuminaSection(
+                    title: '现在关注',
+                    raised: true,
+                    glassTitle: glassTitle,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        QuietLabel('${focus.length} 项'),
+                        LuminaIconButton(
+                          tooltip: '恢复此列表默认排序',
+                          icon: const LuminaIcon(LuminaIcons.sync, size: 16),
+                          onPressed: () => ref
+                              .read(taskRepositoryProvider)
+                              .resetTaskOrder(
+                                focus.map((task) => task.id).toList(),
+                              ),
+                        ),
+                      ],
+                    ),
+                    child: LuminaCompletionList(
+                      empty: _empty('眼下没有需要赶的事。'),
+                      children: _orderedTasks(focus, 'today:focus'),
+                    ),
+                  ),
+                ),
+                paletteSection(
+                  LuminaCardPalette.sage,
+                  LuminaSection(
+                    title: '下一安排',
+                    raised: true,
+                    glassTitle: glassTitle,
+                    trailing: LuminaButton(
+                      primary: false,
+                      icon: LuminaIcon(
+                        LuminaIcons.calendar,
+                        size: 18,
+                        color: LuminaTheme.of(context).colors.muted,
+                      ),
+                      onPressed: () => context.go('/calendar'),
+                      child: Text(
+                        '日历',
+                        style: LuminaTheme.of(context).textTheme.bodyMedium
+                            .copyWith(
+                              color: LuminaTheme.of(context).colors.muted,
                             ),
                       ),
-                    ],
-                  ),
-                  child: LuminaCompletionList(
-                    empty: _empty('眼下没有需要赶的事。'),
-                    children: _orderedTasks(focus, 'today:focus'),
+                    ),
+                    child: next == null
+                        ? _empty('今天没有接下来的安排。')
+                        : _schedule(next),
                   ),
                 ),
-                LuminaSection(
-                  title: '下一安排',
-                  raised: true,
-                  trailing: LuminaButton(
-                    primary: false,
-                    icon: LuminaIcon(
-                      LuminaIcons.calendar,
-                      size: 18,
-                      color: LuminaTheme.of(context).colors.muted,
-                    ),
-                    onPressed: () => context.go('/calendar'),
-                    child: Text(
-                      '日历',
-                      style: LuminaTheme.of(context).textTheme.bodyMedium
-                          .copyWith(
-                            color: LuminaTheme.of(context).colors.muted,
+                paletteSection(
+                  LuminaCardPalette.amber,
+                  LuminaSection(
+                    title: '最近截止',
+                    raised: true,
+                    glassTitle: glassTitle,
+                    trailing: LuminaIconButton(
+                      tooltip: '恢复此列表默认排序',
+                      icon: const LuminaIcon(LuminaIcons.sync, size: 16),
+                      onPressed: () => ref
+                          .read(taskRepositoryProvider)
+                          .resetTaskOrder(
+                            deadlines.take(3).map((task) => task.id).toList(),
                           ),
                     ),
-                  ),
-                  child: next == null ? _empty('今天没有接下来的安排。') : _schedule(next),
-                ),
-                LuminaSection(
-                  title: '最近截止',
-                  raised: true,
-                  trailing: LuminaIconButton(
-                    tooltip: '恢复此列表默认排序',
-                    icon: const LuminaIcon(LuminaIcons.sync, size: 16),
-                    onPressed: () => ref
-                        .read(taskRepositoryProvider)
-                        .resetTaskOrder(
-                          deadlines.take(3).map((task) => task.id).toList(),
-                        ),
-                  ),
-                  child: LuminaCompletionList(
-                    empty: _empty('暂无未来的截止事项。'),
-                    children: _orderedTasks(
-                      deadlines.take(3).toList(),
-                      'today:deadlines',
+                    child: LuminaCompletionList(
+                      empty: _empty('暂无未来的截止事项。'),
+                      children: _orderedTasks(
+                        deadlines.take(3).toList(),
+                        'today:deadlines',
+                      ),
                     ),
                   ),
                 ),
-                LuminaSection(
-                  title: '今日稍后',
-                  raised: true,
-                  child: remaining.length < 2
-                      ? _empty('稍后留白，按自己的节奏继续。')
-                      : ContentStack(
-                          children: [
-                            for (final s in remaining.skip(1)) _schedule(s),
-                          ],
-                        ),
+                paletteSection(
+                  LuminaCardPalette.lavender,
+                  LuminaSection(
+                    title: '今日稍后',
+                    raised: true,
+                    glassTitle: glassTitle,
+                    child: remaining.length < 2
+                        ? _empty('稍后留白，按自己的节奏继续。')
+                        : ContentStack(
+                            children: [
+                              for (final s in remaining.skip(1)) _schedule(s),
+                            ],
+                          ),
+                  ),
                 ),
               ];
               return LayoutBuilder(

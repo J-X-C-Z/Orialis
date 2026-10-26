@@ -2,6 +2,21 @@ import '../../../core/database/app_database.dart';
 
 enum ChatTextKind { message, progress, internalNotice }
 
+final _summaryMessageId = RegExp(r'^progress_[a-f0-9]{24}$');
+final _finalMessageId = RegExp(r'^final_[a-f0-9]{24}$');
+
+bool isChatProgressSummary(Message message) =>
+    message.role == 'assistant' && _summaryMessageId.hasMatch(message.id);
+
+// Stream completion can be a mid-turn boundary; only a durable turn-final ID counts.
+Set<String> completedSummaryAnchors(Iterable<Message> messages) => {
+  for (final message in messages)
+    if (message.role == 'assistant' &&
+        _finalMessageId.hasMatch(message.id) &&
+        message.replyToMessageId?.isNotEmpty == true)
+      message.replyToMessageId!,
+};
+
 // Legacy Hermes messages have no visibility metadata after server persistence.
 // Match its notification envelopes, never ordinary mentions of these phrases.
 final _workingNotice = RegExp(

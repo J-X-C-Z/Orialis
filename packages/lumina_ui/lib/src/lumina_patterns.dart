@@ -8,11 +8,13 @@ class LuminaCollapsibleCard extends StatefulWidget {
     required this.child,
     this.trailing,
     this.summary,
+    this.glassTitle,
     this.padding = LuminaCardMetrics.contentInsets,
     super.key,
   });
   final String storageId, title;
   final String? summary;
+  final bool? glassTitle;
   final Widget child;
   final Widget? trailing;
   final EdgeInsetsGeometry padding;
@@ -37,6 +39,7 @@ class _LuminaCollapsibleCardState extends State<LuminaCollapsibleCard> {
           title: widget.title,
           trailing: widget.trailing,
           expanded: expanded,
+          glassTitle: widget.glassTitle,
           onTitleTap: () {
             setState(() => expanded = !expanded);
             LuminaCardMemory.save(widget.storageId, expanded);

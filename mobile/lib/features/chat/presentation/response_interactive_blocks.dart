@@ -1,12 +1,12 @@
 import 'dart:convert';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../domain/response_interactive_schema.dart';
+import 'response_table_block.dart';
 
 class ResponseInteractiveBlock extends StatefulWidget {
   const ResponseInteractiveBlock({
@@ -26,11 +26,9 @@ class ResponseInteractiveBlock extends StatefulWidget {
 class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
   final _values = <String, Object?>{};
   final _controllers = <String, TextEditingController>{};
-  final _search = TextEditingController();
   final _expanded = <int>{};
-  int? _sortColumn;
-  bool _ascending = true, _saving = false;
-  String? _error, _notice;
+  bool _submitted = false;
+  String? _notice;
 
   List<Map<String, dynamic>> get _items =>
       (widget.data['items'] as List).cast<Map<String, dynamic>>();
@@ -42,16 +40,10 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
   }
 
   void _reset() {
-    for (final controller in _controllers.values) {
-      controller.dispose();
-    }
-    _controllers.clear();
     _values.clear();
     _expanded.clear();
-    _search.clear();
-    _sortColumn = null;
-    _ascending = true;
-    _error = _notice = null;
+    _submitted = false;
+    _notice = null;
     if (widget.data['type'] != 'form') return;
     for (final item in _items) {
       final id = item['id'] as String;
@@ -62,7 +54,8 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
         _ => value,
       };
       if (item['kind'] == 'text' || item['kind'] == 'date') {
-        _controllers[id] = TextEditingController(text: value as String? ?? '');
+        (_controllers[id] ??= TextEditingController()).text =
+            value as String? ?? '';
       }
     }
   }
@@ -78,68 +71,140 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
     for (final controller in _controllers.values) {
       controller.dispose();
     }
-    _search.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => switch (widget.data['type']) {
     'form' => _form(),
-    'table' => _table(),
+    'table' => ResponseTableBlock(data: widget.data),
     'sources' => _sources(),
     'diff' => _diff(),
+    'accordion' => _accordion(),
     _ => const SizedBox.shrink(),
   };
 
-  Widget _form() => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      for (final item in _items)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: _field(item),
+  Widget _form() {
+    final theme = LuminaTheme.of(context);
+    final requiredCount = _items
+        .where((item) => item['required'] == true)
+        .length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          '${_items.length} 项信息 · $requiredCount 项必填',
+          style: theme.textTheme.bodySmall,
         ),
-      if (_error != null)
-        Text(_error!, style: const TextStyle(color: Colors.red)),
-      LuminaButton(
-        onPressed: widget.onPromptSelected == null
-            ? null
-            : () {
-                final error = responseFormError(widget.data, _values);
-                setState(() => _error = error);
-                if (error == null) {
-                  widget.onPromptSelected!(
-                    responseFormPrompt(widget.data, _values),
-                  );
-                  setState(() => _notice = '已填入输入框，请确认后发送');
-                }
+        const SizedBox(height: 12),
+        for (final item in _items)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: _field(item),
+          ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            LuminaButton(
+              onPressed: widget.onPromptSelected == null
+                  ? null
+                  : () {
+                      final error = responseFormError(widget.data, _values);
+                      setState(() => _submitted = true);
+                      if (error == null) {
+                        widget.onPromptSelected!(
+                          responseFormPrompt(widget.data, _values),
+                        );
+                        setState(() => _notice = '已填入输入框，请确认后发送');
+                      }
+                    },
+              child: const Text('填入输入框'),
+            ),
+            LuminaButton(
+              key: const ValueKey('form-reset'),
+              primary: false,
+              onPressed: () {
+                FocusScope.of(context).unfocus();
+                setState(_reset);
               },
-        child: const Text('填入输入框'),
-      ),
-      const SizedBox(height: 6),
-      Text(
-        _notice ?? '填写内容仅保留在当前视图；填入后由你确认发送。',
-        style: LuminaTheme.of(context).textTheme.bodySmall,
-      ),
-    ],
-  );
+              child: const Text('重置表单'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _notice ?? '填写内容仅保留在当前视图；填入后由你确认发送。',
+          style: theme.textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
 
   Widget _field(Map<String, dynamic> item) {
+    final theme = LuminaTheme.of(context);
     final id = item['id'] as String;
-    final label = '${item['label']}${item['required'] == true ? ' *' : ''}';
+    final error = _submitted ? responseFormFieldError(item, _values[id]) : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(item['label'] as String, style: theme.textTheme.labelMedium),
+            Text(
+              item['required'] == true ? '必填' : '选填',
+              style: theme.textTheme.bodySmall.copyWith(
+                color: item['required'] == true
+                    ? theme.colors.accent
+                    : theme.colors.muted,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Semantics(
+          label: '${item['label']}${item['required'] == true ? '，必填' : ''}',
+          child: _fieldControl(item),
+        ),
+        if (error != null) ...[
+          const SizedBox(height: 6),
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              error,
+              key: ValueKey('form-error-$id'),
+              style: theme.textTheme.bodySmall.copyWith(
+                color: theme.colors.danger,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  void _changeValue(String id, Object? value) => setState(() {
+    _values[id] = value;
+    _notice = null;
+  });
+
+  Widget _fieldControl(Map<String, dynamic> item) {
+    final id = item['id'] as String;
     switch (item['kind']) {
       case 'text':
       case 'date':
         final field = LuminaTextField(
           key: ValueKey('field-$id'),
           controller: _controllers[id]!,
-          label: label,
           hint: item['kind'] == 'date' ? 'YYYY-MM-DD' : '请输入',
           maxLength: item['kind'] == 'date' ? 10 : 1000,
           keyboardType: item['kind'] == 'date'
               ? TextInputType.datetime
               : TextInputType.text,
-          onChanged: (value) => _values[id] = value,
+          onChanged: (value) => _changeValue(id, value),
         );
         if (item['kind'] == 'text') return field;
         return Column(
@@ -169,7 +234,7 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
                   }
                   final value = selected.toIso8601String().substring(0, 10);
                   controller.text = value;
-                  _values[id] = value;
+                  _changeValue(id, value);
                 },
                 child: const Text('选择日期'),
               ),
@@ -182,8 +247,6 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(label, style: LuminaTheme.of(context).textTheme.labelMedium),
-            const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -199,6 +262,7 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
                           ? (_values[id] as List).contains(option)
                           : _values[id] == option,
                       onPressed: () => setState(() {
+                        _notice = null;
                         if (multiple) {
                           final selected = _values[id] as List<String>;
                           selected.contains(option)
@@ -220,219 +284,23 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('$label：${value.toStringAsFixed(2)}'),
+            Text(
+              '当前值：${value.toStringAsFixed(2)}',
+              style: LuminaTheme.of(context).textTheme.bodySmall,
+            ),
             Slider(
               key: ValueKey('slider-$id'),
               value: value,
               min: (item['min'] as num).toDouble(),
               max: (item['max'] as num).toDouble(),
               label: value.toStringAsFixed(2),
-              onChanged: (value) => setState(() => _values[id] = value),
+              onChanged: (value) => _changeValue(id, value),
             ),
           ],
         );
       default:
         return const SizedBox.shrink();
     }
-  }
-
-  List<Map<String, dynamic>> _visibleRows() {
-    final query = _search.text.trim().toLowerCase();
-    final rows = _items
-        .where(
-          (row) => '${row['label']} ${(row['cells'] as List).join(' ')}'
-              .toLowerCase()
-              .contains(query),
-        )
-        .toList();
-    final column = _sortColumn;
-    if (column != null) {
-      rows.sort((a, b) {
-        final left = (a['cells'] as List)[column];
-        final right = (b['cells'] as List)[column];
-        final comparison = left is num && right is num
-            ? left.compareTo(right)
-            : '$left'.compareTo('$right');
-        return _ascending ? comparison : -comparison;
-      });
-    }
-    return rows;
-  }
-
-  String _csv() => responseTableCsv(
-    (widget.data['columns'] as List).cast<String>(),
-    _visibleRows()
-        .map((row) => (row['cells'] as List).cast<Object?>())
-        .toList(),
-  );
-
-  Future<void> _saveCsv() async {
-    if (_saving) return;
-    setState(() {
-      _saving = true;
-      _notice = null;
-    });
-    try {
-      final path = await FilePicker.saveFile(
-        fileName: 'orialis-table.csv',
-        mimeType: 'text/csv',
-        type: FileType.custom,
-        allowedExtensions: ['csv'],
-        bytes: Uint8List.fromList(utf8.encode('\uFEFF${_csv()}')),
-      );
-      if (mounted && path != null) setState(() => _notice = '表格已导出');
-    } catch (_) {
-      if (mounted) setState(() => _notice = '导出失败，请重试或复制 CSV');
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  Widget _table() {
-    final columns = (widget.data['columns'] as List).cast<String>();
-    final rows = _visibleRows();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        LuminaTextField(
-          controller: _search,
-          label: '筛选表格',
-          hint: '搜索任意单元格',
-          onChanged: (_) => setState(() {}),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          '显示 ${rows.length} / ${_items.length} 行；点击列名排序',
-          style: LuminaTheme.of(context).textTheme.bodySmall,
-        ),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            sortColumnIndex: _sortColumn == null ? null : _sortColumn! + 1,
-            sortAscending: _ascending,
-            dataRowMinHeight: 48,
-            dataRowMaxHeight: double.infinity,
-            columns: [
-              const DataColumn(label: Text('详情')),
-              for (var i = 0; i < columns.length; i++)
-                DataColumn(
-                  label: Text(columns[i]),
-                  onSort: (column, ascending) => setState(() {
-                    _sortColumn = i;
-                    _ascending = ascending;
-                  }),
-                ),
-            ],
-            rows: [
-              for (final row in rows)
-                DataRow(
-                  cells: [
-                    DataCell(
-                      Semantics(
-                        label: '${row['label']} 展开行',
-                        child: TextButton(
-                          style: TextButton.styleFrom(
-                            foregroundColor: LuminaTheme.of(context)
-                                .colors
-                                .accent,
-                            textStyle: LuminaTheme.of(context)
-                                .textTheme
-                                .labelMedium,
-                          ),
-                          onPressed: () => _showRow(columns, row),
-                          child: const Text('展开行'),
-                        ),
-                      ),
-                    ),
-                    for (final cell in row['cells'] as List)
-                      DataCell(
-                        SizedBox(
-                          width: 180,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Text(
-                              '$cell',
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            LuminaButton(
-              primary: false,
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: _csv()));
-                if (mounted) setState(() => _notice = 'CSV 已复制');
-              },
-              child: const Text('复制 CSV'),
-            ),
-            LuminaButton(
-              primary: false,
-              onPressed: _saving ? null : _saveCsv,
-              child: Text(_saving ? '正在导出…' : '导出 CSV'),
-            ),
-          ],
-        ),
-        if (_notice != null) Text(_notice!),
-      ],
-    );
-  }
-
-  Future<void> _showRow(List<String> columns, Map<String, dynamic> row) {
-    final theme = LuminaTheme.of(context);
-    final media = MediaQuery.of(context);
-    return showDialog<void>(
-      context: context,
-      builder: (context) => MediaQuery(
-        data: media,
-        child: LuminaTheme(
-          data: theme.data,
-          brightness: theme.brightness,
-          tint: theme.tint,
-          darkProgress: theme.darkProgress,
-          highPerformanceMode: theme.highPerformanceMode,
-          reduceTransparency: theme.reduceTransparency,
-          child: AlertDialog(
-            insetPadding: const EdgeInsets.all(16),
-            scrollable: true,
-            title: Text(row['label'] as String),
-            content: SizedBox(
-              width: 520,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (var i = 0; i < columns.length; i++) ...[
-                    Text(
-                      columns[i],
-                      style: LuminaTheme.of(context).textTheme.labelMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    LuminaSelectableText('${(row['cells'] as List)[i]}'),
-                    const SizedBox(height: 12),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('关闭详情'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   Future<void> _openSource(String url) async {
@@ -447,97 +315,215 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
     }
   }
 
-  Widget _sources() => Column(
+  Widget _panel(Widget child) => LuminaSurface(
+    radius: 16,
+    padding: const EdgeInsets.all(12),
+    child: child,
+  );
+
+  void _toggle(int index) => setState(() {
+    _expanded.contains(index) ? _expanded.remove(index) : _expanded.add(index);
+  });
+
+  Widget _accordion() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      for (var i = 0; i < _items.length; i++) ...[
-        Text(
-          '${i + 1}. ${_items[i]['label']}',
-          style: LuminaTheme.of(context).textTheme.recessedTitle,
-        ),
-        if (_items[i]['sourceId'] != null)
-          Text('来源编号：${_items[i]['sourceId']}'),
-        LuminaSelectableText(_items[i]['url'] as String),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            LuminaButton(
-              primary: false,
-              onPressed: () => _openSource(_items[i]['url'] as String),
-              child: const Text('打开来源'),
+      for (var i = 0; i < _items.length; i++)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: _panel(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Semantics(
+                  expanded: _expanded.contains(i),
+                  child: LuminaButton(
+                    key: ValueKey('accordion-toggle-$i'),
+                    primary: false,
+                    icon: Icon(
+                      _expanded.contains(i)
+                          ? Icons.expand_less
+                          : Icons.expand_more,
+                      color: LuminaTheme.of(context).colors.accent,
+                    ),
+                    onPressed: () => _toggle(i),
+                    child: Text(_items[i]['label'] as String),
+                  ),
+                ),
+                if (_expanded.contains(i)) ...[
+                  const SizedBox(height: 12),
+                  LuminaSelectableText(
+                    _items[i]['content'] as String,
+                    key: ValueKey('accordion-content-$i'),
+                    style: LuminaTheme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ],
             ),
-            LuminaButton(
-              primary: false,
-              onPressed: () => Clipboard.setData(
-                ClipboardData(text: _items[i]['url'] as String),
-              ),
-              child: const Text('复制地址'),
-            ),
-            if (_items[i]['excerpt'] != null)
-              LuminaButton(
-                primary: false,
-                onPressed: () => setState(() {
-                  _expanded.contains(i)
-                      ? _expanded.remove(i)
-                      : _expanded.add(i);
-                }),
-                child: Text(_expanded.contains(i) ? '收起摘录' : '查看摘录'),
-              ),
-          ],
+          ),
         ),
-        if (_expanded.contains(i)) ...[
-          const SizedBox(height: 8),
-          LuminaSelectableText(_items[i]['excerpt'] as String),
-        ],
-        const SizedBox(height: 16),
-      ],
-      if (_notice != null) Text(_notice!),
     ],
   );
+
+  Widget _sources() {
+    final theme = LuminaTheme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('${_items.length} 个来源', style: theme.textTheme.bodySmall),
+        const SizedBox(height: 8),
+        for (var i = 0; i < _items.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _panel(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '${i + 1}. ${_items[i]['label']}',
+                    style: theme.textTheme.recessedTitle,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    Uri.parse(_items[i]['url'] as String).host,
+                    style: theme.textTheme.labelMedium.copyWith(
+                      color: theme.colors.accent,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      LuminaButton(
+                        primary: false,
+                        onPressed: () =>
+                            _openSource(_items[i]['url'] as String),
+                        child: const Text('打开来源'),
+                      ),
+                      LuminaButton(
+                        primary: false,
+                        onPressed: () => Clipboard.setData(
+                          ClipboardData(text: _items[i]['url'] as String),
+                        ),
+                        child: const Text('复制地址'),
+                      ),
+                      if (_items[i]['excerpt'] != null)
+                        LuminaButton(
+                          primary: false,
+                          onPressed: () => _toggle(i),
+                          child: Text(_expanded.contains(i) ? '收起摘录' : '查看摘录'),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (_items[i]['sourceId'] != null)
+                    Text(
+                      '来源编号：${_items[i]['sourceId']}',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  LuminaSelectableText(
+                    _items[i]['url'] as String,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  if (_expanded.contains(i)) ...[
+                    const SizedBox(height: 12),
+                    Text('摘录', style: theme.textTheme.labelMedium),
+                    const SizedBox(height: 6),
+                    LuminaSelectableText(_items[i]['excerpt'] as String),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        if (_notice != null) Text(_notice!, style: theme.textTheme.bodySmall),
+      ],
+    );
+  }
 
   Widget _diff() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      for (var i = 0; i < _items.length; i++) ...[
-        Text(
-          _items[i]['label'] as String,
-          style: LuminaTheme.of(context).textTheme.recessedTitle,
+      for (var i = 0; i < _items.length; i++)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _diffCard(i),
         ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            LuminaButton(
-              primary: false,
-              onPressed: () => setState(() {
-                _expanded.contains(i) ? _expanded.remove(i) : _expanded.add(i);
-              }),
-              child: Text(_expanded.contains(i) ? '收起对比' : '展开对比'),
-            ),
-            LuminaButton(
-              primary: false,
-              onPressed: () async {
-                await Clipboard.setData(
-                  ClipboardData(text: _items[i]['after'] as String),
-                );
-                if (mounted) setState(() => _notice = '修改后的内容已复制');
-              },
-              child: const Text('复制修改后内容'),
-            ),
-          ],
-        ),
-        if (_expanded.contains(i)) _diffLines(_items[i]),
-        const SizedBox(height: 12),
-      ],
-      if (_notice != null) Text(_notice!),
+      if (_notice != null)
+        Text(_notice!, style: LuminaTheme.of(context).textTheme.bodySmall),
     ],
   );
 
-  Widget _diffLines(Map<String, dynamic> item) {
-    final before = (item['before'] as String).split('\n');
-    final after = (item['after'] as String).split('\n');
+  Widget _diffCard(int index) {
+    final theme = LuminaTheme.of(context);
+    final item = _items[index];
+    final lines = _diffRows(item);
+    final added = lines.where((line) => line.$1 == '+').length;
+    final removed = lines.where((line) => line.$1 == '−').length;
+    return _panel(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(item['label'] as String, style: theme.textTheme.recessedTitle),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 12,
+            runSpacing: 4,
+            children: [
+              Text(
+                '新增 $added 行',
+                style: theme.textTheme.bodySmall.copyWith(
+                  color: theme.colors.accent,
+                ),
+              ),
+              Text(
+                '移除 $removed 行',
+                style: theme.textTheme.bodySmall.copyWith(
+                  color: theme.colors.danger,
+                ),
+              ),
+              if (added == 0 && removed == 0)
+                Text('无变更', style: theme.textTheme.bodySmall),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              LuminaButton(
+                primary: false,
+                onPressed: () => _toggle(index),
+                child: Text(_expanded.contains(index) ? '收起对比' : '展开对比'),
+              ),
+              LuminaButton(
+                primary: false,
+                onPressed: () async {
+                  await Clipboard.setData(
+                    ClipboardData(text: item['after'] as String),
+                  );
+                  if (mounted) setState(() => _notice = '修改后的内容已复制');
+                },
+                child: const Text('复制修改后内容'),
+              ),
+            ],
+          ),
+          if (_expanded.contains(index)) ...[
+            const SizedBox(height: 12),
+            Text('− 修改前 / + 修改后', style: theme.textTheme.bodySmall),
+            const SizedBox(height: 6),
+            _diffLines(lines),
+          ],
+        ],
+      ),
+    );
+  }
+
+  List<(String, String)> _diffRows(Map<String, dynamic> item) {
+    final oldText = item['before'] as String;
+    final newText = item['after'] as String;
+    final before = oldText.isEmpty ? <String>[] : oldText.split('\n');
+    final after = newText.isEmpty ? <String>[] : newText.split('\n');
     var prefix = 0, suffix = 0;
     while (prefix < before.length &&
         prefix < after.length &&
@@ -550,7 +536,7 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
             after[after.length - suffix - 1]) {
       suffix++;
     }
-    final lines = <(String, String)>[
+    return <(String, String)>[
       for (final line in before.take(prefix)) (' ', line),
       for (final line
           in before.skip(prefix).take(before.length - prefix - suffix))
@@ -560,6 +546,10 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
         ('+', line),
       for (final line in after.skip(after.length - suffix)) (' ', line),
     ];
+  }
+
+  Widget _diffLines(List<(String, String)> lines) {
+    final colors = LuminaTheme.of(context).colors;
     return SizedBox(
       height: 320,
       child: ListView.builder(
@@ -568,15 +558,19 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
           final (marker, line) = lines[index];
           return ColoredBox(
             color: marker == '+'
-                ? Colors.green.withValues(alpha: .1)
+                ? colors.accent.withValues(alpha: .12)
                 : marker == '−'
-                ? Colors.red.withValues(alpha: .1)
+                ? colors.danger.withValues(alpha: .12)
                 : Colors.transparent,
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 6),
               child: LuminaSelectableText(
                 '$marker $line',
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  color: colors.ink,
+                ),
               ),
             ),
           );

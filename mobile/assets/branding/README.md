@@ -21,3 +21,7 @@ Build Android variants sequentially, preserving each APK before building the
 next. After `integration_test` is used, run the normal release build preparation
 (without `--no-pub`) so Flutter regenerates its release plugin registrant.
 An isolated build directory also avoids interference with concurrent work.
+
+## Hybrid UI experiment — 2026-10-25
+
+`orialis-neumorphic.png` is the new Orialis O-loop master, generated with the built-in imagegen tool for the user-requested light neumorphic/frosted-glass identity. The original schedule/news masters remain available. This branch derives Android launcher, macOS AppIcon and Windows ICO resources from the new master, and references it in the profile and desktop brand. The generation prompt and original output are retained in the UI delivery.

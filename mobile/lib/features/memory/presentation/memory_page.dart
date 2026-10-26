@@ -516,14 +516,20 @@ class _MemoryDetailPageState extends State<_MemoryDetailPage> {
           ],
           if (record.summary != null) ...[
             const SizedBox(height: 20),
-            const Text('内容摘要'),
+            if (LuminaGlassTitleScope.of(context))
+              const LuminaCardHeader(title: '内容摘要')
+            else
+              const Text('内容摘要'),
             const SizedBox(height: 8),
             SafeMarkdownView(source: record.summary!),
           ],
           if (record.videoStatus == 'analyzed' ||
               record.videoStatus == 'unavailable') ...[
             const SizedBox(height: 20),
-            const Text('视频理解'),
+            if (LuminaGlassTitleScope.of(context))
+              const LuminaCardHeader(title: '视频理解')
+            else
+              const Text('视频理解'),
             const SizedBox(height: 8),
             if (record.videoStatus == 'analyzed')
               SafeMarkdownView(
@@ -539,12 +545,18 @@ class _MemoryDetailPageState extends State<_MemoryDetailPage> {
           ],
           if (record.notes.isNotEmpty) ...[
             const SizedBox(height: 20),
-            const Text('我的笔记'),
+            if (LuminaGlassTitleScope.of(context))
+              const LuminaCardHeader(title: '我的笔记')
+            else
+              const Text('我的笔记'),
             const SizedBox(height: 8),
             LuminaSelectableText(record.notes),
           ],
           const SizedBox(height: 20),
-          const Text('捕获到的链接'),
+          if (LuminaGlassTitleScope.of(context))
+            const LuminaCardHeader(title: '捕获到的链接')
+          else
+            const Text('捕获到的链接'),
           if (record.urls.isEmpty)
             const Text('这次未获取到链接。可在原应用通过「分享 → Orialis 记忆」保存原始链接。'),
           for (final url in record.urls)
@@ -583,7 +595,10 @@ class _MemoryDetailPageState extends State<_MemoryDetailPage> {
             ),
           if (record.imagePath != null) ...[
             const SizedBox(height: 20),
-            const Text('原始截图'),
+            if (LuminaGlassTitleScope.of(context))
+              const LuminaCardHeader(title: '原始截图')
+            else
+              const Text('原始截图'),
             const SizedBox(height: 8),
             _MemoryImage(
               key: const ValueKey('memory-original-screenshot'),
@@ -591,7 +606,10 @@ class _MemoryDetailPageState extends State<_MemoryDetailPage> {
             ),
           ],
           const SizedBox(height: 20),
-          const Text('原始内容'),
+          if (LuminaGlassTitleScope.of(context))
+            const LuminaCardHeader(title: '原始内容')
+          else
+            const Text('原始内容'),
           const SizedBox(height: 8),
           const Text('这里保留实际收到的截图、分享文案和链接，不代表已获取笔记或视频全文。'),
           const SizedBox(height: 8),

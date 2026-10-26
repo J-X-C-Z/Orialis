@@ -74,6 +74,7 @@ class _LuminaCardBoxPainter extends BoxPainter {
       focused: false,
       pressed: false,
       cheapShadow: decoration.highPerformance,
+      neumorphic: decoration.colors.neumorphic,
       physicalShadow: true,
     ).paint(canvas, size);
     canvas.restore();
@@ -95,6 +96,8 @@ class _LuminaMaterial extends CustomPainter {
     this.glass = false,
     this.diffuseGlass = false,
     this.liquidGlass = false,
+    this.embeddedGlass = false,
+    this.neumorphic = false,
     this.cheapShadow = false,
     this.physicalShadow = false,
     this.blurCompensation = 0,
@@ -109,6 +112,8 @@ class _LuminaMaterial extends CustomPainter {
   final bool glass;
   final bool diffuseGlass;
   final bool liquidGlass;
+  final bool embeddedGlass;
+  final bool neumorphic;
   final bool cheapShadow;
   final bool physicalShadow;
 
@@ -118,7 +123,12 @@ class _LuminaMaterial extends CustomPainter {
   static final Map<(Size, double, bool, double?), Path> _outlineCache = {};
 
   Path _outline(Size size) {
-    final key = (size, radius, shoulder, shoulderWidth);
+    final key = (
+      size,
+      radius,
+      shoulder && !neumorphic,
+      neumorphic ? null : shoulderWidth,
+    );
     final hit = _outlineCache.remove(key);
     if (hit != null) {
       _outlineCache[key] = hit;
@@ -135,7 +145,7 @@ class _LuminaMaterial extends CustomPainter {
   Path _makeOutline(Size size) {
     final w = size.width, h = size.height;
     final r = radius.clamp(0.0, size.shortestSide / 2).toDouble();
-    if (!shoulder || w < 160 || h < 64) {
+    if (neumorphic || !shoulder || w < 160 || h < 64) {
       return Path()..addRRect(RRect.fromLTRBR(0, 0, w, h, Radius.circular(r)));
     }
     final shelf = (shoulderWidth ?? r * 2)
@@ -222,6 +232,14 @@ class _LuminaMaterial extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
     final path = _outline(size), rect = Offset.zero & size;
+    if (neumorphic) {
+      _paintNeumorphic(canvas, path, rect);
+      return;
+    }
+    if (embeddedGlass) {
+      _paintEmbeddedGlass(canvas, path, rect);
+      return;
+    }
     if (liquidGlass) {
       _paintLiquidGlass(canvas, path, rect);
       return;
@@ -582,6 +600,71 @@ class _LuminaMaterial extends CustomPainter {
     );
   }
 
+  /// A lens seated in its well: a short sidewall lifts the clear top just
+  /// above the rim, while a tight contact shadow keeps it attached to the seat.
+  void _paintEmbeddedGlass(Canvas canvas, Path path, Rect rect) {
+    final base = colors.surface;
+    const white = Color(0xFFFFFFFF);
+    final wall = Color.lerp(base, colors.accent, .16)!;
+    final contact = Color.lerp(base, const Color(0xFF152337), .28)!;
+    final height = pressed ? .35 : 1.4;
+    final face = path.shift(Offset(0, pressed ? .15 : -.7));
+    canvas.save();
+    canvas.clipPath(
+      Path()
+        ..fillType = PathFillType.evenOdd
+        ..addRect(rect.inflate(8))
+        ..addPath(face, Offset.zero),
+    );
+    canvas.drawPath(
+      path.shift(Offset(0, height)),
+      Paint()
+        ..color = contact.withValues(alpha: colors.toneValue(.22, .35))
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.3),
+    );
+    canvas.drawPath(
+      path.shift(Offset(0, height)),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..shader = ui.Gradient.linear(rect.topCenter, rect.bottomCenter, [
+          white.withValues(alpha: colors.toneValue(.38, .12)),
+          wall.withValues(alpha: colors.toneValue(.44, .64)),
+        ]),
+    );
+    canvas.restore();
+    canvas.drawPath(
+      face,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          rect.topLeft,
+          rect.bottomRight,
+          [
+            white.withValues(alpha: colors.toneValue(.15, .065)),
+            wall.withValues(alpha: .025),
+            white.withValues(alpha: colors.toneValue(.055, .025)),
+          ],
+          [0, .48, 1],
+        ),
+    );
+    canvas.drawPath(
+      face,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.05
+        ..shader = ui.Gradient.linear(
+          rect.topLeft,
+          rect.bottomRight,
+          [
+            white.withValues(alpha: colors.toneValue(.86, .40)),
+            wall.withValues(alpha: colors.toneValue(.25, .40)),
+            white.withValues(alpha: colors.toneValue(.55, .20)),
+          ],
+          [0, .58, 1],
+        ),
+    );
+  }
+
   static final Map<Size, List<Offset>> _glassGrainPoints = {};
 
   /// Micro-noise + soft highlight that replaces the quality of a large
@@ -630,8 +713,73 @@ class _LuminaMaterial extends CustomPainter {
     canvas.restore();
   }
 
+  void _paintNeumorphic(Canvas canvas, Path path, Rect rect) {
+    final inset = pressed || depth == LuminaSurfaceDepth.recessed;
+    final base = Color.alphaBlend(tint, colors.surface).withValues(alpha: 1);
+    final light = inset
+        ? Color.lerp(base, const Color(0xFFFFFFFF), colors.toneValue(.62, .14))!
+        : colors.tone(const Color(0xFFFAFAFA), const Color(0xFF3B414B));
+    final shade = inset
+        ? Color.lerp(
+            Color.lerp(base, colors.accent, .10),
+            const Color(0xFF152337),
+            colors.toneValue(.22, .28),
+          )!
+        : colors.tone(const Color(0xFFB7B7B7), const Color(0xFF181B20));
+    final distance = math.min(
+      rect.shortestSide * (inset ? .065 : .10),
+      inset ? 3.5 : 6.0,
+    );
+    final blur = distance * 1.7;
+    final offset = Offset(distance, distance);
+    final paint = Paint()..maskFilter = MaskFilter.blur(BlurStyle.normal, blur);
+    if (!inset && !contrast) {
+      canvas.drawPath(path.shift(-offset), paint..color = light);
+      canvas.drawPath(path.shift(offset), paint..color = shade);
+    }
+    canvas.drawPath(
+      path,
+      inset && !contrast
+          ? (Paint()
+              ..shader = ui.Gradient.linear(
+                rect.topLeft,
+                rect.bottomRight,
+                [
+                  Color.lerp(base, shade, .16)!,
+                  base,
+                  Color.lerp(base, light, .08)!,
+                ],
+                [0, .52, 1],
+              ))
+          : (Paint()..color = tint),
+    );
+    if (inset && !contrast) {
+      // Clip the blurred outside shape into the well, without a saveLayer.
+      final outside = Path()
+        ..fillType = PathFillType.evenOdd
+        ..addRect(rect.inflate(40))
+        ..addPath(path, Offset.zero);
+      canvas.save();
+      canvas.clipPath(path);
+      canvas.drawPath(outside.shift(offset), paint..color = shade);
+      canvas.drawPath(outside.shift(-offset), paint..color = light);
+      canvas.restore();
+    }
+    if (focused || contrast) {
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = focused ? colors.accent : colors.ink
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = focused ? 2 : 1,
+      );
+    }
+  }
+
   @override
   bool shouldRepaint(_LuminaMaterial old) =>
+      old.neumorphic != neumorphic ||
+      old.embeddedGlass != embeddedGlass ||
       old.shoulderWidth != shoulderWidth ||
       old.colors.darkProgress != colors.darkProgress ||
       old.colors.tint != colors.tint ||

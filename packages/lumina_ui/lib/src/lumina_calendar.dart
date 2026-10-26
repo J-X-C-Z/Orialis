@@ -101,13 +101,17 @@ class LuminaTitledContentCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Semantics(
-          header: true,
-          child: Text(
-            title,
-            style: LuminaTheme.of(context).textTheme.titleMedium,
+        if (LuminaGlassTitleScope.of(context) &&
+            LuminaTheme.of(context).data.neumorphic)
+          LuminaCardHeader(title: title)
+        else
+          Semantics(
+            header: true,
+            child: Text(
+              title,
+              style: LuminaTheme.of(context).textTheme.titleMedium,
+            ),
           ),
-        ),
         const SizedBox(height: 14),
         if (children.isEmpty)
           Text(

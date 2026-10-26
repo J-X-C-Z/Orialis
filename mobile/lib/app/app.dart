@@ -226,7 +226,7 @@ final syncEngineProvider = Provider<SyncEngine>((ref) {
   return SyncEngine(
     database: ref.watch(databaseProvider),
     config: ref.watch(appConfigProvider),
-    includeChat: !ref.watch(desktopModeProvider),
+    includeChat: true,
     requireSession: true,
   );
 });
@@ -239,11 +239,15 @@ final realtimeClientProvider = Provider<MobileRealtimeClient>((ref) {
   final desktop = ref.watch(desktopModeProvider);
   final client = MobileRealtimeClient(
     config: ref.watch(appConfigProvider),
-    platform: desktop ? 'macos' : 'android',
+    platform: desktop
+        ? switch (defaultTargetPlatform) {
+            TargetPlatform.windows => 'windows',
+            TargetPlatform.linux => 'linux',
+            _ => 'macos',
+          }
+        : 'android',
     clientName: desktop ? 'orialis_desktop' : 'orialis_mobile',
-    advertisedCapabilities: desktop
-        ? const {}
-        : MobileRealtimeClient.clientCapabilities,
+    advertisedCapabilities: MobileRealtimeClient.clientCapabilities,
   );
   ref.onDispose(client.dispose);
   return client;
@@ -254,9 +258,7 @@ final syncCoordinatorProvider = Provider<SyncCoordinator>((ref) {
     sync: ref.watch(syncEngineProvider).syncOnce,
     flushChatMessage: ref.watch(syncEngineProvider).flushChatMessage,
     realtime: ref.watch(realtimeClientProvider),
-    chatRepository: ref.watch(desktopModeProvider)
-        ? null
-        : ref.watch(chatRepositoryProvider),
+    chatRepository: ref.watch(chatRepositoryProvider),
     localChanges: ref.watch(desktopModeProvider)
         ? watchDesktopLocalChanges(ref.watch(databaseProvider))
         : null,
@@ -413,26 +415,32 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
         return AnimatedLuminaTheme(
           brightness: brightness,
           highPerformanceMode: highPerformanceMode,
-          data: LuminaThemeData(liquidGlass: ref.watch(desktopModeProvider)),
-          child: LuminaMaterialBridge(
-            child: Builder(
-              builder: (context) => DefaultTextStyle(
-                style: LuminaTheme.of(context).textTheme.bodyMedium,
-                child: AnnotatedRegion<SystemUiOverlayStyle>(
-                  value: brightness == Brightness.dark
-                      ? SystemUiOverlayStyle.light
-                      : SystemUiOverlayStyle.dark,
-                  child: Material(
-                    animationDuration: Duration.zero,
-                    color: LuminaTheme.of(context).colors.paper,
-                    textStyle: LuminaTheme.of(context).textTheme.bodyMedium,
-                    child: SafeArea(
-                      bottom: false,
-                      child: Column(
-                        children: [
-                          const LegacyRecoveryNotice(),
-                          Expanded(child: child ?? const SizedBox.shrink()),
-                        ],
+          data: const LuminaThemeData(neumorphic: true, neumorphicGlass: true),
+          child: LuminaGlassTitleScope(
+            enabled:
+                !ref.watch(desktopModeProvider) &&
+                (defaultTargetPlatform == TargetPlatform.android ||
+                    defaultTargetPlatform == TargetPlatform.iOS),
+            child: LuminaMaterialBridge(
+              child: Builder(
+                builder: (context) => DefaultTextStyle(
+                  style: LuminaTheme.of(context).textTheme.bodyMedium,
+                  child: AnnotatedRegion<SystemUiOverlayStyle>(
+                    value: brightness == Brightness.dark
+                        ? SystemUiOverlayStyle.light
+                        : SystemUiOverlayStyle.dark,
+                    child: Material(
+                      animationDuration: Duration.zero,
+                      color: LuminaTheme.of(context).colors.paper,
+                      textStyle: LuminaTheme.of(context).textTheme.bodyMedium,
+                      child: SafeArea(
+                        bottom: false,
+                        child: Column(
+                          children: [
+                            const LegacyRecoveryNotice(),
+                            Expanded(child: child ?? const SizedBox.shrink()),
+                          ],
+                        ),
                       ),
                     ),
                   ),

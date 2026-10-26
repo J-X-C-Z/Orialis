@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show DesktopLayoutScope;
+import 'package:orialis_mobile/pages/shared/desktop_insights.dart';
 
 /// Desktop navigation reuses the same local-first product pages.
 class DesktopShell extends StatefulWidget {
@@ -18,6 +20,7 @@ class DesktopShell extends StatefulWidget {
     'GitHub',
     'Project',
     'Web 服务',
+    'Chat',
   ];
   static const icons = [
     LuminaIcons.today,
@@ -29,6 +32,7 @@ class DesktopShell extends StatefulWidget {
     LuminaIcons.branch,
     LuminaIcons.folder,
     LuminaIcons.devices,
+    LuminaIcons.chat,
   ];
 
   @override
@@ -47,6 +51,7 @@ class _DesktopShellState extends State<DesktopShell> {
     LogicalKeyboardKey.digit7: 6,
     LogicalKeyboardKey.digit8: 7,
     LogicalKeyboardKey.digit9: 8,
+    LogicalKeyboardKey.digit0: 9,
   };
 
   @override
@@ -68,9 +73,13 @@ class _DesktopShellState extends State<DesktopShell> {
   }
 
   bool _handleKeyEvent(KeyEvent event) {
+    final macOS = defaultTargetPlatform == TargetPlatform.macOS;
     if (event is! KeyDownEvent ||
-        !HardwareKeyboard.instance.isMetaPressed ||
-        HardwareKeyboard.instance.isControlPressed ||
+        (macOS
+            ? !HardwareKeyboard.instance.isMetaPressed ||
+                  HardwareKeyboard.instance.isControlPressed
+            : !HardwareKeyboard.instance.isControlPressed ||
+                  HardwareKeyboard.instance.isMetaPressed) ||
         HardwareKeyboard.instance.isAltPressed ||
         HardwareKeyboard.instance.isShiftPressed ||
         _route?.isCurrent != true) {
@@ -88,52 +97,76 @@ class _DesktopShellState extends State<DesktopShell> {
   }
 
   Widget _destination(int index, {bool compact = false}) {
-    final theme = LuminaTheme.of(context);
     final selected = widget.navigationShell.currentIndex == index;
-    return Semantics(
-      selected: selected,
-      child: LuminaSurface(
-        radius: 14,
-        glass: selected,
-        backdrop: selected,
-        color: selected
-            ? theme.colors.accentSoft.withValues(alpha: .65)
-            : const Color(0x00000000),
-        onTap: () => widget.navigationShell.goBranch(index),
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? 8 : 12,
-          vertical: 12,
-        ),
-        child: compact
-            ? Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  LuminaIcon(DesktopShell.icons[index], size: 20),
-                  const SizedBox(height: 4),
-                  Text(DesktopShell.labels[index]),
-                ],
-              )
-            : Row(
-                children: [
-                  LuminaIcon(
-                    DesktopShell.icons[index],
-                    size: 20,
-                    color: selected ? theme.colors.accent : theme.colors.muted,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      DesktopShell.labels[index],
-                      style: theme.textTheme.bodyMedium.copyWith(
-                        fontWeight: selected
-                            ? FontWeight.w600
-                            : FontWeight.w400,
-                      ),
-                    ),
-                  ),
-                  Text('⌘${index + 1}', style: theme.textTheme.bodySmall),
-                ],
+    final palette = switch (index) {
+      0 || 3 => LuminaCardPalette.ocean,
+      1 => LuminaCardPalette.amber,
+      2 || 7 || 9 => LuminaCardPalette.lavender,
+      4 || 8 => LuminaCardPalette.mist,
+      5 => LuminaCardPalette.rose,
+      _ => LuminaCardPalette.sage,
+    };
+    final digit = index == 9 ? '0' : '${index + 1}';
+    return LuminaPalette(
+      palette: palette,
+      child: Builder(
+        builder: (context) {
+          final theme = LuminaTheme.of(context);
+          return Semantics(
+            selected: selected,
+            child: LuminaSurface(
+              radius: 14,
+              glass: selected,
+              color: selected
+                  ? theme.colors.accentSoft.withValues(alpha: .65)
+                  : const Color(0x00000000),
+              onTap: () => widget.navigationShell.goBranch(index),
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? 6 : 12,
+                vertical: 12,
               ),
+              child: compact
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        LuminaIcon(DesktopShell.icons[index], size: 20),
+                        const SizedBox(height: 4),
+                        Text(
+                          DesktopShell.labels[index],
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        LuminaIcon(
+                          DesktopShell.icons[index],
+                          size: 20,
+                          color: selected
+                              ? theme.colors.accent
+                              : theme.colors.muted,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            DesktopShell.labels[index],
+                            style: theme.textTheme.bodyMedium.copyWith(
+                              fontWeight: selected
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '${defaultTargetPlatform == TargetPlatform.macOS ? '⌘' : 'Ctrl+'}$digit',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -156,10 +189,11 @@ class _DesktopShellState extends State<DesktopShell> {
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Row(
               children: [
-                LuminaIcon(
-                  LuminaIcons.home,
-                  color: theme.colors.accent,
-                  size: 23,
+                Image.asset(
+                  'assets/branding/orialis-neumorphic.png',
+                  width: 26,
+                  height: 26,
+                  excludeFromSemantics: true,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -178,15 +212,22 @@ class _DesktopShellState extends State<DesktopShell> {
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
             child: Text('工作空间', style: theme.textTheme.bodySmall),
           ),
-          for (var i = 0; i < 4; i++) ...[
-            _destination(i),
-            const SizedBox(height: 4),
-          ],
-          for (var i = 5; i < DesktopShell.labels.length; i++) ...[
-            _destination(i),
-            const SizedBox(height: 4),
-          ],
-          const Spacer(),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  for (var i = 0; i < 4; i++) ...[
+                    _destination(i),
+                    const SizedBox(height: 4),
+                  ],
+                  for (var i = 5; i < DesktopShell.labels.length; i++) ...[
+                    _destination(i),
+                    const SizedBox(height: 4),
+                  ],
+                ],
+              ),
+            ),
+          ),
           Container(
             height: 1,
             color: theme.colors.outline.withValues(alpha: .35),
@@ -209,7 +250,11 @@ class _DesktopShellState extends State<DesktopShell> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final wide = constraints.maxWidth >= 900;
+              final showInsights =
+                  constraints.maxWidth >= 1440 &&
+                  widget.navigationShell.currentIndex != 9;
               const sidebarWidth = 224.0;
+              const insightsWidth = 280.0;
               final navigation = wide
                   ? _sidebar()
                   : Padding(
@@ -218,11 +263,22 @@ class _DesktopShellState extends State<DesktopShell> {
                         glass: true,
                         radius: 20,
                         padding: const EdgeInsets.all(6),
-                        child: Row(
-                          children: [
-                            for (var i = 0; i < DesktopShell.labels.length; i++)
-                              Expanded(child: _destination(i, compact: true)),
-                          ],
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              for (
+                                var i = 0;
+                                i < DesktopShell.labels.length;
+                                i++
+                              )
+                                SizedBox(
+                                  width: 76,
+                                  child: _destination(i, compact: true),
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                     );
@@ -232,7 +288,10 @@ class _DesktopShellState extends State<DesktopShell> {
                   children: [
                     Positioned.fill(
                       child: Padding(
-                        padding: EdgeInsets.only(left: wide ? sidebarWidth : 0),
+                        padding: EdgeInsets.only(
+                          left: wide ? sidebarWidth : 0,
+                          right: showInsights ? insightsWidth : 0,
+                        ),
                         child: widget.navigationShell,
                       ),
                     ),
@@ -249,6 +308,14 @@ class _DesktopShellState extends State<DesktopShell> {
                       Align(
                         alignment: Alignment.bottomCenter,
                         child: navigation,
+                      ),
+                    if (showInsights)
+                      const Positioned(
+                        top: 0,
+                        bottom: 0,
+                        right: 0,
+                        width: insightsWidth,
+                        child: DesktopInsightsPanel(),
                       ),
                   ],
                 ),
