@@ -1,3 +1,6 @@
+import 'dart:ui' as ui;
+
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lumina_ui/lumina_ui.dart';
 
@@ -153,6 +156,95 @@ void main() {
           expect(tester.takeException(), isNull);
         }
       }
+    }
+  });
+
+  testWidgets('card decoration reuses shoulder measurement at same size', (
+    tester,
+  ) async {
+    var measurements = 0;
+    var afterFirstPaint = -1;
+    var afterSecondPaint = -1;
+    await tester.pumpWidget(
+      _host(
+        Builder(
+          builder: (context) {
+            final decoration = LuminaCardDecoration.of(
+              context,
+              shoulder: true,
+              title: 'Title shelf',
+            );
+            final painter = decoration.createBoxPainter();
+            final recorder = ui.PictureRecorder();
+            final canvas = ui.Canvas(recorder);
+            painter.paint(
+              canvas,
+              ui.Offset.zero,
+              const ImageConfiguration(size: ui.Size(340, 120)),
+            );
+            afterFirstPaint = measurements;
+            painter.paint(
+              canvas,
+              ui.Offset.zero,
+              const ImageConfiguration(size: ui.Size(340, 120)),
+            );
+            afterSecondPaint = measurements;
+            painter.paint(
+              canvas,
+              ui.Offset.zero,
+              const ImageConfiguration(size: ui.Size(320, 120)),
+            );
+            recorder.endRecording().dispose();
+            painter.dispose();
+            return const SizedBox();
+          },
+        ),
+        neumorphic: false,
+        textScaler: _CountingTextScaler(() => measurements++),
+      ),
+    );
+    expect(afterFirstPaint, greaterThan(0));
+    expect(afterSecondPaint, afterFirstPaint);
+    expect(measurements, greaterThan(afterSecondPaint));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('neumorphic depth remains visible in both shadow modes', (
+    tester,
+  ) async {
+    for (final depth in LuminaSurfaceDepth.values) {
+      final images = <List<int>>[];
+      for (final performance in [true, false]) {
+        await tester.pumpWidget(
+          _host(
+            RepaintBoundary(
+              key: const ValueKey('painted-card'),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: LuminaSurface(
+                  depth: depth,
+                  child: const SizedBox(width: 220, height: 100),
+                ),
+              ),
+            ),
+            performance: performance,
+          ),
+        );
+        await tester.pumpAndSettle();
+        final boundary = tester.renderObject<RenderRepaintBoundary>(
+          find.byKey(const ValueKey('painted-card')),
+        );
+        await tester.runAsync(() async {
+          final image = await boundary.toImage();
+          final bytes = await image.toByteData(
+            format: ui.ImageByteFormat.rawRgba,
+          );
+          images.add(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
+      expect(images.first, isNot(images.last), reason: depth.name);
+      expect(tester.takeException(), isNull);
     }
   });
 }

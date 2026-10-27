@@ -365,13 +365,23 @@ void main() {
         expect(find.text('3 / 8 · 37.5%'), findsOneWidget);
         expect(find.text('来自实际结果'), findsOneWidget);
         if (style == 'linear') {
+          final fill = find.byKey(
+            const ValueKey('response-progress-fill-本次已确认的完成数量'),
+          );
+          final track = find
+              .ancestor(of: fill, matching: find.byType(Align))
+              .first;
+          expect(
+            tester.getSize(fill).width / tester.getSize(track).width,
+            closeTo(.375, .001),
+          );
           expect(
             tester
-                .widgetList<LinearProgressIndicator>(
-                  find.byType(LinearProgressIndicator),
+                .getSize(
+                  find.byKey(const ValueKey('response-progress-fill-尚未完成')),
                 )
-                .map((w) => w.value),
-            [0.375, 0],
+                .width,
+            0,
           );
         } else {
           expect(

@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app.dart';
+import '../../features/updates/presentation/github_updates_section.dart';
 import 'legacy_recovery.dart';
 
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
@@ -180,10 +181,13 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   @override
   Widget build(BuildContext context) => OrialisPageScaffold(
+    padding: EdgeInsets.zero,
     title: '我的',
     body: Builder(
       builder: (context) => ListView(
         padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
           top: LuminaPageHeaderInset.of(context) + 12,
           bottom: MediaQuery.paddingOf(context).bottom + 24,
         ),
@@ -374,6 +378,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     onTap: _logout,
                   ),
                 ),
+              const GithubUpdatesSection(),
               const QuietLabel('Lumina 光构'),
             ],
           ),
@@ -450,6 +455,7 @@ class _AuthPageState extends ConsumerState<AuthPage> {
 
   @override
   Widget build(BuildContext context) => OrialisPageScaffold(
+    padding: EdgeInsets.zero,
     title: _register ? '注册账户' : '登录账户',
     leading: LuminaIconButton(
       tooltip: '返回',
@@ -459,6 +465,8 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     body: Builder(
       builder: (context) => ListView(
         padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
           top: LuminaPageHeaderInset.of(context) + 12,
           bottom: MediaQuery.paddingOf(context).bottom + 24,
         ),

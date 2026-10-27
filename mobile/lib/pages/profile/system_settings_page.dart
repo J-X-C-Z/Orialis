@@ -113,6 +113,7 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
         _status['focusPermission'] == true &&
         _status['focusBusinessConfigured'] == true;
     return OrialisPageScaffold(
+      padding: EdgeInsets.zero,
       title: '系统提醒与桌面',
       leading: LuminaIconButton(
         tooltip: '返回',
@@ -122,6 +123,8 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
       body: Builder(
         builder: (context) => ListView(
           padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
             top: LuminaPageHeaderInset.of(context) + 12,
             bottom: MediaQuery.paddingOf(context).bottom + 24,
           ),

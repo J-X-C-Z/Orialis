@@ -10,6 +10,7 @@ import '../../core/database/app_database.dart';
 import '../../features/events/presentation/task_children.dart';
 import '../../features/events/presentation/task_editor.dart';
 import '../shared/page_parts.dart';
+import '../shared/glass_segmented.dart';
 
 typedef Schedule = CalendarEvent;
 
@@ -165,7 +166,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                       child: const Text('今天'),
                     ),
                     const Spacer(),
-                    SizedBox(width: 196, child: _viewSelector()),
+                    SizedBox(width: 196, child: _viewSelector(desktop: true)),
                   ],
                 ),
                 const SizedBox(height: 20),
@@ -182,12 +183,18 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     ),
   );
 
-  Widget _viewSelector() => LuminaSegmented<int>(
-    transparent: true,
-    items: const {0: '日', 1: '周', 2: '月'},
-    value: _view,
-    onChanged: (v) => setState(() => _view = v),
-  );
+  Widget _viewSelector({bool desktop = false}) => desktop
+      ? LuminaSegmented<int>(
+          transparent: true,
+          items: const {0: '日', 1: '周', 2: '月'},
+          value: _view,
+          onChanged: (v) => setState(() => _view = v),
+        )
+      : OrialisGlassSegmented<int>(
+          items: const {0: '日', 1: '周', 2: '月'},
+          value: _view,
+          onChanged: (v) => setState(() => _view = v),
+        );
 
   Widget _calendarContent(double topInset, {bool desktop = false}) =>
       StreamBuilder<List<Schedule>>(
@@ -444,7 +451,9 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
           .colors(darkProgress: colors.darkProgress)
           .accent;
     }
-    return LuminaTheme.of(context).colors.muted;
+    return LuminaCardPalette.sage
+        .colors(darkProgress: colors.darkProgress)
+        .accent;
   }
 
   Widget _agenda(DateTime day) {
@@ -453,58 +462,67 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     return ContentStack(
       gap: 14,
       children: [
-        LuminaTitledContentCard(
-          key: ValueKey('calendar-schedules-${dateKey(day)}'),
-          title: '${day.month}月${day.day}日 · 日程',
-          emptyText: '这一天没有日程。',
-          children: [for (final schedule in schedules) _scheduleRow(schedule)],
+        LuminaPalette(
+          palette: LuminaCardPalette.sage,
+          child: LuminaTitledContentCard(
+            key: ValueKey('calendar-schedules-${dateKey(day)}'),
+            title: '${day.month}月${day.day}日 · 日程',
+            emptyText: '这一天没有日程。',
+            children: [
+              for (final schedule in schedules) _scheduleRow(schedule),
+            ],
+          ),
         ),
-        LuminaTitledContentCard(
-          key: ValueKey('calendar-due-${dateKey(day)}'),
-          title: '当天截止',
-          emptyText: '这一天没有截止事项。',
-          children: [
-            if (due.isNotEmpty)
-              LuminaCompletionList(
-                animateChanges: true,
-                children: [
-                  for (final task in due)
-                    LuminaListRow(
-                      key: ValueKey(task.id),
-                      depth: LuminaSurfaceDepth.recessed,
-                      title: task.title,
-                      subtitle: task.dueTime ?? '当天截止',
-                      detail: TaskSourceLabel(task: task),
-                      trailing: LuminaCheck(
-                        value: task.completed,
-                        onChanged: (v) =>
-                            ref.read(taskRepositoryProvider).complete(task, v),
+        LuminaPalette(
+          palette: LuminaCardPalette.amber,
+          child: LuminaTitledContentCard(
+            key: ValueKey('calendar-due-${dateKey(day)}'),
+            title: '当天截止',
+            emptyText: '这一天没有截止事项。',
+            children: [
+              if (due.isNotEmpty)
+                LuminaCompletionList(
+                  animateChanges: true,
+                  children: [
+                    for (final task in due)
+                      LuminaListRow(
+                        key: ValueKey(task.id),
+                        depth: LuminaSurfaceDepth.recessed,
+                        title: task.title,
+                        subtitle: task.dueTime ?? '当天截止',
+                        detail: TaskSourceLabel(task: task),
+                        trailing: LuminaCheck(
+                          value: task.completed,
+                          onChanged: (v) => ref
+                              .read(taskRepositoryProvider)
+                              .complete(task, v),
+                        ),
+                        onTap: () => showTaskEditor(
+                          context,
+                          task: task,
+                          onSave: (d) => ref
+                              .read(taskRepositoryProvider)
+                              .updateDetails(
+                                task,
+                                title: d.title,
+                                notes: d.notes,
+                                due: d.due,
+                                dueTime: d.dueTime,
+                                important: d.important,
+                                urgent: d.urgent,
+                                reminderMinutes: d.reminderMinutes,
+                                recurrence: d.recurrence,
+                                projectId: d.projectId,
+                                reminderMinutesProvided: true,
+                                recurrenceProvided: true,
+                                projectIdProvided: true,
+                              ),
+                        ),
                       ),
-                      onTap: () => showTaskEditor(
-                        context,
-                        task: task,
-                        onSave: (d) => ref
-                            .read(taskRepositoryProvider)
-                            .updateDetails(
-                              task,
-                              title: d.title,
-                              notes: d.notes,
-                              due: d.due,
-                              dueTime: d.dueTime,
-                              important: d.important,
-                              urgent: d.urgent,
-                              reminderMinutes: d.reminderMinutes,
-                              recurrence: d.recurrence,
-                              projectId: d.projectId,
-                              reminderMinutesProvided: true,
-                              recurrenceProvided: true,
-                              projectIdProvided: true,
-                            ),
-                      ),
-                    ),
-                ],
-              ),
-          ],
+                  ],
+                ),
+            ],
+          ),
         ),
       ],
     );
@@ -551,7 +569,9 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
           child: LuminaPalette(
             palette: s.important
                 ? LuminaCardPalette.ocean
-                : LuminaCardPalette.mist,
+                : ongoing
+                ? LuminaCardPalette.amber
+                : LuminaCardPalette.sage,
             child: LuminaListRow(
               depth: LuminaSurfaceDepth.recessed,
               title: s.title,
@@ -590,7 +610,8 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     final selected = dateKey(day) == dateKey(_date);
     final colors = LuminaTheme.of(context).colors;
     final text = LuminaTheme.of(context).textTheme;
-    final density = count == 0 ? 0.0 : (.06 + count.clamp(0, 6) * .025);
+    final today = dateKey(day) == dateKey(DateTime.now());
+    final weekend = day.weekday >= DateTime.saturday;
     return Semantics(
       selected: selected,
       label: '${dateKey(day)}，$count 项',
@@ -602,11 +623,9 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         glass: true,
         diffuseGlass: true,
         padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-        color: Color.lerp(
-          colors.surface,
-          colors.accent,
-          selected ? .23 : density,
-        ),
+        color: selected
+            ? colors.accentSoft
+            : Color.lerp(colors.surface, colors.accent, weekend ? .07 : 0),
         onTap: () {
           setState(() => _date = day);
           if (week) {
@@ -640,7 +659,14 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                   fit: BoxFit.scaleDown,
                   child: Text(
                     '${day.day}',
-                    style: text.labelLarge,
+                    style: text.labelLarge.copyWith(
+                      color: selected || today
+                          ? colors.accent
+                          : weekend
+                          ? colors.accent.withValues(alpha: .8)
+                          : null,
+                      fontWeight: selected || today ? FontWeight.w700 : null,
+                    ),
                     maxLines: 1,
                   ),
                 ),
@@ -648,15 +674,36 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
               const SizedBox(height: 4),
               SizedBox(
                 height: 5,
-                child: count == 0
-                    ? null
-                    : DecoratedBox(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (events.isNotEmpty)
+                      Container(
+                        width: 4,
+                        height: 4,
                         decoration: BoxDecoration(
                           color: _statusColor(day, events),
-                          borderRadius: BorderRadius.circular(3),
+                          shape: BoxShape.circle,
                         ),
-                        child: SizedBox(width: 5 + count.clamp(0, 5) * 2.0),
                       ),
+                    if (events.isNotEmpty && _dueOn(day).isNotEmpty)
+                      const SizedBox(width: 3),
+                    if (_dueOn(day).isNotEmpty)
+                      Transform.rotate(
+                        angle: .785398,
+                        child: Container(
+                          width: 4,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: LuminaCardPalette.amber
+                                .colors(darkProgress: colors.darkProgress)
+                                .accent,
+                            borderRadius: BorderRadius.circular(1),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -712,49 +759,11 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   Widget _month(double topInset) {
     final first = DateTime(_date.year, _date.month, 1);
     final length = DateTime(_date.year, _date.month + 1, 0).day;
+    final rows = ((first.weekday - 1 + length) / 7).ceil();
     final cells = <Widget>[];
-    final summaries = <Widget>[];
     for (var number = 1; number <= length; number++) {
       final day = DateTime(_date.year, _date.month, number);
-      final schedules = _on(day);
-      final due = _dueOn(day);
-      final entries = <Widget>[];
-      void addSchedule(Schedule schedule) =>
-          entries.add(_monthSummary(schedule.title, false));
-      void addTask(Task task) => entries.add(_monthSummary(task.title, true));
-      if (schedules.isNotEmpty && due.isNotEmpty) {
-        addSchedule(schedules.first);
-        addTask(due.first);
-      } else {
-        for (final schedule in schedules.take(2)) {
-          addSchedule(schedule);
-        }
-        for (final task in due.take(2)) {
-          addTask(task);
-        }
-      }
-      final remaining = schedules.length + due.length - entries.length;
       cells.add(_dayCell(day));
-      summaries.add(
-        Semantics(
-          button: true,
-          label: '${dateKey(day)} 详情',
-          child: LuminaTap(
-            onTap: () => setState(() => _date = day),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                ...entries,
-                if (remaining > 0)
-                  Text(
-                    '+$remaining',
-                    style: LuminaTheme.of(context).textTheme.labelSmall,
-                  ),
-              ],
-            ),
-          ),
-        ),
-      );
     }
     return ListView(
       key: const PageStorageKey('calendar-month-scroll'),
@@ -772,11 +781,33 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 ],
               ),
               const SizedBox(height: 8),
-              _ExpandableMonthGrid(
-                offset: first.weekday - 1,
-                cells: cells,
-                summaries: summaries,
-              ),
+              for (var row = 0; row < rows; row++)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (var column = 0; column < 7; column++)
+                        Expanded(
+                          child: Builder(
+                            builder: (context) {
+                              final index =
+                                  row * 7 + column - first.weekday + 1;
+                              if (index < 0 || index >= cells.length) {
+                                return const SizedBox(height: 38);
+                              }
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 2,
+                                ),
+                                child: cells[index],
+                              );
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               const QuietLabel('圆点 · 日程　菱形 · 截止事项'),
             ],
           ),
@@ -830,136 +861,6 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       ],
     ),
   );
-}
-
-// Expansion state stays local: dragging does not rebuild date data or agendas.
-class _ExpandableMonthGrid extends StatefulWidget {
-  const _ExpandableMonthGrid({
-    required this.offset,
-    required this.cells,
-    required this.summaries,
-  });
-  final int offset;
-  final List<Widget> cells, summaries;
-  @override
-  State<_ExpandableMonthGrid> createState() => _ExpandableMonthGridState();
-}
-
-class _ExpandableMonthGridState extends State<_ExpandableMonthGrid> {
-  double _expansion = 0, _shown = 0;
-  bool _dragging = false;
-  void _settle([double velocity = 0]) => setState(() {
-    _dragging = false;
-    _expansion = velocity.abs() > 250
-        ? (velocity > 0 ? 1 : 0)
-        : (_expansion >= .5 ? 1 : 0);
-  });
-  @override
-  Widget build(BuildContext context) {
-    final weeks = ((widget.cells.length + widget.offset) / 7).ceil();
-    return Column(
-      children: [
-        TweenAnimationBuilder<double>(
-          tween: Tween(end: _expansion),
-          duration: _dragging || MediaQuery.disableAnimationsOf(context)
-              ? Duration.zero
-              : LuminaMotion.standard,
-          curve: luminaEaseOut,
-          builder: (context, progress, _) {
-            _shown = progress;
-            return Column(
-              children: [
-                for (var row = 0; row < weeks; row++)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (var col = 0; col < 7; col++)
-                          Expanded(
-                            child: Builder(
-                              builder: (context) {
-                                final index = row * 7 + col - widget.offset;
-                                if (index < 0 || index >= widget.cells.length) {
-                                  return const SizedBox();
-                                }
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 2,
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                      widget.cells[index],
-                                      Offstage(
-                                        offstage: progress == 0,
-                                        child: ClipRect(
-                                          child: Align(
-                                            alignment: Alignment.topCenter,
-                                            heightFactor: progress,
-                                            child: Opacity(
-                                              opacity: progress,
-                                              child: SizedBox(
-                                                height:
-                                                    MediaQuery.textScalerOf(
-                                                      context,
-                                                    ).scale(64) +
-                                                    12,
-                                                child: widget.summaries[index],
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-              ],
-            );
-          },
-        ),
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onVerticalDragStart: (_) => setState(() {
-            _expansion = _shown;
-            _dragging = true;
-          }),
-          onVerticalDragUpdate: (details) => setState(() {
-            _expansion = (_expansion + details.delta.dy / 180).clamp(0.0, 1.0);
-          }),
-          onVerticalDragEnd: (details) => _settle(details.primaryVelocity ?? 0),
-          onVerticalDragCancel: _settle,
-          child: LuminaTap(
-            onTap: () => setState(() => _expansion = _expansion < .5 ? 1 : 0),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  RotatedBox(
-                    quarterTurns: _expansion < .5 ? 0 : 2,
-                    child: const LuminaIcon(LuminaIcons.chevronDown, size: 16),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _expansion < .5 ? '展开月历' : '收起月历',
-                    style: LuminaTheme.of(context).textTheme.labelSmall,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
 }
 
 class _ScheduleDraft {

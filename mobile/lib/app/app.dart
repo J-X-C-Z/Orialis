@@ -426,9 +426,21 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
                 builder: (context) => DefaultTextStyle(
                   style: LuminaTheme.of(context).textTheme.bodyMedium,
                   child: AnnotatedRegion<SystemUiOverlayStyle>(
-                    value: brightness == Brightness.dark
-                        ? SystemUiOverlayStyle.light
-                        : SystemUiOverlayStyle.dark,
+                    value:
+                        (brightness == Brightness.dark
+                                ? SystemUiOverlayStyle.light
+                                : SystemUiOverlayStyle.dark)
+                            .copyWith(
+                              statusBarColor: const Color(0x00000000),
+                              systemNavigationBarColor: LuminaTheme.of(context)
+                                  .colors
+                                  .paper,
+                              systemNavigationBarDividerColor: const Color(
+                                0x00000000,
+                              ),
+                              systemNavigationBarContrastEnforced: false,
+                              systemStatusBarContrastEnforced: false,
+                            ),
                     child: Material(
                       animationDuration: Duration.zero,
                       color: LuminaTheme.of(context).colors.paper,

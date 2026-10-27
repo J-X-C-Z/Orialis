@@ -36,6 +36,8 @@ class LuminaCardDecoration extends Decoration {
 class _LuminaCardBoxPainter extends BoxPainter {
   _LuminaCardBoxPainter(this.decoration, super.onChanged);
   final LuminaCardDecoration decoration;
+  Size? _shoulderSize;
+  double? _shoulderWidth;
 
   @override
   void paint(Canvas canvas, Offset offset, ImageConfiguration configuration) {
@@ -49,23 +51,27 @@ class _LuminaCardBoxPainter extends BoxPainter {
         decoration.title != null &&
         size.width >= 160 &&
         size.height >= 64) {
-      final titlePainter =
-          TextPainter(
-            text: TextSpan(
-              text: decoration.title,
-              style: decoration.titleStyle,
-            ),
-            textDirection: decoration.textDirection,
-            textScaler: decoration.textScaler,
-          )..layout(
-            maxWidth: math.max(
-              1,
-              size.width - 32 - decoration.shoulderTrailingSpace,
-            ),
-          );
-      final lines = titlePainter.computeLineMetrics();
-      shoulderWidth = 16 + (lines.isEmpty ? 0 : lines.first.width) + 28;
-      titlePainter.dispose();
+      if (_shoulderSize != size) {
+        final titlePainter =
+            TextPainter(
+              text: TextSpan(
+                text: decoration.title,
+                style: decoration.titleStyle,
+              ),
+              textDirection: decoration.textDirection,
+              textScaler: decoration.textScaler,
+            )..layout(
+              maxWidth: math.max(
+                1,
+                size.width - 32 - decoration.shoulderTrailingSpace,
+              ),
+            );
+        final lines = titlePainter.computeLineMetrics();
+        _shoulderWidth = 16 + (lines.isEmpty ? 0 : lines.first.width) + 28;
+        titlePainter.dispose();
+        _shoulderSize = size;
+      }
+      shoulderWidth = _shoulderWidth;
     }
     _LuminaMaterial(
       colors: decoration.colors,
@@ -744,35 +750,52 @@ class _LuminaMaterial extends CustomPainter {
           )!
         : colors.tone(const Color(0xFFB7B7B7), const Color(0xFF181B20));
     final distance = math.min(
-      rect.shortestSide * (inset ? .065 : .10),
-      inset ? 3.5 : 6.0,
+      rect.shortestSide * (inset ? .055 : .075),
+      inset ? 3.0 : 4.0,
     );
-    final blur = distance * 1.7;
+    final blur = distance * (cheapShadow ? .9 : 1.35);
     final offset = Offset(distance, distance);
     final paint = Paint()..maskFilter = MaskFilter.blur(BlurStyle.normal, blur);
     if (!inset && !contrast) {
-      canvas.drawPath(path.shift(-offset), paint..color = light);
-      canvas.drawPath(path.shift(offset), paint..color = shade);
+      if (cheapShadow) {
+        canvas.save();
+        canvas.translate(-offset.dx, -offset.dy);
+        canvas.drawShadow(path, light.withValues(alpha: .30), 1.5, false);
+        canvas.restore();
+        canvas.save();
+        canvas.translate(offset.dx, offset.dy);
+        canvas.drawShadow(path, shade.withValues(alpha: .22), 2, false);
+        canvas.restore();
+      } else {
+        canvas.drawPath(
+          path.shift(-offset),
+          paint..color = light.withValues(alpha: .38),
+        );
+        canvas.drawPath(
+          path.shift(offset),
+          paint..color = shade.withValues(alpha: .24),
+        );
+      }
     }
     canvas.drawPath(
       path,
-      inset && !contrast
+      !contrast
           ? (Paint()
               ..shader = _cachedGradient(
                 _bodyGradientCache,
-                ('well', rect.size, base, shade, light),
+                (inset ? 'well' : 'raised', rect.size, base, shade, light),
                 () => ui.Gradient.linear(
                   rect.topLeft,
                   rect.bottomRight,
                   [
-                    Color.lerp(base, shade, .16)!,
+                    Color.lerp(base, shade, inset ? .16 : .045)!,
                     base,
-                    Color.lerp(base, light, .08)!,
+                    Color.lerp(base, light, inset ? .08 : .055)!,
                   ],
                   [0, .52, 1],
                 ),
               ))
-          : (Paint()..color = tint),
+          : (Paint()..color = base),
     );
     if (inset && !contrast) {
       // Clip the blurred outside shape into the well, without a saveLayer.

@@ -15,8 +15,11 @@ Future<({int Function() selected, ValueChanged<bool> setKeyboard})> _mount(
   bool highContrast = false,
   bool disableAnimations = false,
   bool reduceTransparency = false,
+  double width = 400,
+  double textScale = 2,
+  double bottomInset = 0,
 }) async {
-  tester.view.physicalSize = const Size(400, 880);
+  tester.view.physicalSize = Size(width, 880);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -33,7 +36,8 @@ Future<({int Function() selected, ValueChanged<bool> setKeyboard})> _mount(
             textDirection: direction,
             child: MediaQuery(
               data: MediaQuery.of(context).copyWith(
-                textScaler: const TextScaler.linear(2),
+                textScaler: TextScaler.linear(textScale),
+                padding: EdgeInsets.only(bottom: bottomInset),
                 highContrast: highContrast,
                 disableAnimations: disableAnimations,
                 viewInsets: EdgeInsets.only(bottom: keyboard ? 280 : 0),
@@ -80,14 +84,45 @@ Transform _engraving(WidgetTester tester, int index) =>
 
 void main() {
   testWidgets(
+    'compact chrome clears the gesture area at narrow widths and large text',
+    (tester) async {
+      for (final width in [320.0, 432.0]) {
+        for (final scale in [1.0, 2.0]) {
+          await tester.pumpWidget(const SizedBox());
+          await _mount(tester, width: width, textScale: scale, bottomInset: 24);
+          final frame = tester.getRect(
+            find.byType(OrialisNavigationGlassFrame),
+          );
+          expect(frame.left, greaterThanOrEqualTo(16));
+          expect(frame.right, lessThanOrEqualTo(width - 16));
+          expect(frame.bottom, lessThanOrEqualTo(880 - 24 - 6));
+          final reserved = tester
+              .widget<LuminaNavigationInset>(find.byType(LuminaNavigationInset))
+              .bottom;
+          expect(reserved, greaterThanOrEqualTo(880 - 24 - frame.top));
+          expect(find.byType(ImageFiltered), findsNothing);
+          expect(find.byType(BackdropFilter), findsOneWidget);
+          final lens = tester.getRect(
+            find.byKey(const ValueKey('nav-glass-slider')),
+          );
+          expect(lens.top, closeTo(frame.top + 7, .01));
+          expect(lens.bottom, closeTo(frame.bottom - 7, .01));
+          expect(tester.takeException(), isNull);
+        }
+      }
+    },
+  );
+
+  testWidgets(
     'glass layers share geometry and the engraving follows the drag',
     (tester) async {
       final nav = await _mount(tester);
-      final recess = find.byKey(const ValueKey('nav-recess'));
       final slider = find.byKey(const ValueKey('nav-glass-slider'));
-      expect(recess, findsOneWidget);
       expect(slider, findsOneWidget);
-      expect(tester.getRect(recess), tester.getRect(slider));
+      final frame = tester.getRect(find.byType(OrialisNavigationGlassFrame));
+      expect(tester.getRect(slider).left, closeTo(frame.left + 9, .01));
+      expect(tester.getRect(slider).top, closeTo(frame.top + 7, .01));
+      expect(tester.getRect(slider).bottom, closeTo(frame.bottom - 7, .01));
       expect(find.byType(OrialisNavigationGlassFrame), findsOneWidget);
       expect(find.byType(OrialisNavigationGlassLens), findsOneWidget);
 
@@ -106,7 +141,10 @@ void main() {
         identical(originalLabel, tester.widget<Text>(find.text('Chat'))),
         isTrue,
       );
-      expect(tester.getRect(recess), tester.getRect(slider));
+      expect(
+        tester.getRect(slider).center.dx,
+        closeTo(tester.getCenter(find.text('Chat')).dx, .01),
+      );
       expect(_engraving(tester, 0).transform.entry(1, 1), closeTo(1, .001));
       expect(_engraving(tester, 0).transform.entry(1, 3), closeTo(0, .001));
       expect(_engraving(tester, 2).transform.entry(1, 1), lessThan(1));
@@ -118,6 +156,7 @@ void main() {
       await tester.tap(find.text('Me'));
       await tester.pumpAndSettle();
       expect(nav.selected(), 4);
+      expect(tester.getRect(slider).right, closeTo(frame.right - 9, .01));
       nav.setKeyboard(true);
       await tester.pumpAndSettle();
       expect(find.text('Me').hitTestable(), findsNothing);
@@ -144,7 +183,9 @@ void main() {
 
       await tester.pumpWidget(const SizedBox.shrink());
       nav = await _mount(tester, disabledIndex: 2);
-      final initial = tester.getRect(find.byKey(const ValueKey('nav-recess')));
+      final initial = tester.getRect(
+        find.byKey(const ValueKey('nav-glass-slider')),
+      );
       drag = await tester.startGesture(tester.getCenter(find.text('Today')));
       await tester.pump(const Duration(milliseconds: 600));
       await drag.moveTo(tester.getCenter(find.text('Chat')));
@@ -153,7 +194,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(nav.selected(), 0);
       expect(
-        tester.getRect(find.byKey(const ValueKey('nav-recess'))).center,
+        tester.getRect(find.byKey(const ValueKey('nav-glass-slider'))).center,
         initial.center,
       );
     },
@@ -200,8 +241,8 @@ void main() {
       expect(node.flagsCollection.isSelected == Tristate.isTrue, i == 0);
     }
     expect(
-      tester.getRect(find.byKey(const ValueKey('nav-recess'))),
-      tester.getRect(find.byKey(const ValueKey('nav-glass-slider'))),
+      tester.getRect(find.byKey(const ValueKey('nav-glass-slider'))).center,
+      tester.getRect(find.byKey(const ValueKey('nav-glass-slider'))).center,
     );
     await tester.tap(find.text('Plan'));
     await tester.pumpAndSettle();

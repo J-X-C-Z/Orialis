@@ -49,6 +49,7 @@ class LuminaGlassWell extends StatelessWidget {
         focused: focused,
         pressed: false,
         neumorphic: true,
+        cheapShadow: theme.highPerformanceMode,
       ),
       child: Stack(
         fit: StackFit.passthrough,

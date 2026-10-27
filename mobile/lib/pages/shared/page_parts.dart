@@ -78,3 +78,37 @@ String dateKey(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 String timeLabel(DateTime d) =>
     '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+/// Page-local density, preserving accessibility scaling and all material settings.
+class OrialisCompactTypography extends StatelessWidget {
+  const OrialisCompactTypography({required this.child, super.key});
+  final Widget child;
+  @override
+  Widget build(BuildContext context) {
+    final theme = LuminaTheme.of(context);
+    final data = theme.data;
+    return LuminaTheme(
+      brightness: theme.brightness,
+      darkProgress: theme.colors.darkProgress,
+      tint: theme.tint,
+      highPerformanceMode: theme.highPerformanceMode,
+      reduceTransparency: theme.reduceTransparency,
+      data: LuminaThemeData(
+        fontFamily: data.fontFamily,
+        fontScale: data.fontScale * .92,
+        spacingScale: data.spacingScale,
+        radiusScale: data.radiusScale,
+        motionScale: data.motionScale,
+        liquidGlass: data.liquidGlass,
+        neumorphic: data.neumorphic,
+        neumorphicGlass: data.neumorphicGlass,
+      ),
+      child: Builder(
+        builder: (context) => DefaultTextStyle(
+          style: LuminaTheme.of(context).textTheme.bodyMedium,
+          child: child,
+        ),
+      ),
+    );
+  }
+}

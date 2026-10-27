@@ -8,12 +8,16 @@ class LuminaFloatingActionButton extends StatelessWidget {
     required this.icon,
     this.label,
     this.tooltip,
+    this.frosted = false,
     super.key,
   });
   final VoidCallback? onPressed;
   final Widget icon;
   final Widget? label;
   final String? tooltip;
+
+  /// A standalone circular frosted action, without an inner control well.
+  final bool frosted;
 
   @override
   Widget build(BuildContext context) {
@@ -26,9 +30,11 @@ class LuminaFloatingActionButton extends StatelessWidget {
           opacity: onPressed == null ? .45 : 1,
           child: LuminaSurface(
             glass: true,
+            frosted: frosted,
+            backdrop: frosted,
             depth: LuminaSurfaceDepth.raised,
-            color: theme.colors.accentSoft,
-            radius: label == null ? 20 : LuminaControlSize.capsuleRadius,
+            color: frosted ? theme.colors.surface : theme.colors.accentSoft,
+            radius: LuminaControlSize.capsuleRadius,
             onTap: onPressed,
             padding: EdgeInsets.symmetric(
               horizontal: label == null ? 16 : 20,
@@ -39,7 +45,7 @@ class LuminaFloatingActionButton extends StatelessWidget {
               child: DefaultTextStyle(
                 style: theme.textTheme.labelMedium,
                 child: m.IconTheme(
-                  data: m.IconThemeData(color: theme.colors.ink),
+                  data: m.IconThemeData(color: theme.colors.accent),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [

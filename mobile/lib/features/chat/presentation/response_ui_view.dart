@@ -335,10 +335,7 @@ class _ResponseUiViewState extends State<ResponseUiView> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (block.title != null) ...[
-                        Text(
-                          _typeLabel(block.type),
-                          style: LuminaTheme.of(context).textTheme.labelSmall,
-                        ),
+                        _blockTypeBadge(context, block.type),
                         const SizedBox(height: 4),
                       ],
                       LuminaCardHeader(
@@ -352,10 +349,7 @@ class _ResponseUiViewState extends State<ResponseUiView> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (block.title != null) ...[
-                          Text(
-                            _typeLabel(block.type),
-                            style: LuminaTheme.of(context).textTheme.labelSmall,
-                          ),
+                          _blockTypeBadge(context, block.type),
                           const SizedBox(height: 4),
                         ],
                         Text(
@@ -370,6 +364,25 @@ class _ResponseUiViewState extends State<ResponseUiView> {
           ),
           content,
         ],
+      ),
+    );
+  }
+
+  Widget _blockTypeBadge(BuildContext context, String type) {
+    final theme = LuminaTheme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colors.accent.withValues(alpha: .09),
+        borderRadius: BorderRadius.circular(LuminaRadius.control),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        child: Text(
+          _typeLabel(type),
+          style: theme.textTheme.labelSmall.copyWith(
+            color: theme.colors.accent,
+          ),
+        ),
       ),
     );
   }

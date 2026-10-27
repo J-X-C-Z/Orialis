@@ -9,6 +9,8 @@ import 'package:orialis_mobile/core/database/app_database.dart';
 import 'package:orialis_mobile/core/sync/sync_coordinator.dart';
 import 'package:orialis_mobile/core/sync/sync_engine.dart';
 import 'package:orialis_mobile/features/events/data/event_repository.dart';
+import 'package:orialis_mobile/pages/shared/glass_segmented.dart';
+import 'package:orialis_mobile/pages/shared/navigation_glass.dart';
 
 class _Config extends AppConfig {
   @override
@@ -154,12 +156,24 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('事件').last);
     await tester.pumpAndSettle();
-    final pageSelector = tester.widget<LuminaSegmented<int>>(
+    final pageSelector = tester.widget<OrialisGlassSegmented<int>>(
       find.byWidgetPredicate(
-        (widget) => widget is LuminaSegmented<int> && widget.items[0] == '四象限',
+        (widget) =>
+            widget is OrialisGlassSegmented<int> && widget.items[0] == '四象限',
       ),
     );
-    expect(pageSelector.transparent, isTrue);
+    expect(pageSelector.items[0], '四象限');
+    expect(
+      tester
+          .getSize(
+            find.descendant(
+              of: find.byWidget(pageSelector),
+              matching: find.byType(OrialisNavigationGlassFrame),
+            ),
+          )
+          .width,
+      lessThanOrEqualTo(282),
+    );
     expect(
       tester
           .widget<LuminaSegmented<String>>(find.byType(LuminaSegmented<String>))
@@ -301,40 +315,13 @@ void main() {
           await tester.tap(
             find
                 .descendant(
-                  of: find.byType(LuminaSegmented<int>),
+                  of: find.byType(OrialisGlassSegmented<int>),
                   matching: find.text(view),
                 )
                 .first,
           );
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull, reason: view);
-          if (view == '月') {
-            final expand = find.text('展开月历');
-            await Scrollable.ensureVisible(
-              tester.element(expand),
-              alignment: .5,
-            );
-            await tester.pumpAndSettle();
-            await tester.tap(expand);
-            await tester.pumpAndSettle();
-            final collapse = find.text('收起月历');
-            await Scrollable.ensureVisible(
-              tester.element(collapse),
-              alignment: .5,
-            );
-            await tester.pumpAndSettle();
-            await tester.tap(collapse);
-            await tester.pumpAndSettle();
-            expect(
-              tester
-                  .widget<LuminaSegmented<int>>(
-                    find.byType(LuminaSegmented<int>),
-                  )
-                  .value,
-              2,
-            );
-            expect(tester.takeException(), isNull);
-          }
         }
       }
     }
@@ -342,7 +329,7 @@ void main() {
     await tester.pumpAndSettle();
     await db.close();
   });
-  testWidgets('expanded month reserves both categories and overflow count', (
+  testWidgets('month grid stays compact and selecting a day updates agenda', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(432, 960);
@@ -352,31 +339,28 @@ void main() {
     final db = AppDatabase(executor: NativeDatabase.memory());
     final repository = EventRepository(database: db, config: _Config());
     final today = DateTime.now();
+    final selected = DateTime(today.year, today.month, today.day + 1);
     final key =
-        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+        '${selected.year}-${selected.month.toString().padLeft(2, '0')}-${selected.day.toString().padLeft(2, '0')}';
     await repository.createCalendarEvent(
-      title: '月格日程',
-      startAt: DateTime(today.year, today.month, today.day, 10),
-      endAt: DateTime(today.year, today.month, today.day, 11),
+      title: '选中日程',
+      startAt: DateTime(selected.year, selected.month, selected.day, 10),
+      endAt: DateTime(selected.year, selected.month, selected.day, 11),
     );
-    await repository.createTask(title: '月格截止一', due: key);
-    await repository.createTask(title: '月格截止二', due: key);
+    await repository.createTask(title: '选中截止', due: key);
     await tester.pumpWidget(_app(db));
     await tester.pumpAndSettle();
     await tester.tap(find.text('日历').last);
     await tester.pumpAndSettle();
-    final expand = find.text('展开月历');
-    await Scrollable.ensureVisible(tester.element(expand), alignment: .5);
+    expect(find.text('展开月历'), findsNothing);
+    final dateCell = find.byKey(ValueKey('calendar-date-month-$key'));
+    await Scrollable.ensureVisible(tester.element(dateCell), alignment: .5);
     await tester.pumpAndSettle();
-    await tester.tap(expand);
+    await tester.tap(dateCell);
     await tester.pumpAndSettle();
-    final summaries = tester
-        .widgetList<LuminaCalendarSummary>(find.byType(LuminaCalendarSummary))
-        .toList();
-    expect(summaries.length, 2);
-    expect(summaries.where((s) => s.deadline).length, 1);
-    expect(summaries.where((s) => !s.deadline).single.title, '月格日程');
-    expect(find.text('+1'), findsOneWidget);
+    expect(find.byKey(ValueKey('calendar-schedules-$key')), findsOneWidget);
+    expect(find.text('选中日程'), findsOneWidget);
+    expect(find.text('选中截止'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await tester.pumpAndSettle();
@@ -403,9 +387,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester
-          .widget<LuminaSegmented<int>>(find.byType(LuminaSegmented<int>))
-          .transparent,
-      isTrue,
+          .widget<OrialisGlassSegmented<int>>(find.byType(OrialisGlassSegmented<int>))
+          .value,
+      2,
     );
     final dateTiles = find.byWidgetPredicate(
       (w) =>
@@ -429,7 +413,7 @@ void main() {
     await tester.tap(
       find
           .descendant(
-            of: find.byType(LuminaSegmented<int>),
+            of: find.byType(OrialisGlassSegmented<int>),
             matching: find.text('周'),
           )
           .first,
@@ -450,7 +434,7 @@ void main() {
     await tester.tap(
       find
           .descendant(
-            of: find.byType(LuminaSegmented<int>),
+            of: find.byType(OrialisGlassSegmented<int>),
             matching: find.text('日'),
           )
           .first,
@@ -496,19 +480,28 @@ void main() {
     );
     expect(task.depth, LuminaSurfaceDepth.recessed);
     final cardTitle = tester.widget<Text>(find.text('现在关注'));
-    expect(cardTitle.style?.fontSize, 18);
-    expect(tester.widget<Text>(find.text('最近截止')).style?.fontSize, 18);
+    expect(cardTitle.style?.fontSize, closeTo(16.56, .01));
+    expect(
+      tester.widget<Text>(find.text('最近截止')).style?.fontSize,
+      closeTo(16.56, .01),
+    );
     final todayTitleX = tester.getTopLeft(find.text('现在关注')).dx;
     expect(tester.getTopLeft(find.text('最近截止')).dx, closeTo(todayTitleX, 1));
-    expect(tester.widget<Text>(find.text('重点事项 0')).style?.fontSize, 16);
+    expect(
+      tester.widget<Text>(find.text('重点事项 0')).style?.fontSize,
+      closeTo(14.72, .01),
+    );
 
     await tester.tap(find.text('事件').last);
     await tester.pumpAndSettle();
     final first = find.text('重要且紧急');
     final second = find.text('紧急但不重要');
-    expect(tester.widget<Text>(first).style?.fontSize, 18);
+    expect(tester.widget<Text>(first).style?.fontSize, closeTo(16.56, .01));
     expect(tester.getTopLeft(first).dx, closeTo(todayTitleX, 1));
-    expect(tester.widget<Text>(find.text('重点事项 0')).style?.fontSize, 16);
+    expect(
+      tester.widget<Text>(find.text('重点事项 0')).style?.fontSize,
+      closeTo(14.72, .01),
+    );
     expect(
       tester
           .renderObject<RenderSliver>(

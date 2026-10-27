@@ -1,30 +1,59 @@
-import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:lumina_ui/lumina_ui.dart';
 
-/// A thin glass rim, separated from the caller's opaque neumorphic surface.
+/// A raised glass housing surrounding a separate recessed track.
 class OrialisNavigationGlassFrame extends StatelessWidget {
   const OrialisNavigationGlassFrame({required this.child, super.key});
 
   final Widget child;
 
+  static const innerInsets = EdgeInsets.symmetric(horizontal: 9, vertical: 7);
+  static const surfaceDepth = 4.0;
+
   @override
   Widget build(BuildContext context) {
     final theme = LuminaTheme.of(context);
-    return CustomPaint(
-      painter: _NavigationGlassPaint(
-        colors: theme.colors,
-        opaque: theme.reduceTransparency || MediaQuery.highContrastOf(context),
-        frame: true,
-      ),
-      child: Padding(padding: const EdgeInsets.all(6), child: child),
+    final opaque =
+        theme.reduceTransparency || MediaQuery.highContrastOf(context);
+    return Stack(
+      fit: StackFit.passthrough,
+      clipBehavior: Clip.none,
+      children: [
+        Positioned.fill(
+          child: IgnorePointer(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(1000),
+              child: opaque
+                  ? ColoredBox(color: theme.colors.surface)
+                  : BackdropFilter(
+                      filter: ui.ImageFilter.blur(
+                        sigmaX: theme.highPerformanceMode ? 3.5 : 6,
+                        sigmaY: theme.highPerformanceMode ? 3.5 : 6,
+                      ),
+                      child: ColoredBox(
+                        color: theme.colors.surface.withValues(alpha: .62),
+                      ),
+                    ),
+            ),
+          ),
+        ),
+        CustomPaint(
+          foregroundPainter: _NavigationGlassPaint(
+            colors: theme.colors,
+            opaque: opaque,
+            frame: true,
+          ),
+          child: Padding(padding: innerInsets, child: child),
+        ),
+      ],
     );
   }
 }
 
-/// Filter a bounded navigation image, never an ambiguously sized backdrop.
-class OrialisNavigationGlassLens extends StatefulWidget {
+/// Paint-only glass cover: no offscreen image filter over text or icons.
+/// This keeps the native labels upright across Skia and Impeller backends.
+class OrialisNavigationGlassLens extends StatelessWidget {
   const OrialisNavigationGlassLens({
     required this.child,
     required this.position,
@@ -36,115 +65,39 @@ class OrialisNavigationGlassLens extends StatefulWidget {
   final int count;
 
   @override
-  State<OrialisNavigationGlassLens> createState() =>
-      _OrialisNavigationGlassLensState();
-}
-
-class _OrialisNavigationGlassLensState
-    extends State<OrialisNavigationGlassLens> {
-  static Future<ui.FragmentProgram?>? _program;
-  ui.FragmentShader? _shader;
-  bool _requested = false;
-
-  static Future<ui.FragmentProgram?> _loadProgram() async {
-    try {
-      return await ui.FragmentProgram.fromAsset('shaders/navigation_lens.frag');
-    } catch (error, stack) {
-      debugPrint(
-        'Navigation lens shader failed; using clear-rim fallback: '
-        '$error\n$stack',
-      );
-      return null;
-    }
-  }
-
-  Future<void> _loadShader() async {
-    final program = await (_program ??= _loadProgram());
-    if (!mounted || program == null) return;
-    // Each mounted lens owns its instance; only the immutable program is shared.
-    final shader = program.fragmentShader();
-    setState(() => _shader = shader);
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final theme = LuminaTheme.of(context);
-    if (_requested ||
-        theme.reduceTransparency ||
-        MediaQuery.highContrastOf(context)) {
-      return;
-    }
-    _requested = true;
-    if (ui.ImageFilter.isShaderFilterSupported) {
-      unawaited(_loadShader());
-    }
-    // Skia keeps the clear rim and engraving; curved refraction needs Impeller.
-  }
-
-  @override
-  void dispose() {
-    _shader?.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final theme = LuminaTheme.of(context);
     final opaque =
         theme.reduceTransparency || MediaQuery.highContrastOf(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final rtl = Directionality.of(context) == TextDirection.rtl;
-        final index = widget.position.clamp(0.0, widget.count - 1.0);
-        final physical = rtl ? widget.count - 1 - index : index;
-        final fraction = (physical + .5) / widget.count;
-        final shader = _shader;
-        final filtered =
-            !opaque && shader != null && ui.ImageFilter.isShaderFilterSupported;
-        if (filtered) {
-          // The child is clipped before sampling: input coordinates belong to
-          // this navigation image, not the surrounding page or global screen.
-          shader
-            ..setFloat(2, MediaQuery.devicePixelRatioOf(context))
-            ..setFloat(3, theme.highPerformanceMode ? 1 : 0)
-            ..setFloat(4, fraction)
-            ..setFloat(5, widget.count.toDouble());
-        }
+        final index = position.clamp(0.0, count - 1.0);
+        final physical = Directionality.of(context) == TextDirection.rtl
+            ? count - 1 - index
+            : index;
+        final trackPadding = 3 * theme.data.spacingScale;
         return Stack(
           fit: StackFit.passthrough,
+          clipBehavior: Clip.none,
           children: [
-            ImageFiltered(
-              enabled: filtered,
-              imageFilter: filtered
-                  ? ui.ImageFilter.shader(shader)
-                  : ui.ImageFilter.blur(sigmaX: 0, sigmaY: 0),
-              child: ClipRect(child: widget.child),
-            ),
-            Positioned.fill(
+            child,
+            Positioned(
+              left: physical * constraints.maxWidth / count - trackPadding,
+              width: constraints.maxWidth / count + 2 * trackPadding,
+              top: -trackPadding,
+              bottom: -trackPadding,
               child: IgnorePointer(
                 child: ExcludeSemantics(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Transform.translate(
-                      offset: Offset(
-                        physical * constraints.maxWidth / widget.count,
-                        0,
-                      ),
-                      child: SizedBox(
-                        key: const ValueKey('nav-glass-slider'),
-                        width: constraints.maxWidth / widget.count,
-                        height: constraints.maxHeight,
-                        child: opaque
-                            ? const SizedBox.expand()
-                            : CustomPaint(
-                                painter: _NavigationGlassPaint(
-                                  colors: theme.colors,
-                                  opaque: false,
-                                ),
-                              ),
-                      ),
-                    ),
+                  child: SizedBox(
+                    key: const ValueKey('nav-glass-slider'),
+                    child: opaque
+                        ? const SizedBox.expand()
+                        : CustomPaint(
+                            painter: _NavigationGlassPaint(
+                              colors: theme.colors,
+                              opaque: false,
+                            ),
+                          ),
                   ),
                 ),
               ),
@@ -176,13 +129,25 @@ class _NavigationGlassPaint extends CustomPainter {
       rect,
       Radius.circular(rect.shortestSide / 2),
     );
-    final rimWidth = frame ? 2.6 : 1.2;
-    final ring = Path()
+    final outline = Path()..addRRect(outer);
+    final innerRect = Rect.fromLTRB(
+      rect.left + OrialisNavigationGlassFrame.innerInsets.left,
+      rect.top + OrialisNavigationGlassFrame.innerInsets.top,
+      rect.right - OrialisNavigationGlassFrame.innerInsets.right,
+      rect.bottom - OrialisNavigationGlassFrame.innerInsets.bottom,
+    );
+    final housing = Path()
       ..fillType = PathFillType.evenOdd
       ..addRRect(outer)
-      ..addRRect(outer.deflate(rimWidth));
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          innerRect,
+          Radius.circular(innerRect.height / 2),
+        ),
+      );
+    final material = frame ? housing : outline;
     if (opaque) {
-      canvas.drawPath(ring, Paint()..color = colors.surface);
+      canvas.drawPath(material, Paint()..color = colors.surface);
       canvas.drawRRect(
         outer,
         Paint()
@@ -193,64 +158,84 @@ class _NavigationGlassPaint extends CustomPainter {
       return;
     }
     const light = Color(0xFFFFFFFF);
-    final refracted = Color.lerp(colors.surface, colors.accent, .20)!;
+    final glass = Color.lerp(colors.surface, colors.accent, .16)!;
+    final shade = Color.lerp(colors.surface, const Color(0xFF101D2B), .65)!;
+    final depth = OrialisNavigationGlassFrame.surfaceDepth;
+
+    // Housing and lens use the same projected sidewall depth. The lens stays
+    // inside the housing opening; raising its surface never enlarges its bounds.
     canvas.drawPath(
-      ring,
+      material,
       Paint()
         ..shader = ui.Gradient.linear(
-          rect.topLeft,
-          rect.bottomRight,
+          rect.topCenter,
+          rect.bottomCenter,
           [
-            light.withValues(alpha: colors.toneValue(.32, .14)),
-            refracted.withValues(alpha: .035),
-            refracted.withValues(alpha: colors.toneValue(.24, .36)),
+            light.withValues(alpha: colors.toneValue(.27, .13)),
+            glass.withValues(alpha: frame ? .24 : .08),
+            glass.withValues(alpha: frame ? .36 : .16),
           ],
-          [0, .48, 1],
+          [0, .45, 1],
         ),
     );
-    if (!frame) {
-      // The body is clear; only the lower edge catches a faint wash of light.
-      canvas.drawRRect(
-        outer,
-        Paint()
-          ..shader = ui.Gradient.linear(
-            rect.topCenter,
-            rect.bottomCenter,
-            [
-              light.withValues(alpha: .025),
-              light.withValues(alpha: 0),
-              refracted.withValues(alpha: colors.toneValue(.055, .09)),
-            ],
-            [0, .45, 1],
-          ),
-      );
-    }
+    final faceRect = Rect.fromLTRB(
+      rect.left,
+      rect.top,
+      rect.right,
+      rect.bottom - depth,
+    );
+    final face = RRect.fromRectAndRadius(
+      faceRect,
+      Radius.circular(faceRect.shortestSide / 2),
+    );
+    final sidewall = Path.combine(
+      PathOperation.difference,
+      outline,
+      Path()..addRRect(face),
+    );
+    canvas.save();
+    canvas.clipPath(material);
+    canvas.drawPath(
+      sidewall,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          Offset(rect.center.dx, rect.bottom - depth * 1.5),
+          rect.bottomCenter,
+          [
+            glass.withValues(alpha: colors.toneValue(.34, .42)),
+            shade.withValues(alpha: colors.toneValue(.30, .54)),
+          ],
+        ),
+    );
+    // A broad top bevel replaces nested stroked rings.
+    canvas.drawRect(
+      Rect.fromLTRB(rect.left, rect.top, rect.right, rect.top + depth * 2),
+      Paint()
+        ..shader = ui.Gradient.linear(
+          rect.topCenter,
+          Offset(rect.center.dx, rect.top + depth * 2),
+          [
+            light.withValues(alpha: colors.toneValue(.36, .20)),
+            light.withValues(alpha: 0),
+          ],
+        ),
+    );
+    canvas.restore();
     canvas.drawRRect(
       outer,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.05
+        ..strokeWidth = .8
         ..shader = ui.Gradient.linear(
           rect.topLeft,
           rect.bottomRight,
           [
-            light.withValues(alpha: colors.toneValue(.82, .42)),
-            light.withValues(alpha: .04),
-            refracted.withValues(alpha: colors.toneValue(.40, .58)),
-            light.withValues(alpha: colors.toneValue(.46, .24)),
+            light.withValues(alpha: colors.toneValue(.74, .42)),
+            light.withValues(alpha: .025),
+            shade.withValues(alpha: colors.toneValue(.22, .38)),
           ],
-          [0, .45, .78, 1],
+          [0, .48, 1],
         ),
-    );
-    canvas.drawRRect(
-      outer.deflate(rimWidth),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = .65
-        ..shader = ui.Gradient.linear(rect.topLeft, rect.bottomRight, [
-          colors.ink.withValues(alpha: colors.toneValue(.13, .25)),
-          light.withValues(alpha: colors.toneValue(.36, .16)),
-        ]),
     );
   }
 

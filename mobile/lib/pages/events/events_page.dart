@@ -16,6 +16,7 @@ import '../../features/events/presentation/long_press_orderable.dart';
 import '../../features/events/presentation/quick_event_button.dart';
 import '../projects/projects_page.dart';
 import '../shared/page_parts.dart';
+import '../shared/glass_segmented.dart';
 
 class EventsPage extends ConsumerStatefulWidget {
   const EventsPage({super.key});
@@ -120,8 +121,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
     body: ref.watch(desktopModeProvider)
         ? _tasks(20)
         : LuminaFloatingHeader(
-            header: LuminaSegmented<int>(
-              transparent: true,
+            header: OrialisGlassSegmented<int>(
               items: const {0: '四象限', 1: '项目'},
               value: _page,
               onChanged: (v) => _pager.animateToPage(

@@ -24,6 +24,7 @@ class ResponseDashboardProgress extends StatelessWidget {
                 final max = item['max'] ?? 100;
                 final ratio =
                     (item['value'] as num).toDouble() / (max as num).toDouble();
+                final progress = ratio.clamp(0.0, 1.0);
                 final percentage = '${(ratio * 100).toStringAsFixed(1)}%';
                 return Semantics(
                   label:
@@ -44,7 +45,7 @@ class ResponseDashboardProgress extends StatelessWidget {
                           child: SizedBox.square(
                             dimension: 72,
                             child: CircularProgressIndicator(
-                              value: ratio,
+                              value: progress,
                               color: theme.colors.accent,
                               backgroundColor: theme.colors.recessedSurface,
                               strokeWidth: 8,
@@ -52,13 +53,48 @@ class ResponseDashboardProgress extends StatelessWidget {
                           ),
                         )
                       else
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: LinearProgressIndicator(
-                            value: ratio,
-                            minHeight: 10,
-                            color: theme.colors.accent,
-                            backgroundColor: theme.colors.recessedSurface,
+                        LuminaSurface(
+                          depth: LuminaSurfaceDepth.recessed,
+                          radius: 8,
+                          padding: const EdgeInsets.all(2),
+                          child: SizedBox(
+                            height: 10,
+                            child: TweenAnimationBuilder<double>(
+                              tween: Tween(end: progress),
+                              duration:
+                                  LuminaTheme.motionReducedOf(context) ||
+                                      theme.highPerformanceMode
+                                  ? Duration.zero
+                                  : const Duration(milliseconds: 180),
+                              curve: luminaEaseOut,
+                              builder: (context, value, _) => Align(
+                                alignment: AlignmentDirectional.centerStart,
+                                child: FractionallySizedBox(
+                                  widthFactor: value.clamp(0.0, 1.0),
+                                  heightFactor: 1,
+                                  child: DecoratedBox(
+                                    key: ValueKey(
+                                      'response-progress-fill-${item['label']}',
+                                    ),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(6),
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: [
+                                          Color.lerp(
+                                            theme.colors.accent,
+                                            theme.colors.surface,
+                                            .28,
+                                          )!,
+                                          theme.colors.accent,
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       if (item['detail'] != null)

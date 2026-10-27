@@ -140,32 +140,98 @@ class LuminaResize extends StatelessWidget {
 }
 
 /// Reversible expansion keeps its contents mounted, preserving local state.
-class LuminaReveal extends StatelessWidget {
+class LuminaReveal extends StatefulWidget {
   const LuminaReveal({required this.visible, required this.child, super.key});
   final bool visible;
   final Widget child;
   @override
-  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
-    tween: Tween(end: visible ? 1 : 0),
-    duration: LuminaTheme.motionReducedOf(context)
-        ? Duration.zero
-        : LuminaMotion.standard,
-    curve: luminaEaseOut,
-    child: child,
-    builder: (context, value, child) => Offstage(
-      offstage: value == 0,
-      child: IgnorePointer(
-        ignoring: !visible,
-        child: ExcludeSemantics(
-          excluding: !visible,
-          child: ClipRect(
-            child: Align(
-              alignment: Alignment.topCenter,
-              heightFactor: value,
-              child: TickerMode(
-                enabled: value > 0,
-                child: Opacity(opacity: value, child: child),
-              ),
+  State<LuminaReveal> createState() => _LuminaRevealState();
+}
+
+class _LuminaRevealState extends State<LuminaReveal>
+    with SingleTickerProviderStateMixin {
+  late final controller = AnimationController(
+    vsync: this,
+    duration: LuminaMotion.standard,
+    value: widget.visible ? 1 : 0,
+  );
+  bool reducedMotion = false;
+  late bool contentActive = widget.visible;
+
+  @override
+  void initState() {
+    super.initState();
+    controller.addStatusListener(_handleStatus);
+  }
+
+  void _handleStatus(AnimationStatus _) {
+    if (!controller.isAnimating &&
+        controller.value == 0 &&
+        !widget.visible &&
+        contentActive) {
+      setState(() => contentActive = false);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduced = LuminaTheme.motionReducedOf(context);
+    if (reduced == reducedMotion) return;
+    reducedMotion = reduced;
+    if (reduced) {
+      contentActive = widget.visible;
+      controller.value = widget.visible ? 1 : 0;
+    } else {
+      _animateToTarget();
+    }
+  }
+
+  @override
+  void didUpdateWidget(LuminaReveal oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.visible != widget.visible) {
+      if (reducedMotion) {
+        contentActive = widget.visible;
+        controller.value = widget.visible ? 1 : 0;
+      } else {
+        if (widget.visible && !contentActive) {
+          setState(() => contentActive = true);
+        }
+        _animateToTarget();
+      }
+    }
+  }
+
+  void _animateToTarget() {
+    controller.animateTo(
+      widget.visible ? 1 : 0,
+      duration: LuminaMotion.standard,
+      curve: luminaEaseOut,
+    );
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+    ignoring: !widget.visible,
+    child: ExcludeFocus(
+      excluding: !widget.visible,
+      child: ExcludeSemantics(
+        excluding: !widget.visible,
+        child: SizeTransition(
+          sizeFactor: controller,
+          alignment: Alignment.topCenter,
+          child: FadeTransition(
+            opacity: controller,
+            child: Offstage(
+              offstage: !contentActive,
+              child: TickerMode(enabled: contentActive, child: widget.child),
             ),
           ),
         ),

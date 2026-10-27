@@ -12,6 +12,7 @@ import '../../pages/profile/profile_page.dart';
 import '../../pages/shell/orialis_shell.dart';
 import '../../pages/shell/desktop_shell.dart';
 import '../../pages/today/today_page.dart';
+import '../../pages/shared/page_parts.dart';
 import '../../pages/projects/projects_page.dart';
 import '../../features/devices/presentation/device_center_page.dart';
 import '../../features/wear/wear_connection_page.dart';
@@ -73,7 +74,6 @@ GoRouter buildRouter({bool desktop = false}) {
         navigatorContainerBuilder: (context, shell, children) =>
             LuminaBranchTransition(
               index: shell.currentIndex,
-              animate: desktop,
               children: children,
             ),
         builder: (context, state, navigationShell) => desktop
@@ -82,12 +82,22 @@ GoRouter buildRouter({bool desktop = false}) {
         branches: [
           StatefulShellBranch(
             routes: [
-              GoRoute(path: '/today', builder: (_, _) => const TodayPage()),
+              GoRoute(
+                path: '/today',
+                builder: (_, _) => desktop
+                    ? const TodayPage()
+                    : const OrialisCompactTypography(child: TodayPage()),
+              ),
             ],
           ),
           StatefulShellBranch(
             routes: [
-              GoRoute(path: '/events', builder: (_, _) => const EventsPage()),
+              GoRoute(
+                path: '/events',
+                builder: (_, _) => desktop
+                    ? const EventsPage()
+                    : const OrialisCompactTypography(child: EventsPage()),
+              ),
             ],
           ),
           if (desktop)

@@ -133,6 +133,7 @@ class _MemoryPageState extends State<MemoryPage> with WidgetsBindingObserver {
         .where((record) => categoryFilter == 'all' || record.category == 'ai')
         .toList();
     return OrialisPageScaffold(
+      padding: EdgeInsets.zero,
       title: '屏幕记忆',
       subtitle: '把正在看的内容，留给以后的自己',
       leading: LuminaIconButton(
@@ -159,8 +160,10 @@ class _MemoryPageState extends State<MemoryPage> with WidgetsBindingObserver {
           child: ListView.builder(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
               top: LuminaPageHeaderInset.of(context) + 12,
-              bottom: 40,
+              bottom: MediaQuery.paddingOf(context).bottom + 40,
             ),
             itemCount: 1 + (filtered?.length ?? 0),
             itemBuilder: (context, index) {
@@ -448,6 +451,7 @@ class _MemoryDetailPageState extends State<_MemoryDetailPage> {
 
   @override
   Widget build(BuildContext context) => OrialisPageScaffold(
+    padding: EdgeInsets.zero,
     title: record.title,
     subtitle: '${_source(record)} · ${_time(record.createdAt)}',
     leading: LuminaIconButton(
@@ -458,8 +462,10 @@ class _MemoryDetailPageState extends State<_MemoryDetailPage> {
     body: Builder(
       builder: (context) => ListView(
         padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
           top: LuminaPageHeaderInset.of(context) + 12,
-          bottom: 40,
+          bottom: MediaQuery.paddingOf(context).bottom + 40,
         ),
         children: [
           Wrap(

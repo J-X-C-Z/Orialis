@@ -28,6 +28,34 @@ Widget _host(
 
 void main() {
   testWidgets(
+    'icon-only frosted action is circular and remains keyboard accessible',
+    (tester) async {
+      var tapped = 0;
+      await tester.pumpWidget(
+        _host(
+          LuminaFloatingActionButton(
+            onPressed: () => tapped++,
+            icon: const m.Icon(m.Icons.add),
+            tooltip: 'Add event',
+            frosted: true,
+          ),
+        ),
+      );
+      final action = find.byType(LuminaFloatingActionButton);
+      final size = tester.getSize(action);
+      expect(size.width, size.height);
+      expect(size.width, greaterThanOrEqualTo(48));
+      await tester.tap(action);
+      expect(tapped, 1);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(tapped, 2);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'catalog buttons expose a single enabled or disabled semantic action',
     (tester) async {
       final semantics = tester.ensureSemantics();

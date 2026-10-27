@@ -79,6 +79,7 @@ class LuminaSurface extends StatefulWidget {
     required this.child,
     this.padding = const EdgeInsets.all(16),
     this.glass = false,
+    this.frosted = false,
     this.liquidGlass,
     this.diffuseGlass = false,
     this.backdrop = false,
@@ -94,6 +95,9 @@ class LuminaSurface extends StatefulWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
   final bool glass;
+
+  /// Standalone frost bypasses the layered neumorphic control treatment.
+  final bool frosted;
 
   /// Overrides the theme material for this surface without changing its children.
   final bool? liquidGlass;
@@ -170,6 +174,7 @@ class _LuminaSurfaceState extends State<LuminaSurface>
         child: LuminaSurface(
           padding: widget.padding,
           glass: widget.glass,
+          frosted: widget.frosted,
           liquidGlass: widget.liquidGlass,
           diffuseGlass: widget.diffuseGlass,
           backdrop: widget.backdrop,
@@ -190,11 +195,13 @@ class _LuminaSurfaceState extends State<LuminaSurface>
     final theme = LuminaTheme.of(context);
     final opaque = contrast || theme.reduceTransparency;
     final card = LuminaCardScope.of(context);
-    final neumorphic = theme.data.neumorphic;
+    final neumorphic = theme.data.neumorphic && !widget.frosted;
     final sandwich = neumorphic && theme.data.neumorphicGlass && widget.glass;
     final glass = widget.glass && !card && !neumorphic;
     final liquidGlass =
-        !neumorphic && !card && (widget.liquidGlass ?? theme.data.liquidGlass);
+        !neumorphic &&
+        !card &&
+        (!widget.frosted && (widget.liquidGlass ?? theme.data.liquidGlass));
     final colors = theme.colors;
     final tint =
         widget.color ??
@@ -229,6 +236,9 @@ class _LuminaSurfaceState extends State<LuminaSurface>
         pressed: pressed,
         child: label,
       );
+      // No backdrop is sampled in performance mode, so the static well/coat
+      // can retain its own display list while its surrounding page repaints.
+      if (theme.highPerformanceMode) content = RepaintBoundary(child: content);
     } else if (!transparent || focused) {
       final materialChild = content;
       content = LayoutBuilder(
@@ -863,7 +873,9 @@ class LuminaCardHeader extends StatelessWidget {
         Flexible(
           child: Text(
             title,
-            style: LuminaTheme.of(context).textTheme.cardTitle,
+            style: LuminaTheme.of(context).textTheme.cardTitle.copyWith(
+              color: relief ? LuminaTheme.of(context).colors.accent : null,
+            ),
           ),
         ),
         if (expanded != null) ...[

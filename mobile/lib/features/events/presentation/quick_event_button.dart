@@ -16,8 +16,8 @@ class QuickEventButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) =>
       LuminaFloatingActionButton(
         tooltip: '快捷添加事件',
+        frosted: true,
         icon: const LuminaIcon(LuminaIcons.add),
-        label: const Text('记一件事'),
         onPressed: () => showLuminaSheet<void>(
           context: context,
           builder: (_) => QuickEventEditor(

@@ -27,7 +27,7 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
     final label = LuminaTheme.of(context).textTheme.labelSmall;
     final theme = LuminaTheme.of(context);
     final layered = theme.data.neumorphic && theme.data.neumorphicGlass;
-    return (layered ? 84 : 72) +
+    return (layered ? 76 : 72) +
         MediaQuery.textScalerOf(context).scale(label.fontSize ?? 12) *
             (label.height ?? 1.2);
   }
@@ -55,10 +55,7 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
                 color: neumorphic && !neumorphicGlass && selectedIndex == i
                     ? null
                     : const Color(0x00000000),
-                padding: const EdgeInsets.symmetric(
-                  vertical: 10,
-                  horizontal: 2,
-                ),
+                padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 2),
                 onTap: destinations[i].enabled
                     ? () => onDestinationSelected(i)
                     : null,
@@ -83,6 +80,8 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         destinations[i].label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.labelSmall.copyWith(
                           color: selectedIndex == i
                               ? theme.colors.accent
@@ -120,13 +119,15 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
       ],
     );
     final innerBar = LuminaSurface(
-      depth: LuminaSurfaceDepth.raised,
+      depth: neumorphicGlass
+          ? LuminaSurfaceDepth.recessed
+          : LuminaSurfaceDepth.raised,
       glass: !neumorphic,
       backdrop: !neumorphic,
       radius: LuminaControlSize.capsuleRadius,
-      padding: const EdgeInsets.all(6),
+      padding: const EdgeInsets.all(3),
       child: neumorphic
-          ? _NeumorphicNavigationSelection(
+          ? OrialisNavigationSelection(
               index: selectedIndex,
               enabled: [
                 for (final destination in destinations) destination.enabled,
@@ -175,7 +176,7 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
                 child: SafeArea(
                   top: false,
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
                     child: neumorphic
                         ? navigationBar
                         : ListenableBuilder(
@@ -194,8 +195,9 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
   }
 }
 
-class _NeumorphicNavigationSelection extends StatefulWidget {
-  const _NeumorphicNavigationSelection({
+class OrialisNavigationSelection extends StatefulWidget {
+  const OrialisNavigationSelection({
+    super.key,
     required this.index,
     required this.enabled,
     required this.glass,
@@ -210,12 +212,11 @@ class _NeumorphicNavigationSelection extends StatefulWidget {
   final Widget Function(Animation<double> position) builder;
 
   @override
-  State<_NeumorphicNavigationSelection> createState() =>
-      _NeumorphicNavigationSelectionState();
+  State<OrialisNavigationSelection> createState() =>
+      _OrialisNavigationSelectionState();
 }
 
-class _NeumorphicNavigationSelectionState
-    extends State<_NeumorphicNavigationSelection>
+class _OrialisNavigationSelectionState extends State<OrialisNavigationSelection>
     with SingleTickerProviderStateMixin {
   late final LuminaSpring _position = LuminaSpring(
     vsync: this,
@@ -273,6 +274,15 @@ class _NeumorphicNavigationSelectionState
   }
 
   void _settleTo(int index) {
+    if (!LuminaTheme.motionReducedOf(context) &&
+        LuminaTheme.of(context).highPerformanceMode) {
+      _position.animateTo(
+        index.toDouble(),
+        duration: const Duration(milliseconds: 180),
+        curve: luminaEaseOut,
+      );
+      return;
+    }
     _position.settleNavigation(
       index.toDouble(),
       reducedMotion: LuminaTheme.motionReducedOf(context),
@@ -304,7 +314,7 @@ class _NeumorphicNavigationSelectionState
   }
 
   @override
-  void didUpdateWidget(_NeumorphicNavigationSelection oldWidget) {
+  void didUpdateWidget(OrialisNavigationSelection oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.index != widget.index || oldWidget.enabled.length != _count) {
       _dragging = false;
@@ -319,36 +329,6 @@ class _NeumorphicNavigationSelectionState
       _position.settle(widget.index.toDouble(), reducedMotion: true);
     }
   }
-
-  Widget _movingWell() => Positioned.fill(
-    child: IgnorePointer(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final width = constraints.maxWidth / _count;
-          return Align(
-            alignment: Alignment.centerLeft,
-            child: Transform.translate(
-              offset: Offset(
-                _physicalPosition.clamp(0.0, _count - 1.0) * width,
-                0,
-              ),
-              child: SizedBox(
-                key: const ValueKey('nav-recess'),
-                width: width,
-                height: constraints.maxHeight,
-                child: const LuminaSurface(
-                  depth: LuminaSurfaceDepth.recessed,
-                  radius: LuminaControlSize.capsuleRadius,
-                  padding: EdgeInsets.zero,
-                  child: SizedBox.expand(),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    ),
-  );
 
   @override
   Widget build(BuildContext context) => GestureDetector(
@@ -365,10 +345,7 @@ class _NeumorphicNavigationSelectionState
         return OrialisNavigationGlassLens(
           position: _position.value,
           count: _count,
-          child: Stack(
-            fit: StackFit.passthrough,
-            children: [_movingWell(), content!],
-          ),
+          child: content!,
         );
       },
     ),

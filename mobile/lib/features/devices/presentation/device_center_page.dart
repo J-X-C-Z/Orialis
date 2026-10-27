@@ -19,6 +19,7 @@ class DeviceCenterPage extends ConsumerWidget {
     final state = ref.watch(deviceCenterControllerProvider);
     final controller = ref.read(deviceCenterControllerProvider.notifier);
     return OrialisPageScaffold(
+      padding: EdgeInsets.zero,
       title: '设备中心',
       leading: LuminaIconButton(
         tooltip: '返回',
@@ -28,6 +29,8 @@ class DeviceCenterPage extends ConsumerWidget {
       body: Builder(
         builder: (context) => ListView(
           padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
             top: LuminaPageHeaderInset.of(context) + 12,
             bottom: MediaQuery.paddingOf(context).bottom + 24,
           ),
