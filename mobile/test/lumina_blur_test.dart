@@ -33,12 +33,13 @@ void main() {
     test('high-performance chrome is cheaper than balanced mode', () {
       final config = LuminaBlurConfig.highPerformanceChrome;
       expect(config.backend, isNot(LuminaBlurBackend.legacyGaussian));
-      expect(config.level, LuminaBlurLevel.blurS);
+      expect(config.level, LuminaBlurLevel.blurXS);
+      expect(config.backend, LuminaBlurBackend.tintNoise);
       expect(
         config.level.sigma,
         lessThan(LuminaBlurConfig.flowingGlass.level.sigma),
       );
-      expect(config.imageFilter(), isNotNull);
+      expect(config.imageFilter(), isNull);
     });
 
     test('auto-downgrade never drops chrome below BlurS', () {
@@ -82,7 +83,7 @@ void main() {
       policy.useLegacyFallback();
       expect(seen, LuminaBlurLevel.blurXL);
       policy.useHighPerformanceChrome();
-      expect(seen, LuminaBlurLevel.blurS);
+      expect(seen, LuminaBlurLevel.blurXS);
       policy.useFlowingGlass();
       expect(seen, LuminaBlurLevel.blurM);
     });
@@ -111,6 +112,7 @@ void main() {
           onTap: () {},
           child: const SizedBox(width: 240, height: 56),
         ),
+        highPerformance: false,
       ),
     );
     expect(find.byType(BackdropFilter), findsOneWidget);
@@ -118,8 +120,10 @@ void main() {
     expect(filter.filter, isNotNull);
   });
 
-  testWidgets('BlurXS backdrop does not mount BackdropFilter', (tester) async {
-    LuminaBlurPolicy.instance.useDisabled();
+  testWidgets('high-performance backdrop does not sample the background', (
+    tester,
+  ) async {
+    LuminaBlurPolicy.instance.useHighPerformanceChrome();
     addTearDown(LuminaBlurPolicy.instance.useFlowingGlass);
     await tester.pumpWidget(
       _harness(

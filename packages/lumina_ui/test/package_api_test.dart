@@ -23,10 +23,13 @@ void main() {
   testWidgets('switch shares the recessed track and glass selection lens', (
     tester,
   ) async {
+    LuminaBlurPolicy.instance.useFlowingGlass();
+    addTearDown(LuminaBlurPolicy.instance.useFlowingGlass);
     var value = false;
     await tester.pumpWidget(
       app(
         LuminaTheme(
+          highPerformanceMode: false,
           child: Center(
             child: StatefulBuilder(
               builder: (context, update) => LuminaSwitch(
@@ -111,10 +114,13 @@ void main() {
   testWidgets('value slider taps and long-press scrubs on the glass well', (
     tester,
   ) async {
+    LuminaBlurPolicy.instance.useFlowingGlass();
+    addTearDown(LuminaBlurPolicy.instance.useFlowingGlass);
     var value = 0.0;
     await tester.pumpWidget(
       app(
         LuminaTheme(
+          highPerformanceMode: false,
           child: Center(
             child: SizedBox(
               width: 300,

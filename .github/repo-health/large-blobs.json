@@ -1,4 +1,9 @@
 {
   "max_new_blob_bytes": 1048576,
-  "allowlist": {}
+  "allowlist": {
+    "docs/implementation/assets/intelligent-ui-extended-preview.png": {
+      "blob_id": "5306759d0f929018f8f3fee642f2616f859e180a",
+      "rationale": "Reviewed 900x2843 native Flutter preview documenting the Intelligent UI appearance; retained at readable resolution as documentation, not a build artifact."
+    }
+  }
 }
