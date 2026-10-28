@@ -74,6 +74,12 @@ GoRouter buildRouter({bool desktop = false}) {
         navigatorContainerBuilder: (context, shell, children) =>
             LuminaBranchTransition(
               index: shell.currentIndex,
+              // A 220 ms full-page translation is costly on 120 Hz screens:
+              // each frame has only 8.3 ms, and moving content forces the
+              // persistent glass navigation to sample a changing backdrop.
+              // Keep the local navigation indicator animation on those
+              // screens, but switch the page immediately.
+              animate: _animateBranchTransition(desktop),
               children: children,
             ),
         builder: (context, state, navigationShell) => desktop
@@ -177,6 +183,13 @@ GoRouter buildRouter({bool desktop = false}) {
       ),
     ],
   );
+}
+
+bool _animateBranchTransition(bool desktop) {
+  if (desktop) return true;
+  final views = WidgetsBinding.instance.platformDispatcher.views;
+  if (views.isEmpty) return true;
+  return views.first.display.refreshRate < 110;
 }
 
 class PlaceholderPage extends StatelessWidget {

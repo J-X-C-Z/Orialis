@@ -1,7 +1,7 @@
 name: orialis_mobile
 description: Orialis local-first mobile client.
 publish_to: "none"
-version: 1.2.5+28
+version: 1.2.13+36
 
 environment:
   sdk: ">=3.13.0 <4.0.0"

@@ -76,13 +76,14 @@ class _FailOnce extends ResponseActionService {
   @override
   Future<ResponseActionReceipt> create(
     String scope,
-    Map<String, dynamic> item,
-  ) {
+    Map<String, dynamic> item, {
+    Map<String, dynamic>? overrides,
+  }) {
     if (fail) {
       fail = false;
       throw StateError('test failure');
     }
-    return super.create(scope, item);
+    return super.create(scope, item, overrides: overrides);
   }
 }
 

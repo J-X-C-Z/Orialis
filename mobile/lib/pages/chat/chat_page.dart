@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart' show listEquals, mapEquals;
 import 'package:flutter/material.dart' show MaterialPageRoute;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/rendering.dart' show RenderProxyBox;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -274,6 +275,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   final _latestMessageAnchor = GlobalKey();
+  double _floatingDockHeight = 160;
+
+  void _dockHeightChanged(double height) {
+    if (!mounted || (_floatingDockHeight - height).abs() < .5) return;
+    setState(() => _floatingDockHeight = height);
+  }
+
   final _imagePicker = ImagePicker();
   final _attachmentBridge = AttachmentBridge();
   final List<AttachmentRecord> _attachments = [];
@@ -939,6 +947,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
 
   Widget _conversationList() => OrialisPageScaffold(
     title: '聊天',
+    padding: EdgeInsets.zero,
     actions: [
       LuminaIconButton(
         onPressed: _startingDeviceChat ? null : _chooseChatDevice,
@@ -1006,9 +1015,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
           children: [
             Padding(
               padding: EdgeInsets.fromLTRB(
-                16,
+                36,
                 LuminaPageHeaderInset.of(context) + 8,
-                16,
+                36,
                 6,
               ),
               child: Row(
@@ -1044,8 +1053,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
               child: conversations.isEmpty
                   ? const LuminaEmptyState(text: '没有匹配的会话，试试其他搜索或筛选。')
                   : ReorderableList(
-                      padding: EdgeInsets.only(
-                        bottom: MediaQuery.paddingOf(context).bottom + 24,
+                      // Keep the viewport full width so row shadows are not
+                      // clipped into a fixed rectangular frame around the list.
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        0,
+                        20,
+                        MediaQuery.paddingOf(context).bottom + 24,
                       ),
                       itemCount: conversations.length,
                       onReorderItem: (oldIndex, newIndex) async {
@@ -2451,464 +2465,634 @@ class _ChatPageState extends ConsumerState<ChatPage>
           child: ColoredBox(
             color: colors.paper,
             child: SafeArea(
-              child: Column(
-                children: [
-                  Expanded(
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: messages.when(
-                            loading: () =>
-                                const Center(child: LuminaProgress()),
-                            error: (error, _) => const LuminaEmptyState(
-                              text: '消息暂时无法加载，请稍后再试。',
-                              card: false,
-                            ),
-                            data: (window) {
-                              final hasEarlier = window.length > _historyLimit;
-                              final items =
-                                  (hasEarlier ? window.sublist(1) : window)
-                                      .where(isVisibleChatMessage)
-                                      .toList();
-                              final completedAnchors = completedSummaryAnchors(
-                                items,
-                              );
-                              final notificationMessage =
-                                  _pendingNotificationMessageId;
-                              if (notificationMessage != null) {
-                                _pendingNotificationMessageId = null;
-                                WidgetsBinding.instance.addPostFrameCallback((
-                                  _,
-                                ) {
-                                  if (mounted) {
-                                    _jumpToQuotedMessage(
-                                      notificationMessage,
-                                      items,
-                                      waitForSync: true,
-                                    );
+              child: LayoutBuilder(
+                builder: (context, constraints) => Stack(
+                  children: [
+                    Positioned.fill(
+                      child: SizedBox(
+                        key: const ValueKey('chat-message-viewport'),
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: messages.when(
+                                loading: () =>
+                                    const Center(child: LuminaProgress()),
+                                error: (error, _) => const LuminaEmptyState(
+                                  text: '消息暂时无法加载，请稍后再试。',
+                                  card: false,
+                                ),
+                                data: (window) {
+                                  final hasEarlier =
+                                      window.length > _historyLimit;
+                                  final items =
+                                      (hasEarlier ? window.sublist(1) : window)
+                                          .where(isVisibleChatMessage)
+                                          .toList();
+                                  final completedAnchors =
+                                      completedSummaryAnchors(items);
+                                  final notificationMessage =
+                                      _pendingNotificationMessageId;
+                                  if (notificationMessage != null) {
+                                    _pendingNotificationMessageId = null;
+                                    WidgetsBinding.instance
+                                        .addPostFrameCallback((_) {
+                                          if (mounted) {
+                                            _jumpToQuotedMessage(
+                                              notificationMessage,
+                                              items,
+                                              waitForSync: true,
+                                            );
+                                          }
+                                        });
                                   }
-                                });
-                              }
-                              // Latest identity + content hash detects a new final
-                              // message without building a full-body signature string.
-                              final last = items.isEmpty ? null : items.last;
-                              final signature =
-                                  '$_conversationId:${last?.id ?? ''}:${last?.content.hashCode ?? 0}:${last?.attachmentsJson.hashCode ?? 0}';
-                              if (_messageSignature != signature) {
-                                _messageSignature = signature;
-                                _contentArrived();
-                              }
-                              return items.isEmpty
-                                  ? ListView(
-                                      padding: const EdgeInsets.only(
-                                        top: headerHeight + 12,
-                                      ),
-                                      children: [
-                                        if (hasEarlier)
-                                          LuminaButton(
-                                            primary: false,
-                                            onPressed: () => setState(() {
-                                              _historyLimit += 30;
-                                            }),
-                                            child: const Text('查看更早消息'),
+                                  // Latest identity + content hash detects a new final
+                                  // message without building a full-body signature string.
+                                  final last = items.isEmpty
+                                      ? null
+                                      : items.last;
+                                  final signature =
+                                      '$_conversationId:${last?.id ?? ''}:${last?.content.hashCode ?? 0}:${last?.attachmentsJson.hashCode ?? 0}';
+                                  if (_messageSignature != signature) {
+                                    _messageSignature = signature;
+                                    _contentArrived();
+                                  }
+                                  return items.isEmpty
+                                      ? ListView(
+                                          padding: EdgeInsets.only(
+                                            bottom: _floatingDockHeight + 20,
+                                            top: headerHeight + 12,
                                           ),
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 20,
-                                          ),
-                                          child: AgentEventsPanel(
-                                            key: ValueKey(
-                                              'agent-events-$_conversationId',
-                                            ),
-                                            store: _agentEvents,
-                                            showActivity: false,
-                                            showThinking: true,
-                                            showClarifications: false,
-                                            onRefresh: _chatDeviceId == null
-                                                ? null
-                                                : _refreshAgentStatus,
-                                            onPromptSelected: _fillPrompt,
-                                            onAction: _sendAgentAction,
-                                          ),
-                                        ),
-                                        if (_agentEvents.streams.isEmpty &&
-                                            !_agentEvents.typing &&
-                                            chatThinkingLabel(_agentEvents) ==
-                                                null)
-                                          Padding(
-                                            padding: const EdgeInsets.fromLTRB(
-                                              20,
-                                              28,
-                                              20,
-                                              20,
-                                            ),
-                                            child: ChatEmptySuggestions(
-                                              onSelect: _fillPrompt,
-                                            ),
-                                          ),
-                                      ],
-                                    )
-                                  : NotificationListener<
-                                      ScrollMetricsNotification
-                                    >(
-                                      onNotification: (notification) {
-                                        if (notification.depth == 0 &&
-                                            !_userDragging &&
-                                            _followLatest) {
-                                          _queueLatest();
-                                        }
-                                        return false;
-                                      },
-                                      child: NotificationListener<ScrollNotification>(
-                                        onNotification: (notification) {
-                                          if (notification.depth != 0) {
-                                            return false;
-                                          }
-                                          if (notification
-                                                  is ScrollStartNotification &&
-                                              notification.dragDetails !=
-                                                  null) {
-                                            _userDragging = true;
-                                          } else if (notification
-                                              is ScrollEndNotification) {
-                                            if (_userDragging) {
-                                              _userDragging = false;
-                                              _syncFollowFromPosition();
-                                              if (_followLatest) _queueLatest();
-                                            }
-                                          } else if (notification
-                                                  is ScrollUpdateNotification &&
-                                              _userDragging) {
-                                            _onScroll();
-                                          }
-                                          return false;
-                                        },
-                                        child: IgnorePointer(
-                                          // Only the first paint is hidden while we jump to
-                                          // the newest bubble; never trap the gesture.
-                                          ignoring:
-                                              _positioningLatest &&
-                                              _alignRetries < 3,
-                                          child: Opacity(
-                                            opacity: _positioningLatest ? 0 : 1,
-                                            child: ListView.builder(
-                                              key: ValueKey(_conversationId),
-                                              controller: _scrollController,
+                                          children: [
+                                            if (hasEarlier)
+                                              LuminaButton(
+                                                primary: false,
+                                                onPressed: () => setState(() {
+                                                  _historyLimit += 30;
+                                                }),
+                                                child: const Text('查看更早消息'),
+                                              ),
+                                            Padding(
                                               padding:
-                                                  const EdgeInsets.fromLTRB(
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 20,
+                                                  ),
+                                              child: AgentEventsPanel(
+                                                key: ValueKey(
+                                                  'agent-events-$_conversationId',
+                                                ),
+                                                store: _agentEvents,
+                                                showActivity: false,
+                                                showThinking: true,
+                                                showClarifications: false,
+                                                onRefresh: _chatDeviceId == null
+                                                    ? null
+                                                    : _refreshAgentStatus,
+                                                onPromptSelected: _fillPrompt,
+                                                onAction: _sendAgentAction,
+                                              ),
+                                            ),
+                                            if (_agentEvents.streams.isEmpty &&
+                                                !_agentEvents.typing &&
+                                                chatThinkingLabel(
+                                                      _agentEvents,
+                                                    ) ==
+                                                    null)
+                                              Padding(
+                                                padding:
+                                                    const EdgeInsets.fromLTRB(
+                                                      20,
+                                                      28,
+                                                      20,
+                                                      20,
+                                                    ),
+                                                child: ChatEmptySuggestions(
+                                                  onSelect: _fillPrompt,
+                                                ),
+                                              ),
+                                          ],
+                                        )
+                                      : NotificationListener<
+                                          ScrollMetricsNotification
+                                        >(
+                                          onNotification: (notification) {
+                                            if (notification.depth == 0 &&
+                                                !_userDragging &&
+                                                _followLatest) {
+                                              _queueLatest();
+                                            }
+                                            return false;
+                                          },
+                                          child: NotificationListener<ScrollNotification>(
+                                            onNotification: (notification) {
+                                              if (notification.depth != 0) {
+                                                return false;
+                                              }
+                                              if (notification
+                                                      is ScrollStartNotification &&
+                                                  notification.dragDetails !=
+                                                      null) {
+                                                _userDragging = true;
+                                              } else if (notification
+                                                  is ScrollEndNotification) {
+                                                if (_userDragging) {
+                                                  _userDragging = false;
+                                                  _syncFollowFromPosition();
+                                                  if (_followLatest) {
+                                                    _queueLatest();
+                                                  }
+                                                }
+                                              } else if (notification
+                                                      is ScrollUpdateNotification &&
+                                                  _userDragging) {
+                                                _onScroll();
+                                              }
+                                              return false;
+                                            },
+                                            child: IgnorePointer(
+                                              // Only the first paint is hidden while we jump to
+                                              // the newest bubble; never trap the gesture.
+                                              ignoring:
+                                                  _positioningLatest &&
+                                                  _alignRetries < 3,
+                                              child: Opacity(
+                                                opacity: _positioningLatest
+                                                    ? 0
+                                                    : 1,
+                                                child: ListView.builder(
+                                                  key: ValueKey(
+                                                    _conversationId,
+                                                  ),
+                                                  controller: _scrollController,
+                                                  padding: EdgeInsets.fromLTRB(
                                                     20,
                                                     headerHeight + 12,
                                                     20,
-                                                    20,
+                                                    _floatingDockHeight + 20,
                                                   ),
-                                              itemCount:
-                                                  items.length -
-                                                  _historyStart.clamp(
-                                                    0,
-                                                    items.length,
-                                                  ) +
-                                                  2 +
-                                                  (hasEarlier ||
-                                                          _historyStart > 0
-                                                      ? 1
-                                                      : 0),
-                                              itemBuilder: (context, index) {
-                                                final start = _historyStart
-                                                    .clamp(0, items.length);
-                                                final showEarlier =
-                                                    hasEarlier || start > 0;
-                                                if (showEarlier && index == 0) {
-                                                  return LuminaButton(
-                                                    primary: false,
-                                                    onPressed: () => setState(
-                                                      () {
-                                                        _followLatest = false;
-                                                        _positioningLatest =
-                                                            false;
-                                                        if (start > 0) {
-                                                          _historyStart =
-                                                              (start - 30)
-                                                                  .clamp(
-                                                                    0,
-                                                                    items
-                                                                        .length,
-                                                                  );
-                                                        } else {
-                                                          _historyLimit += 30;
-                                                        }
-                                                      },
-                                                    ),
-                                                    child: const Text('查看更早消息'),
-                                                  );
-                                                }
-                                                final messageIndex =
-                                                    index +
-                                                    start -
-                                                    (showEarlier ? 1 : 0);
-                                                if (messageIndex <
-                                                    items.length) {
-                                                  final message =
-                                                      items[messageIndex];
-                                                  return Builder(
-                                                    builder: (messageContext) => _ReplyGesture(
-                                                      onReply: () =>
-                                                          _replyTo(message),
-                                                      onLongPress: () =>
-                                                          _messageOptions(
-                                                            messageContext,
-                                                            message,
-                                                          ),
-                                                      child: _MessageBubble(
-                                                        key: ValueKey(
-                                                          message.id,
+                                                  itemCount:
+                                                      items.length -
+                                                      _historyStart.clamp(
+                                                        0,
+                                                        items.length,
+                                                      ) +
+                                                      2 +
+                                                      (hasEarlier ||
+                                                              _historyStart > 0
+                                                          ? 1
+                                                          : 0),
+                                                  itemBuilder: (context, index) {
+                                                    final start = _historyStart
+                                                        .clamp(0, items.length);
+                                                    final showEarlier =
+                                                        hasEarlier || start > 0;
+                                                    if (showEarlier &&
+                                                        index == 0) {
+                                                      return LuminaButton(
+                                                        primary: false,
+                                                        onPressed: () => setState(() {
+                                                          _followLatest = false;
+                                                          _positioningLatest =
+                                                              false;
+                                                          if (start > 0) {
+                                                            _historyStart =
+                                                                (start - 30)
+                                                                    .clamp(
+                                                                      0,
+                                                                      items
+                                                                          .length,
+                                                                    );
+                                                          } else {
+                                                            _historyLimit += 30;
+                                                          }
+                                                        }),
+                                                        child: const Text(
+                                                          '查看更早消息',
                                                         ),
-                                                        message: message,
-                                                        summaryComplete:
-                                                            completedAnchors
-                                                                .contains(
-                                                                  message
-                                                                      .replyToMessageId,
-                                                                ),
-                                                        onPromptSelected:
-                                                            _fillPrompt,
-                                                        highlighted:
-                                                            _highlightMessageId ==
-                                                            message.id,
-                                                        onQuoteTap: () =>
-                                                            _jumpToQuotedMessage(
-                                                              message
-                                                                  .replyToMessageId,
-                                                              items,
-                                                            ),
-                                                        pluginReceived:
-                                                            _agentEvents
-                                                                .receivedMessageIds
-                                                                .contains(
-                                                                  message.id,
-                                                                ),
-                                                        failed: _failedMessages
-                                                            .contains(
+                                                      );
+                                                    }
+                                                    final messageIndex =
+                                                        index +
+                                                        start -
+                                                        (showEarlier ? 1 : 0);
+                                                    if (messageIndex <
+                                                        items.length) {
+                                                      final message =
+                                                          items[messageIndex];
+                                                      return Builder(
+                                                        builder: (messageContext) => _ReplyGesture(
+                                                          onReply: () =>
+                                                              _replyTo(message),
+                                                          onLongPress: () =>
+                                                              _messageOptions(
+                                                                messageContext,
+                                                                message,
+                                                              ),
+                                                          child: _MessageBubble(
+                                                            key: ValueKey(
                                                               message.id,
                                                             ),
-                                                        sending:
-                                                            _sending &&
-                                                            _chatController
-                                                                    .lastMessageId ==
+                                                            message: message,
+                                                            summaryComplete:
+                                                                completedAnchors
+                                                                    .contains(
+                                                                      message
+                                                                          .replyToMessageId,
+                                                                    ),
+                                                            onPromptSelected:
+                                                                _fillPrompt,
+                                                            highlighted:
+                                                                _highlightMessageId ==
                                                                 message.id,
-                                                        onRetry:
-                                                            message.syncStatus ==
-                                                                'pendingCreate'
-                                                            ? () =>
-                                                                  _retryMessage(
+                                                            onQuoteTap: () =>
+                                                                _jumpToQuotedMessage(
+                                                                  message
+                                                                      .replyToMessageId,
+                                                                  items,
+                                                                ),
+                                                            pluginReceived:
+                                                                _agentEvents
+                                                                    .receivedMessageIds
+                                                                    .contains(
+                                                                      message
+                                                                          .id,
+                                                                    ),
+                                                            failed:
+                                                                _failedMessages
+                                                                    .contains(
+                                                                      message
+                                                                          .id,
+                                                                    ),
+                                                            sending:
+                                                                _sending &&
+                                                                _chatController
+                                                                        .lastMessageId ==
                                                                     message.id,
-                                                                  )
-                                                            : null,
-                                                      ),
-                                                    ),
-                                                  );
-                                                }
-                                                if (messageIndex ==
-                                                    items.length) {
-                                                  return AgentEventsPanel(
-                                                    store: _agentEvents,
-                                                    persistedMessageIds: {
-                                                      for (final message
-                                                          in items)
-                                                        if (message.role ==
-                                                            'assistant')
-                                                          message.id,
-                                                    },
-                                                    showActivity: false,
-                                                    showThinking: true,
-                                                    showClarifications: false,
-                                                    onRefresh:
-                                                        _chatDeviceId == null
-                                                        ? null
-                                                        : _refreshAgentStatus,
-                                                    onPromptSelected:
-                                                        _fillPrompt,
-                                                    onAction: _sendAgentAction,
-                                                  );
-                                                }
-                                                return SizedBox(
-                                                  key: _latestMessageAnchor,
-                                                  height: 1,
-                                                );
-                                              },
+                                                            onRetry:
+                                                                message.syncStatus == 'pendingCreate'
+                                                                ? () =>
+                                                                      _retryMessage(
+                                                                        message
+                                                                            .id,
+                                                                      )
+                                                                : null,
+                                                          ),
+                                                        ),
+                                                      );
+                                                    }
+                                                    if (messageIndex ==
+                                                        items.length) {
+                                                      return AgentEventsPanel(
+                                                        store: _agentEvents,
+                                                        persistedMessageIds: {
+                                                          for (final message
+                                                              in items)
+                                                            if (message.role ==
+                                                                'assistant')
+                                                              message.id,
+                                                        },
+                                                        showActivity: false,
+                                                        showThinking: true,
+                                                        showClarifications:
+                                                            false,
+                                                        onRefresh:
+                                                            _chatDeviceId ==
+                                                                null
+                                                            ? null
+                                                            : _refreshAgentStatus,
+                                                        onPromptSelected:
+                                                            _fillPrompt,
+                                                        onAction:
+                                                            _sendAgentAction,
+                                                      );
+                                                    }
+                                                    return SizedBox(
+                                                      key: _latestMessageAnchor,
+                                                      height: 1,
+                                                    );
+                                                  },
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                },
+                              ),
+                            ),
+                            Positioned(
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              height: headerHeight,
+                              child: LuminaTopBar(
+                                title: _conversationTitle,
+                                leading: LuminaIconButton(
+                                  onPressed: _closeConversation,
+                                  icon: const LuminaIcon(LuminaIcons.back),
+                                  tooltip: '返回会话列表',
+                                ),
+                                actions: [
+                                  ChatHeaderStatus(
+                                    key: ValueKey(
+                                      'header-status-$_conversationId',
+                                    ),
+                                    store: _agentEvents,
+                                    agents: ref.read(agentChatServiceProvider),
+                                    deviceId: _chatDeviceId,
+                                    sending: _sending,
+                                    lastTurnFailed:
+                                        _lastFailedTurn(messages.valueOrNull) !=
+                                        null,
+                                    onRefresh: _chatDeviceId == null
+                                        ? null
+                                        : _refreshAgentStatus,
+                                    onSessionAction: _isDshTarget
+                                        ? null
+                                        : _runSessionAction,
+                                  ),
+                                  LuminaIconButton(
+                                    onPressed: _showChatOptions,
+                                    icon: const LuminaIcon(LuminaIcons.more),
+                                    tooltip: '更多会话操作',
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: _ChatDockMeasure(
+                        onHeightChanged: _dockHeightChanged,
+                        child: ConstrainedBox(
+                          key: const ValueKey('chat-floating-dock'),
+                          constraints: BoxConstraints(
+                            maxHeight:
+                                (constraints.maxHeight - headerHeight - 8)
+                                    .clamp(0.0, double.infinity),
+                          ),
+                          child: SingleChildScrollView(
+                            reverse: true,
+                            hitTestBehavior: HitTestBehavior.deferToChild,
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 20),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (_hasNewMessages ||
+                                      _highlightMessageId != null)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: Semantics(
+                                        label: _hasNewMessages ? '新消息' : '回到最新',
+                                        child: DecoratedBox(
+                                          decoration: BoxDecoration(
+                                            color: colors.surface,
+                                            borderRadius: BorderRadius.circular(
+                                              LuminaControlSize.capsuleRadius,
+                                            ),
+                                          ),
+                                          child: LuminaSurface(
+                                            key: const ValueKey(
+                                              'chat-jump-latest',
+                                            ),
+                                            glass: true,
+                                            frosted: true,
+                                            diffuseGlass: true,
+                                            liquidGlass: false,
+                                            radius:
+                                                LuminaControlSize.capsuleRadius,
+                                            padding: EdgeInsets.zero,
+                                            onTap: () {
+                                              setState(() {
+                                                _historyStart = 0;
+                                                _highlightMessageId = null;
+                                                _followLatest = true;
+                                                _hasNewMessages = false;
+                                              });
+                                              _queueLatest();
+                                            },
+                                            child: const SizedBox.square(
+                                              dimension:
+                                                  LuminaControlSize.minimum,
+                                              child: Center(
+                                                child: ExcludeSemantics(
+                                                  child: Text('↓'),
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ),
                                       ),
-                                    );
-                            },
+                                    ),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                    ),
+                                    child: AgentRequestsPanel(
+                                      key: ValueKey(
+                                        'requests-$_conversationId',
+                                      ),
+                                      store: _agentEvents,
+                                      onAction: _sendAgentAction,
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      12,
+                                      8,
+                                      12,
+                                      12,
+                                    ),
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: colors.surface,
+                                        borderRadius: BorderRadius.circular(28),
+                                      ),
+                                      child: LuminaSurface(
+                                        key: const ValueKey('chat-composer'),
+                                        glass: true,
+                                        frosted: true,
+                                        diffuseGlass: true,
+                                        liquidGlass: false,
+                                        radius: 28,
+                                        padding: const EdgeInsets.all(12),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (_replyMessage case final reply?)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  bottom: 8,
+                                                ),
+                                                child: LuminaQuotePreview(
+                                                  title: reply.role == 'user'
+                                                      ? '回复自己'
+                                                      : '回复 ${ref.read(agentChatServiceProvider).agentLabel(_chatDeviceId)}',
+                                                  text: _quoteText(reply),
+                                                  onDismiss: () => setState(
+                                                    () => _replyMessage = null,
+                                                  ),
+                                                ),
+                                              ),
+                                            if (_attachments.isNotEmpty)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  bottom: 8,
+                                                ),
+                                                child: ChatComposerAttachments(
+                                                  attachments: _attachments,
+                                                  busy: _sending,
+                                                  onRemove: (index) => setState(
+                                                    () => _attachments.removeAt(
+                                                      index,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            SlashCommandSuggestions(
+                                              controller: _controller,
+                                              enabled:
+                                                  !_sending && !_isDshTarget,
+                                              onSelected: (shortcut) {
+                                                _controller
+                                                    .value = TextEditingValue(
+                                                  text: shortcut.command,
+                                                  selection:
+                                                      TextSelection.collapsed(
+                                                        offset: shortcut
+                                                            .command
+                                                            .length,
+                                                      ),
+                                                );
+                                                _composerFocus.requestFocus();
+                                              },
+                                            ),
+                                            LuminaTextField(
+                                              controller: _controller,
+                                              focusNode: _composerFocus,
+                                              minLines: 1,
+                                              maxLines: 5,
+                                              hintText: '写消息…',
+                                              readOnly: _importingShare,
+                                              textInputAction:
+                                                  TextInputAction.send,
+                                              onSubmitted: (_) =>
+                                                  _sendComposer(),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Row(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.end,
+                                              children: [
+                                                LuminaIconButton(
+                                                  onPressed: _sending
+                                                      ? null
+                                                      : _showAddMenu,
+                                                  icon: const LuminaIcon(
+                                                    LuminaIcons.add,
+                                                  ),
+                                                  tooltip: '附件与快捷指令',
+                                                ),
+                                                Expanded(
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 8,
+                                                          vertical: 12,
+                                                        ),
+                                                    child: Text(
+                                                      ref
+                                                          .read(
+                                                            agentChatServiceProvider,
+                                                          )
+                                                          .agentLabel(
+                                                            _chatDeviceId,
+                                                          ),
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: LuminaTheme.of(
+                                                        context,
+                                                      ).textTheme.labelSmall,
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                LuminaIconButton(
+                                                  onPressed:
+                                                      _sending ||
+                                                          _importingShare
+                                                      ? null
+                                                      : _sendComposer,
+                                                  icon: _sending
+                                                      ? const LuminaProgress()
+                                                      : const LuminaIcon(
+                                                          LuminaIcons.send,
+                                                        ),
+                                                  tooltip: '发送',
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
-                        Positioned(
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          height: headerHeight,
-                          child: LuminaTopBar(
-                            title: _conversationTitle,
-                            leading: LuminaIconButton(
-                              onPressed: _closeConversation,
-                              icon: const LuminaIcon(LuminaIcons.back),
-                              tooltip: '返回会话列表',
-                            ),
-                            actions: [
-                              ChatHeaderStatus(
-                                key: ValueKey('header-status-$_conversationId'),
-                                store: _agentEvents,
-                                agents: ref.read(agentChatServiceProvider),
-                                deviceId: _chatDeviceId,
-                                sending: _sending,
-                                lastTurnFailed:
-                                    _lastFailedTurn(messages.valueOrNull) !=
-                                    null,
-                                onRefresh: _chatDeviceId == null
-                                    ? null
-                                    : _refreshAgentStatus,
-                                onSessionAction: _isDshTarget
-                                    ? null
-                                    : _runSessionAction,
-                              ),
-                              LuminaIconButton(
-                                onPressed: _showChatOptions,
-                                icon: const LuminaIcon(LuminaIcons.more),
-                                tooltip: '更多会话操作',
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_hasNewMessages || _highlightMessageId != null)
-                    LuminaButton(
-                      onPressed: () {
-                        setState(() {
-                          _historyStart = 0;
-                          _highlightMessageId = null;
-                          _followLatest = true;
-                          _hasNewMessages = false;
-                        });
-                        _queueLatest();
-                      },
-                      child: Text(_hasNewMessages ? '新消息 ↓' : '回到最新 ↓'),
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: AgentRequestsPanel(
-                      key: ValueKey('requests-$_conversationId'),
-                      store: _agentEvents,
-                      onAction: _sendAgentAction,
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                    child: LuminaSurface(
-                      radius: 24,
-                      glass: true,
-                      padding: const EdgeInsets.all(8),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (_replyMessage case final reply?)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: LuminaQuotePreview(
-                                title: reply.role == 'user'
-                                    ? '回复自己'
-                                    : '回复 ${ref.read(agentChatServiceProvider).agentLabel(_chatDeviceId)}',
-                                text: _quoteText(reply),
-                                onDismiss: () =>
-                                    setState(() => _replyMessage = null),
-                              ),
-                            ),
-                          if (_attachments.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: ChatComposerAttachments(
-                                attachments: _attachments,
-                                busy: _sending,
-                                onRemove: (index) => setState(
-                                  () => _attachments.removeAt(index),
-                                ),
-                              ),
-                            ),
-                          SlashCommandSuggestions(
-                            controller: _controller,
-                            enabled: !_sending && !_isDshTarget,
-                            onSelected: (shortcut) {
-                              _controller.value = TextEditingValue(
-                                text: shortcut.command,
-                                selection: TextSelection.collapsed(
-                                  offset: shortcut.command.length,
-                                ),
-                              );
-                              _composerFocus.requestFocus();
-                            },
-                          ),
-                          LuminaTextField(
-                            controller: _controller,
-                            focusNode: _composerFocus,
-                            minLines: 1,
-                            maxLines: 5,
-                            hintText: '写消息…',
-                            readOnly: _importingShare,
-                            textInputAction: TextInputAction.send,
-                            onSubmitted: (_) => _sendComposer(),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              LuminaIconButton(
-                                onPressed: _sending ? null : _showAddMenu,
-                                icon: const LuminaIcon(LuminaIcons.add),
-                                tooltip: '附件与快捷指令',
-                              ),
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 12,
-                                  ),
-                                  child: Text(
-                                    ref
-                                        .read(agentChatServiceProvider)
-                                        .agentLabel(_chatDeviceId),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: LuminaTheme.of(context)
-                                        .textTheme
-                                        .labelSmall,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              LuminaIconButton(
-                                onPressed: _sending || _importingShare
-                                    ? null
-                                    : _sendComposer,
-                                icon: _sending
-                                    ? const LuminaProgress()
-                                    : const LuminaIcon(LuminaIcons.send),
-                                tooltip: '发送',
-                              ),
-                            ],
-                          ),
-                        ],
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
     );
+  }
+}
+
+/// Report only real dock size changes, not every frame or scroll update.
+/// The transcript keeps its full viewport; bottom padding clears the dock
+/// when following the latest message, while history can pass behind it.
+class _ChatDockMeasure extends SingleChildRenderObjectWidget {
+  const _ChatDockMeasure({required this.onHeightChanged, required super.child});
+  final ValueChanged<double> onHeightChanged;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _ChatDockMeasureBox(onHeightChanged);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _ChatDockMeasureBox renderObject,
+  ) {
+    renderObject.onHeightChanged = onHeightChanged;
+  }
+}
+
+class _ChatDockMeasureBox extends RenderProxyBox {
+  _ChatDockMeasureBox(this.onHeightChanged);
+  ValueChanged<double> onHeightChanged;
+  double? _lastHeight;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    if (_lastHeight == size.height) return;
+    _lastHeight = size.height;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (attached) onHeightChanged(size.height);
+    });
   }
 }
 

@@ -169,13 +169,14 @@ class _ResponseChartPlotState extends State<ResponseChartPlot> {
         onInspect: inspect,
       );
     } else if (kind == 'bar') {
+      final dark = theme.brightness == Brightness.dark;
       chart = BarChart(
         BarChartData(
           minY: lowerY,
           maxY: upperY,
           titlesData: titles,
           gridData: grid,
-          borderData: border,
+          borderData: FlBorderData(show: false),
           barGroups: [
             for (var i = 0; i < points.length; i++)
               BarChartGroupData(
@@ -185,8 +186,20 @@ class _ResponseChartPlotState extends State<ResponseChartPlot> {
                     toY: spots[i].y,
                     fromY: 0,
                     width: math.max(2, math.min(20, 180 / points.length)),
-                    color: color,
+                    gradient: LinearGradient(
+                      colors: [
+                        Color.lerp(color, Colors.white, dark ? .18 : .28)!,
+                        color,
+                        Color.lerp(color, Colors.black, dark ? .20 : .12)!,
+                      ],
+                    ),
                     borderRadius: BorderRadius.circular(3),
+                    borderSide: BorderSide(
+                      color: theme.colors.ink.withValues(
+                        alpha: dark ? .24 : .16,
+                      ),
+                      width: .7,
+                    ),
                   ),
                 ],
               ),
@@ -339,15 +352,20 @@ class _ResponseChartPlotState extends State<ResponseChartPlot> {
             key: const ValueKey('response-chart-surface'),
             height: kind == 'pie' || kind == 'radar' ? 230 : 230 + axisHeight,
             child: kind == 'bar'
-                ? LayoutBuilder(
-                    builder: (context, constraints) => SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                        width: math.max(
-                          constraints.maxWidth,
-                          points.length * 32.0,
+                ? LuminaSurface(
+                    padding: const EdgeInsets.all(10),
+                    depth: LuminaSurfaceDepth.recessed,
+                    radius: 12,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) => SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: SizedBox(
+                          width: math.max(
+                            constraints.maxWidth,
+                            points.length * 32.0,
+                          ),
+                          child: chart,
                         ),
-                        child: chart,
                       ),
                     ),
                   )

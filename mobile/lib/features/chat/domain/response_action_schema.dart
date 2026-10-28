@@ -1,4 +1,4 @@
-const actionResponseTypes = {'media', 'actions'};
+const actionResponseTypes = {'media', 'actions', 'agenda'};
 
 bool validateActionResponseBlock(Map<String, dynamic> raw) {
   final items = raw['items'];
@@ -15,15 +15,17 @@ bool validateActionResponseBlock(Map<String, dynamic> raw) {
       if (!_text(item['mimeType'], 120) || !_optional(item['name'], 240)) {
         return false;
       }
-    } else if (raw['type'] == 'actions') {
+    } else if (raw['type'] == 'actions' || raw['type'] == 'agenda') {
+      final agenda = raw['type'] == 'agenda';
+      if (agenda && item.containsKey('kind')) return false;
       if (!_text(item['title'], 240) ||
           !_optional(item['notes'], 4000) ||
           !_optional(item['location'], 240)) {
         return false;
       }
-      if (item['kind'] == 'task') {
+      if (!agenda && item['kind'] == 'task') {
         if (item['due'] != null && !_date(item['due'])) return false;
-      } else if (item['kind'] == 'schedule') {
+      } else if (agenda || item['kind'] == 'schedule') {
         if (!_timestamp(item['startAt']) || !_timestamp(item['endAt'])) {
           return false;
         }

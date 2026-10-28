@@ -12,6 +12,8 @@ import '../domain/response_action_schema.dart';
 import 'response_visual_blocks.dart';
 import 'response_interactive_blocks.dart';
 import 'response_action_blocks.dart';
+import '../domain/response_content_schema.dart';
+import 'response_content_blocks.dart';
 
 class ResponseUiView extends StatefulWidget {
   const ResponseUiView({
@@ -82,10 +84,8 @@ class _ResponseUiViewState extends State<ResponseUiView> {
     );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: LuminaSurface(
-        radius: LuminaRadius.attachment,
-        padding: const EdgeInsets.all(LuminaSpacing.compact),
-        liquidGlass: false,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
         child: Material(
           type: MaterialType.transparency,
           child: Column(
@@ -141,6 +141,9 @@ class _ResponseUiViewState extends State<ResponseUiView> {
                                     'diff',
                                     'media',
                                     'actions',
+                                    'agenda',
+                                    'comparison',
+                                    'code',
                                   }.contains(document.blocks[index].type)
                               ? (constraints.maxWidth - 20) / 2
                               : constraints.maxWidth,
@@ -168,7 +171,9 @@ class _ResponseUiViewState extends State<ResponseUiView> {
 
   Widget _block(BuildContext context, ResponseUiBlock block, int index) {
     final Widget content;
-    if (visualResponseTypes.contains(block.type)) {
+    if (contentResponseTypes.contains(block.type)) {
+      content = ResponseContentBlock(data: block.data);
+    } else if (visualResponseTypes.contains(block.type)) {
       content = ResponseVisualBlock(data: block.data);
     } else if (interactiveResponseTypes.contains(block.type)) {
       content = ResponseInteractiveBlock(
@@ -198,12 +203,10 @@ class _ResponseUiViewState extends State<ResponseUiView> {
         'tabs' => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: LuminaTheme.of(context).colors.recessedSurface,
-                borderRadius: BorderRadius.circular(LuminaRadius.control),
-              ),
+            LuminaSurface(
+              depth: LuminaSurfaceDepth.recessed,
+              radius: 20,
+              padding: const EdgeInsets.all(6),
               child: Wrap(
                 spacing: 4,
                 runSpacing: 4,
@@ -212,28 +215,15 @@ class _ResponseUiViewState extends State<ResponseUiView> {
                     Semantics(
                       button: true,
                       selected: (_tabs[index] ?? 0) == item,
-                      child: DecoratedBox(
-                        position: DecorationPosition.foreground,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(
-                            LuminaControlSize.capsuleRadius,
-                          ),
-                          border: Border.all(
-                            color: (_tabs[index] ?? 0) == item
-                                ? LuminaTheme.of(context).colors.accent
-                                : LuminaTheme.of(context).colors.outline,
-                          ),
-                        ),
-                        child: LuminaButton(
-                          primary: (_tabs[index] ?? 0) == item,
-                          onPressed: () => setState(() => _tabs[index] = item),
-                          child: Text(
-                            block.items[item].label,
-                            style: TextStyle(
-                              fontWeight: (_tabs[index] ?? 0) == item
-                                  ? FontWeight.w700
-                                  : FontWeight.w400,
-                            ),
+                      child: LuminaButton(
+                        primary: (_tabs[index] ?? 0) == item,
+                        onPressed: () => setState(() => _tabs[index] = item),
+                        child: Text(
+                          block.items[item].label,
+                          style: TextStyle(
+                            fontWeight: (_tabs[index] ?? 0) == item
+                                ? FontWeight.w700
+                                : FontWeight.w400,
                           ),
                         ),
                       ),
@@ -241,7 +231,7 @@ class _ResponseUiViewState extends State<ResponseUiView> {
                 ],
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 14),
             Semantics(
               container: true,
               label: block.items[_tabs[index] ?? 0].label,
@@ -318,13 +308,12 @@ class _ResponseUiViewState extends State<ResponseUiView> {
         _ => const SizedBox.shrink(),
       };
     }
-    return Container(
+    return LuminaSurface(
       key: ValueKey('response-block-$index'),
-      padding: const EdgeInsets.all(LuminaSpacing.compact),
-      decoration: BoxDecoration(
-        border: Border.all(color: LuminaTheme.of(context).colors.outline),
-        borderRadius: BorderRadius.circular(LuminaRadius.control),
-      ),
+      depth: LuminaSurfaceDepth.raised,
+      radius: 24,
+      liquidGlass: false,
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -334,10 +323,6 @@ class _ResponseUiViewState extends State<ResponseUiView> {
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (block.title != null) ...[
-                        _blockTypeBadge(context, block.type),
-                        const SizedBox(height: 4),
-                      ],
                       LuminaCardHeader(
                         title: block.title ?? _typeLabel(block.type),
                       ),
@@ -348,10 +333,6 @@ class _ResponseUiViewState extends State<ResponseUiView> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (block.title != null) ...[
-                          _blockTypeBadge(context, block.type),
-                          const SizedBox(height: 4),
-                        ],
                         Text(
                           block.title ?? _typeLabel(block.type),
                           style: LuminaTheme.of(context)
@@ -364,25 +345,6 @@ class _ResponseUiViewState extends State<ResponseUiView> {
           ),
           content,
         ],
-      ),
-    );
-  }
-
-  Widget _blockTypeBadge(BuildContext context, String type) {
-    final theme = LuminaTheme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colors.accent.withValues(alpha: .09),
-        borderRadius: BorderRadius.circular(LuminaRadius.control),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        child: Text(
-          _typeLabel(type),
-          style: theme.textTheme.labelSmall.copyWith(
-            color: theme.colors.accent,
-          ),
-        ),
       ),
     );
   }
@@ -408,6 +370,12 @@ class _ResponseUiViewState extends State<ResponseUiView> {
     'diff' => '内容对比',
     'media' => '媒体附件',
     'actions' => '待确认操作',
+    'agenda' => '日程提案',
+    'callout' => '重点提示',
+    'steps' => '步骤安排',
+    'comparison' => '方案对照',
+    'facts' => '信息详情',
+    'code' => '代码片段',
     _ => '内容',
   };
 
@@ -468,12 +436,10 @@ class _ResponseUiViewState extends State<ResponseUiView> {
             for (final item in block.items)
               SizedBox(
                 width: width,
-                child: Container(
-                  padding: const EdgeInsets.all(LuminaSpacing.compact),
-                  decoration: BoxDecoration(
-                    color: theme.colors.recessedSurface,
-                    borderRadius: BorderRadius.circular(LuminaRadius.control),
-                  ),
+                child: LuminaSurface(
+                  depth: LuminaSurfaceDepth.recessed,
+                  radius: 18,
+                  padding: const EdgeInsets.all(14),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -532,8 +498,22 @@ class _ResponseUiViewState extends State<ResponseUiView> {
                                   ? 0
                                   : (item.value as num).abs().toDouble() /
                                         maximum,
-                              child: ColoredBox(
-                                color: LuminaTheme.of(context).colors.accent,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(4),
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Color.lerp(
+                                        LuminaTheme.of(context).colors.accent,
+                                        LuminaTheme.of(context).colors.surface,
+                                        .28,
+                                      )!,
+                                      LuminaTheme.of(context).colors.accent,
+                                    ],
+                                  ),
+                                ),
                               ),
                             ),
                           ),

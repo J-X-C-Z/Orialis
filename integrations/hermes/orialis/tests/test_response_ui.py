@@ -1,6 +1,6 @@
 """The host receives generation guidance through its supported system hook."""
 import asyncio
-from datetime import date
+from datetime import date, datetime
 import json
 import math
 from pathlib import Path
@@ -26,7 +26,7 @@ class ResponseUiTests(unittest.TestCase):
         self.assertEqual(entry.platform_hint, PLATFORM_HINT)
         with patch.object(platform_registry, 'get', return_value=entry):
             hint = platform_hint(SimpleNamespace(platform='orialis'))
-        self.assertIn('automatically', hint)
+        self.assertIn('proactively', hint)
         self.assertIn('ordinary answers', hint)
         self.assertIn('fallback', hint)
         self.assertIn('do not automatically send', hint)
@@ -35,7 +35,7 @@ class ResponseUiTests(unittest.TestCase):
 
     def test_generation_examples_and_shared_mobile_fixture_match_advertised_format(self):
         examples = re.findall(r'```orialis-ui\n(.*?)\n```', PLATFORM_HINT, re.S)
-        self.assertEqual(len(examples), 5)
+        self.assertEqual(len(examples), 6)
         fixture = Path(__file__).resolve().parents[4] / 'docs/contracts/response-ui-v1.example.json'
         examples.append(fixture.read_text(encoding='utf-8'))
         extended_fixture = fixture.with_name('response-ui-v1.extended.example.json')
@@ -117,7 +117,7 @@ class ResponseUiTests(unittest.TestCase):
         self.assertEqual(server, RESPONSE_UI)
 
     def test_board_guidance_keeps_client_limits_and_confirmation_boundary(self):
-        self.assertEqual(len(RESPONSE_UI['block_types']), 20)
+        self.assertEqual(len(RESPONSE_UI['block_types']), 26)
         self.assertEqual(RESPONSE_UI['plot_kinds'],
                          ['line', 'scatter', 'pie', 'area', 'bar', 'radar'])
         self.assertEqual(RESPONSE_UI['version'], 1)
@@ -142,3 +142,43 @@ class ResponseUiTests(unittest.TestCase):
             discovery = json.loads(asyncio.run(handle_capabilities({})))
         self.assertEqual(discovery['plugin']['response_ui'], RESPONSE_UI)
         self.assertEqual(discovery['server']['response_ui'], RESPONSE_UI)
+
+    def test_new_block_example_obeys_field_limits_and_agenda_timezone_order(self):
+        raw, = re.findall(r'Example of all six new types.*?```orialis-ui\n(.*?)\n```',
+                          PLATFORM_HINT, re.S)
+        doc = json.loads(raw)
+        blocks = {block['type']: block for block in doc['blocks']}
+        self.assertEqual(set(blocks),
+                         {'callout', 'steps', 'comparison', 'facts', 'code', 'agenda'})
+        self.assertTrue(doc['fallback'].strip())
+        callout = blocks['callout']['items'][0]
+        self.assertIn(callout['tone'], {'info', 'success', 'warning', 'critical'})
+        self.assertTrue(callout['content'].strip())
+        self.assertLessEqual(len(callout['content']), 4000)
+        for item in blocks['steps']['items']:
+            self.assertIn(item['status'], {'pending', 'current', 'done'})
+            self.assertLessEqual(len(item.get('detail', '')), 1000)
+        comparison = blocks['comparison']
+        columns = comparison['columns']
+        self.assertTrue(2 <= len(columns) <= 4)
+        self.assertEqual(len(set(columns)), len(columns))
+        self.assertTrue(0 <= comparison['recommendedIndex'] < len(columns))
+        for item in comparison['items']:
+            self.assertEqual(len(item['values']), len(columns))
+            self.assertTrue(all(len(value) <= 1000 for value in item['values']))
+        for item in blocks['facts']['items']:
+            self.assertTrue(item['value'].strip())
+            self.assertLessEqual(len(item['value']), 1000)
+            self.assertLessEqual(len(item.get('detail', '')), 240)
+        for item in blocks['code']['items']:
+            self.assertTrue(item['source'].strip())
+            self.assertLessEqual(len(item['source']), 16000)
+            self.assertLessEqual(len(item.get('language', '')), 32)
+        for item in blocks['agenda']['items']:
+            self.assertTrue(item['id'].strip() and item['label'].strip() and item['title'].strip())
+            start, end = datetime.fromisoformat(item['startAt']), datetime.fromisoformat(item['endAt'])
+            self.assertIsNotNone(start.utcoffset())
+            self.assertIsNotNone(end.utcoffset())
+            self.assertLess(start, end)
+            self.assertLessEqual(len(item.get('notes', '')), 4000)
+            self.assertLessEqual(len(item.get('location', '')), 240)

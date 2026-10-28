@@ -63,13 +63,14 @@ pub(crate) async fn capabilities() -> Json<CapabilitiesResponse> {
         // UI is opaque assistant content: clients validate and fall back to text.
         response_ui: serde_json::json!({
             "format": "orialis-ui", "version": 1, "transport": "content_fence",
-            "block_types": ["metrics", "chart", "tabs", "checklist", "choices", "svg", "diagram", "math", "plot", "timeline", "simulation", "form", "table", "sources", "diff", "media", "actions", "progress", "heatmap", "accordion"],
+            "block_types": ["metrics", "chart", "tabs", "checklist", "choices", "svg", "diagram", "math", "plot", "timeline", "simulation", "form", "table", "sources", "diff", "media", "actions", "progress", "heatmap", "accordion", "callout", "steps", "comparison", "facts", "code", "agenda"],
             "plot_kinds": ["line", "scatter", "pie", "area", "bar", "radar"],
             "limits": {
                 "json_bytes": 32768, "blocks": 12, "items": 12, "title": 80,
                 "fallback": 4000, "label": 120, "value": 120, "detail": 240,
                 "content": 4000, "prompt": 1000, "unit": 32, "source": 16000,
                 "math_source": 4000, "points": 120, "edges": 24, "columns": 8,
+                "comparison_columns": 4,
             },
         }),
     })
@@ -119,7 +120,13 @@ mod tests {
                 "actions",
                 "progress",
                 "heatmap",
-                "accordion"
+                "accordion",
+                "callout",
+                "steps",
+                "comparison",
+                "facts",
+                "code",
+                "agenda"
             ])
         );
         assert_eq!(
@@ -131,5 +138,7 @@ mod tests {
         assert_eq!(ui["limits"]["items"], 12);
         assert_eq!(ui["limits"]["fallback"], 4000);
         assert_eq!(ui["limits"]["source"], 16000);
+        assert_eq!(ui["limits"]["comparison_columns"], 4);
+        assert_eq!(ui["limits"]["columns"], 8);
     }
 }

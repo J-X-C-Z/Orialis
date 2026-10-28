@@ -4,6 +4,7 @@ import 'response_svg.dart';
 import 'response_visual_schema.dart';
 import 'response_interactive_schema.dart';
 import 'response_action_schema.dart';
+import 'response_content_schema.dart';
 
 /// A small native response vocabulary. Never evaluates HTML, scripts or URLs.
 class ResponseUiDocument {
@@ -59,6 +60,8 @@ class ResponseUiDocument {
             ? validateInteractiveResponseBlock(raw)
             : actionResponseTypes.contains(type)
             ? validateActionResponseBlock(raw)
+            : contentResponseTypes.contains(type)
+            ? validateContentResponseBlock(raw)
             : null;
         if (extended != null) {
           if (!extended) return null;

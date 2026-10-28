@@ -104,8 +104,9 @@ void main() {
     });
     await _pumpFrames(tester);
     expect(position.pixels, closeTo(before, 1));
-    expect(find.text('新消息 ↓'), findsOneWidget);
-    await tester.tap(find.text('新消息 ↓'));
+    expect(find.text('新消息 ↓'), findsNothing);
+    expect(find.text('↓'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('chat-jump-latest')));
     await _pumpFrames(tester);
     expect(position.extentAfter, lessThan(1));
     expect(tester.takeException(), isNull);
@@ -116,31 +117,100 @@ void main() {
   testWidgets('composer growth follows latest without a new message', (
     tester,
   ) async {
-    final h = await openChat(tester, agentService: _OnlineAgentService());
-    for (var i = 0; i < 16; i++) {
-      final write = h.repo.applyRemoteMessage({
-        'conversationId': h.id,
-        'id': 'composer-$i',
-        'role': 'assistant',
-        'content': '用于验证输入框增高时的最新消息位置 $i',
-        'createdAt': DateTime.utc(2026, 10, 23, 0, i).toIso8601String(),
-        'version': 1,
+    for (final highPerformance in [false, true]) {
+      SharedPreferences.setMockInitialValues({
+        'orialis.highPerformanceMode': highPerformance,
       });
+      final h = await openChat(tester, agentService: _OnlineAgentService());
+      for (var i = 0; i < 16; i++) {
+        final write = h.repo.applyRemoteMessage({
+          'conversationId': h.id,
+          'id': 'composer-$i',
+          'role': 'assistant',
+          'content': '用于验证输入框增高时的最新消息位置 $i',
+          'createdAt': DateTime.utc(2026, 10, 23, 0, i).toIso8601String(),
+          'version': 1,
+        });
+        await _pumpFrames(tester);
+        await write;
+        await _pumpFrames(tester);
+      }
+      final position = _position(tester);
+      expect(position.extentAfter, lessThan(1));
+      await tester.enterText(
+        find.byType(EditableText).last,
+        '第一行\n第二行\n第三行\n第四行',
+      );
       await _pumpFrames(tester);
-      await write;
+      expect(position.extentAfter, lessThan(1));
+
+      tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+      await _pumpFrames(tester);
+      final dockFinder = find.byKey(const ValueKey('chat-floating-dock'));
+      final latest = tester.getRect(find.byKey(const ValueKey('composer-15')));
+      expect(latest.bottom, lessThanOrEqualTo(tester.getRect(dockFinder).top));
+      expect(tester.getRect(dockFinder).bottom, lessThanOrEqualTo(640));
+
+      tester.view.viewInsets = const FakeViewPadding();
+      await _pumpFrames(tester);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
       await _pumpFrames(tester);
     }
-    final position = _position(tester);
-    expect(position.extentAfter, lessThan(1));
-    await tester.enterText(
-      find.byType(EditableText).last,
-      '第一行\n第二行\n第三行\n第四行',
-    );
-    await _pumpFrames(tester);
-    expect(position.extentAfter, lessThan(1));
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox.shrink());
-    await _pumpFrames(tester);
+  });
+
+  testWidgets('full-height message viewport scrolls beneath floating dock', (
+    tester,
+  ) async {
+    for (final highPerformance in [false, true]) {
+      SharedPreferences.setMockInitialValues({
+        'orialis.highPerformanceMode': highPerformance,
+      });
+      final h = await openChat(tester, agentService: _OnlineAgentService());
+      await tester.runAsync(
+        () => h.repo.applyRemoteMessage({
+          'conversationId': h.id,
+          'id': 'dock-scroll-last',
+          'role': 'assistant',
+          'content': List.filled(100, '侧边留白仍属于消息滚动区域。').join('\n'),
+          'createdAt': '2026-10-23T00:00:00Z',
+          'version': 1,
+        }),
+      );
+      await _pumpFrames(tester);
+
+      final viewport = tester.getRect(
+        find.byKey(const ValueKey('chat-message-viewport')),
+      );
+      final dockFinder = find.byKey(const ValueKey('chat-floating-dock'));
+      final dock = tester.getRect(dockFinder);
+      final composer = tester.getRect(
+        find.byKey(const ValueKey('chat-composer')),
+      );
+      expect(viewport.bottom, greaterThan(composer.bottom));
+      expect(viewport.top, lessThan(dock.top));
+
+      final position = _position(tester);
+      position.jumpTo(0);
+      await _pumpFrames(tester);
+      final before = position.pixels;
+      await tester.dragFrom(
+        Offset(viewport.left + 4, dock.top + 40),
+        const Offset(0, -180),
+      );
+      await _pumpFrames(tester);
+      expect(position.pixels, greaterThan(before));
+
+      position.jumpTo(position.maxScrollExtent);
+      await _pumpFrames(tester);
+      final latest = tester.getRect(
+        find.byKey(const ValueKey('dock-scroll-last')),
+      );
+      expect(latest.bottom, lessThanOrEqualTo(tester.getRect(dockFinder).top));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _pumpFrames(tester);
+    }
   });
 
   testWidgets(

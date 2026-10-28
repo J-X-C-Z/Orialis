@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:drift/drift.dart' show TableUpdateQuery;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
@@ -9,6 +10,7 @@ import '../../../app/app.dart';
 import '../../../core/config/app_config.dart';
 import '../application/response_action_service.dart';
 import 'chat_attachment.dart';
+import 'response_schedule_editor.dart';
 
 final responseActionServiceProvider = Provider<ResponseActionService>(
   (ref) => ResponseActionService(ref.watch(eventRepositoryProvider)),
@@ -24,6 +26,11 @@ class ResponseActionBlock extends StatelessWidget {
   final Map<String, dynamic> data;
   final bool enabled;
   final String scope;
+
+  Map<String, dynamic> _item(dynamic raw) => {
+    ...Map<String, dynamic>.from(raw as Map),
+    if (data['type'] == 'agenda') 'kind': 'schedule',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -56,12 +63,18 @@ class ResponseActionBlock extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(raw['label'] as String),
-                  LuminaSelectableText(
-                    _actionDetails(Map<String, dynamic>.from(raw as Map)),
-                  ),
+                  LuminaSelectableText(_actionDetails(_item(raw))),
+                  if (raw['kind'] == 'schedule' || data['type'] == 'agenda')
+                    const Text('待确认'),
                   LuminaButton(
                     onPressed: null,
-                    child: Text(raw['kind'] == 'task' ? '预览并创建任务' : '预览并创建日程'),
+                    child: Text(
+                      raw['kind'] == 'task'
+                          ? '预览并创建任务'
+                          : data['type'] == 'agenda'
+                          ? '确认添加日程'
+                          : '预览并创建日程',
+                    ),
                   ),
                 ],
               ),
@@ -69,7 +82,8 @@ class ResponseActionBlock extends StatelessWidget {
           else
             _ActionItem(
               key: ValueKey('$scope:${raw['id']}'),
-              item: Map<String, dynamic>.from(raw as Map),
+              item: _item(raw),
+              agenda: data['type'] == 'agenda',
               scope: scope,
               enabled: enabled,
             ),
@@ -81,11 +95,13 @@ class ResponseActionBlock extends StatelessWidget {
 class _ActionItem extends ConsumerStatefulWidget {
   const _ActionItem({
     required this.item,
+    required this.agenda,
     required this.scope,
     required this.enabled,
     super.key,
   });
   final Map<String, dynamic> item;
+  final bool agenda;
   final String scope;
   final bool enabled;
 
@@ -118,16 +134,32 @@ class _ActionItemState extends ConsumerState<_ActionItem> {
     unawaited(_reload());
   }
 
+  @override
+  void didUpdateWidget(covariant _ActionItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.scope != widget.scope ||
+        !mapEquals(oldWidget.item, widget.item)) {
+      _receipt = null;
+      _loading = true;
+      unawaited(_reload());
+    }
+  }
+
   Future<void> _invalidate() async {
     if (mounted) setState(() => _identityChanged = true);
   }
 
   Future<void> _reload() async {
+    final item = widget.item;
+    final scope = widget.scope;
     try {
       final value = await ref
           .read(responseActionServiceProvider)
-          .lookup(widget.scope, widget.item);
-      if (mounted && !_identityChanged) {
+          .lookup(scope, item);
+      if (mounted &&
+          !_identityChanged &&
+          scope == widget.scope &&
+          mapEquals(item, widget.item)) {
         setState(() {
           _receipt = value;
           _loading = false;
@@ -145,7 +177,11 @@ class _ActionItemState extends ConsumerState<_ActionItem> {
   }
 
   Future<void> _create() async {
-    if (_busy || _receipt != null || !widget.enabled || _identityChanged) {
+    if (_busy ||
+        _loading ||
+        _receipt != null ||
+        !widget.enabled ||
+        _identityChanged) {
       return;
     }
     setState(() {
@@ -153,33 +189,55 @@ class _ActionItemState extends ConsumerState<_ActionItem> {
       _error = null;
     });
     try {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(widget.item['kind'] == 'task' ? '创建任务' : '创建日程'),
-          content: SingleChildScrollView(child: Text(_details())),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('确认创建'),
-            ),
-          ],
-        ),
-      );
+      final original = widget.item;
+      final scope = widget.scope;
+      Map<String, dynamic>? overrides;
+      final bool confirmed;
+      if (original['kind'] == 'schedule') {
+        overrides = await showLuminaDialog<Map<String, dynamic>>(
+          context: context,
+          builder: (_) => ResponseScheduleEditor(item: original),
+        );
+        confirmed = overrides != null;
+      } else {
+        confirmed =
+            await showLuminaDialog<bool>(
+              context: context,
+              builder: (dialogContext) => LuminaDialog(
+                title: '创建任务',
+                content: Text(_details()),
+                actions: [
+                  LuminaButton(
+                    primary: false,
+                    onPressed: () => Navigator.pop(dialogContext, false),
+                    child: const Text('取消'),
+                  ),
+                  LuminaButton(
+                    onPressed: () => Navigator.pop(dialogContext, true),
+                    child: const Text('确认创建'),
+                  ),
+                ],
+              ),
+            ) ??
+            false;
+      }
       if (confirmed != true ||
           !mounted ||
           _identityChanged ||
-          !widget.enabled) {
+          !widget.enabled ||
+          widget.scope != scope ||
+          !mapEquals(original, widget.item)) {
         return;
       }
       final receipt = await ref
           .read(responseActionServiceProvider)
-          .create(widget.scope, widget.item);
-      if (mounted && !_identityChanged) setState(() => _receipt = receipt);
+          .create(scope, original, overrides: overrides);
+      if (mounted &&
+          !_identityChanged &&
+          widget.scope == scope &&
+          mapEquals(original, widget.item)) {
+        setState(() => _receipt = receipt);
+      }
     } catch (_) {
       if (mounted) setState(() => _error = '创建失败，请重试');
     } finally {
@@ -187,7 +245,8 @@ class _ActionItemState extends ConsumerState<_ActionItem> {
     }
   }
 
-  String _details() => _actionDetails(widget.item);
+  String _details() =>
+      _actionDetails({...widget.item, ...?_receipt?.savedSchedule});
 
   @override
   void dispose() {
@@ -209,6 +268,8 @@ class _ActionItemState extends ConsumerState<_ActionItem> {
         const SizedBox(height: 4),
         LuminaSelectableText(_details()),
         const SizedBox(height: 8),
+        if (widget.item['kind'] == 'schedule' && _receipt == null)
+          const Text('待确认'),
         if (_identityChanged)
           const Text('登录已改变，请重新打开此消息')
         else if (_receipt != null)
@@ -221,6 +282,8 @@ class _ActionItemState extends ConsumerState<_ActionItem> {
                   ? '正在处理…'
                   : widget.item['kind'] == 'task'
                   ? '预览并创建任务'
+                  : widget.agenda
+                  ? '确认添加日程'
                   : '预览并创建日程',
             ),
           ),
@@ -240,7 +303,6 @@ String _actionDetails(Map<String, dynamic> item) => [
   item['title'] as String,
   if (item['notes'] != null) item['notes'] as String,
   if (item['due'] != null) '截止日期：${item['due']}',
-  if (item['startAt'] != null) '开始：${item['startAt']}',
-  if (item['endAt'] != null) '结束：${item['endAt']}',
+  if (item['kind'] == 'schedule') responseScheduleDetails(item),
   if (item['location'] != null) '地点：${item['location']}',
 ].join('\n');

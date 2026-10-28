@@ -8,9 +8,14 @@ import '../../events/data/event_repository.dart';
 import '../domain/response_action_schema.dart';
 
 class ResponseActionReceipt {
-  const ResponseActionReceipt({required this.entityId, required this.status});
+  const ResponseActionReceipt({
+    required this.entityId,
+    required this.status,
+    this.savedSchedule,
+  });
   final String entityId;
   final String status;
+  final Map<String, dynamic>? savedSchedule;
   bool get removed => status == 'removed';
   String get message => switch (status) {
     'removed' => '已创建，之后已删除',
@@ -76,6 +81,15 @@ class ResponseActionService {
       status: row == null || row.deletedAt != null
           ? 'removed'
           : await _status(id, row.syncStatus),
+      savedSchedule: row == null
+          ? null
+          : {
+              'title': row.title,
+              'startAt': row.startAt,
+              'endAt': row.endAt,
+              'notes': row.description,
+              'location': row.location,
+            },
     );
   }
 
@@ -94,9 +108,21 @@ class ResponseActionService {
 
   Future<ResponseActionReceipt> create(
     String scope,
-    Map<String, dynamic> item,
-  ) async {
+    Map<String, dynamic> original, {
+    Map<String, dynamic>? overrides,
+  }) async {
+    // Keep the original payload as the receipt identity, including legacy keys.
+    original = Map<String, dynamic>.of(original);
+    final allowed = original['kind'] == 'schedule'
+        ? const {'title', 'startAt', 'endAt', 'notes', 'location'}
+        : const {'title', 'due', 'notes'};
+    final item = {...original, ...?overrides};
     if (scope.isEmpty ||
+        (overrides != null && !overrides.keys.every(allowed.contains)) ||
+        !validateActionResponseBlock({
+          'type': 'actions',
+          'items': [original],
+        }) ||
         !validateActionResponseBlock({
           'type': 'actions',
           'items': [item],
@@ -116,7 +142,7 @@ class ResponseActionService {
 
     events.config.addIdentityListener(invalidate);
     try {
-      final key = await _key(scope, item);
+      final key = await _key(scope, original);
       requireIdentity();
       return await database.transaction(() async {
         final existing = await _lookupKey(key);

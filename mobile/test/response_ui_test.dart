@@ -382,10 +382,7 @@ void main() {
           .widgetList<LuminaButton>(find.byType(LuminaButton))
           .toList();
       expect(choices.last.onPressed, isNull);
-      final chartFill = find.descendant(
-        of: find.byType(FractionallySizedBox).first,
-        matching: find.byType(ColoredBox),
-      );
+      final chartFill = find.byType(FractionallySizedBox).first;
       expect(tester.getSize(chartFill).height, 8);
       expect(tester.getSize(chartFill).width, greaterThan(0));
     });

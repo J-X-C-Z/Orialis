@@ -30,14 +30,22 @@ See [the shared all-components example](response-ui-v1.example.json). Required f
 | `progress` | `label`, numeric `value`, optional `max`, `detail`; block optional `style` | Linear or ring display of authored data or verified service state |
 | `heatmap` | `label`, numeric `value`, `date` | Dated values with readable labels and intensity from data |
 | `accordion` | `label`, `content` | Expand/collapse plain text locally |
+| `callout` | `label`, nonempty `content`, optional `tone` | Highlight a concise note; tone is `info`, `success`, `warning` or `critical` |
+| `steps` | `label`, optional `detail`, optional `status` | Ordered plan with `pending`, `current` or `done`; status must reflect real state |
+| `comparison` | 2–4 unique `columns`, `label`, aligned string `values`, optional `recommendedIndex` | Compare options using only supplied facts |
+| `facts` | `label`, nonempty `value`, optional `detail` | Present concise factual summaries |
+| `code` | `label`, nonempty `source`, optional `language` | Display and copy source; never execute it |
+| `agenda` | `id`, `label`, `title`, `startAt`, `endAt`, optional `notes`, `location` | Review a dated schedule proposal and confirm local save/outbox creation |
 
 Maximum UTF-8 document size is 32,768 bytes; 1–12 blocks and 1–12 items per block. Character limits: document/block title 80, fallback 4000, label 120, metric value 120, detail 240, tab content 4000, prompt 1000, unit 32, SVG source 16000. Strings must be nonempty when provided. The phone validates these limits before rendering.
 
 The original shared example remains the six-type compatibility fixture. See
 [the extended example](response-ui-v1.extended.example.json) for the next eleven
 types and [the Board example](response-ui-v1.board.example.json) for `progress`,
-`heatmap`, `accordion` and the three added plot kinds. Together these fixtures
-cover all twenty advertised types; each is a separate bounded v1 document.
+`heatmap`, `accordion` and the three added plot kinds. Hermes guidance also
+contains a compact Chinese example for the six types added here. Together these
+fixtures and the prompt example cover all 26 advertised types; each document
+remains independently bounded v1 JSON with a complete readable fallback.
 
 ## Extended block constraints
 
@@ -107,6 +115,30 @@ cover all twenty advertised types; each is a separate bounded v1 document.
   `kind` is `task` or `schedule`, title up to 240 characters, optional notes up to
   4000 and location up to 240. A task may have strict `due: YYYY-MM-DD`; a schedule
   requires explicit-timezone `startAt` and `endAt`, with start before end.
+- `callout`: `label` is at most 120 characters; `content` is nonempty and at
+  most 4000; optional `tone` is `info`, `success`, `warning` or `critical`.
+- `steps`: each `label` is at most 120 characters; optional `detail` is at most
+  1000; optional `status` is `pending`, `current` or `done`. Status describes
+  only a verified or authored plan state, never invented task progress.
+- `comparison`: `columns` has 2–4 unique nonempty strings, each at most 120
+  characters. Optional `recommendedIndex` is an integer in `[0, columns.length)`.
+  Each item has a label and exactly one string value per column; values may be
+  empty and are at most 1000 characters.
+- `facts`: item labels are at most 120; `value` is nonempty and at most 1000;
+  optional `detail` is at most 240.
+- `code`: item labels are at most 120; `source` is nonempty and at most 16000;
+  optional nonempty `language` is at most 32. The client displays/copies source
+  without executing it.
+- `agenda`: `id`, `label` and `title` are required and nonempty; item labels are
+  at most 120. IDs use the same bounded grammar as `actions` and are unique in
+  the block. Optional `notes` are at most 4000 and `location` at most 240.
+  `startAt` and `endAt` are ISO8601 timestamps with an explicit `Z` or numeric
+  offset, and start must precede end. Missing date, time or timezone requires
+  clarification; never infer or fabricate it. An agenda item is a proposal and
+  requires review and explicit confirmation. Confirmation writes locally and
+  creates an outbox item; claim cloud sync only after server readback. Rendering
+  or invoking the component never saves data. Keep agenda in a separate fence
+  where practical and include the full meaning in fallback for older clients.
 
 ## Action lifecycle
 
@@ -159,6 +191,6 @@ Hermes plugin together for automatic SVG generation.
 - Unsupported positive versions show `fallback`; malformed v1 documents remain selectable code. Ordinary code fences retain their existing rendering and copy behavior.
 - Conversation previews, quotes, text selection, copying and transcript export substitute the authored fallback for valid UI fences. Stored content remains unchanged.
 - Tab selection and checklist edits survive rebuilds of the current card. Leaving/recreating the view restores the authored initial state; local interaction is not synchronized across devices.
-- Hermes receives generation guidance through its supported `platform_hint` system context, keeping inbound user text and native retry identity intact. The HTTP capabilities response and the plugin capability tool expose `response_ui` with format, version, block types, `plot_kinds` and limits. Generation must use only these client-supported types and kinds.
+- Hermes receives generation guidance through its supported `platform_hint` system context, keeping inbound user text and native retry identity intact. The HTTP capabilities response and the plugin capability tool expose `response_ui` with format, version, the exact 26-type `block_types` catalog, `plot_kinds` and limits, including `comparison_columns: 4` separately from table `columns: 8`. Generation must use only these client-supported types and kinds.
 
 Provide a useful introduction outside the fence and an accurate fallback covering the card's information. UI formatting is not evidence that the underlying numbers are correct.

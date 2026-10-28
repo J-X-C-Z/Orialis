@@ -7,13 +7,15 @@ RESPONSE_UI = {
     "block_types": ["metrics", "chart", "tabs", "checklist", "choices", "svg",
                     "diagram", "math", "plot", "timeline", "simulation",
                     "form", "table", "sources", "diff", "media", "actions",
-                    "progress", "heatmap", "accordion"],
+                    "progress", "heatmap", "accordion", "callout", "steps",
+                    "comparison", "facts", "code", "agenda"],
     "plot_kinds": ["line", "scatter", "pie", "area", "bar", "radar"],
     "limits": {
         "json_bytes": 32768, "blocks": 12, "items": 12, "title": 80,
         "fallback": 4000, "label": 120, "value": 120, "detail": 240,
         "content": 4000, "prompt": 1000, "unit": 32, "source": 16000,
         "math_source": 4000, "points": 120, "edges": 24, "columns": 8,
+        "comparison_columns": 4,
     },
 }
 
@@ -24,8 +26,8 @@ language between meaningful tool stages, then continue working. Do not add a too
 just to report progress. Skip repetitive updates and short-task preambles. Never report hidden
 reasoning or invent success. Progress is interim; always deliver the complete final answer.
 Use concise readable text for ordinary answers. When a comparison, data summary,
-plan, diagram, or follow-up selection is easier to understand interactively, automatically
-include an Orialis response UI without waiting for a formatting request.
+plan, diagram, or follow-up selection is easier to understand interactively, proactively
+include an Orialis response UI when it adds clarity; ordinary conversation stays in text.
 Use only a closed Markdown code fence labelled orialis-ui containing valid JSON:
 {version:1,title?:string,fallback:string,blocks:[...]}. Always include a nonempty
 fallback that explains all the information in readable text. Add a brief useful
@@ -103,5 +105,22 @@ Example labelled flow and math:
 Example form and explicit creation proposal:
 ```orialis-ui
 {"version":1,"fallback":"填写科目和时间后，结果填入草稿供发送。创建复习任务仍需打开卡片确认。","blocks":[{"type":"form","title":"补充学习偏好","prompt":"请根据下面的信息安排学习：","items":[{"id":"subject","label":"科目","kind":"text","required":true},{"id":"date","label":"学习日期","kind":"date","value":"2030-01-02"},{"id":"mode","label":"学习方式","kind":"select","options":["复习","练习"],"value":"复习"},{"id":"topics","label":"重点","kind":"multiselect","options":["公式","概念","错题"],"value":["公式"]},{"id":"minutes","label":"可用分钟","kind":"slider","min":10,"max":120,"value":45}]},{"type":"actions","items":[{"id":"study-task","label":"添加复习任务","kind":"task","title":"复习傅里叶级数","notes":"演示草案，确认后才会保存。","due":"2030-01-02"}]}]}
+```
+"""
+
+# Additive v1 blocks are separate so older clients can retain their existing fallback.
+PLATFORM_HINT += r"""
+Additional v1 blocks (one independently useful block per fence where practical):
+callout: items [{label:string,content:nonempty string <=4000,tone?:info|success|warning|critical}].
+steps: items [{label:string,detail?:string <=1000,status?:pending|current|done}]. Set status only from the real plan state; do not imply fabricated progress.
+comparison: columns are 2..4 unique nonempty strings <=120; optional recommendedIndex is an integer from 0 to columns.length-1; items [{label:string,values:string[columns.length]}], each value <=1000 chars (empty allowed).
+facts: items [{label:string,value:nonempty string <=1000,detail?:string <=240}].
+code: items [{label:string,source:nonempty string <=16000,language?:nonempty string <=32}]. Code is display/copy only and never executes.
+agenda: items [{id:string,label:string,title:string,startAt:string,endAt:string,notes?:string,location?:string}]. Required ID, label and title are nonempty; IDs use the actions ID constraints and are unique in the block; title/location<=240, notes<=4000. startAt/endAt must be ISO8601 timestamps with explicit Z or numeric timezone offset and startAt<endAt. Agenda is only a proposal until the user reviews and confirms it.
+Retain all legacy actions task/schedule forms and their confirmation behavior. For agenda, confirmation saves locally and creates an outbox entry; cloud sync is successful only after server readback. Rendering or calling a component never saves anything; claim an item was added only after a real confirmation receipt. If date, time or timezone is missing, ask through form/choices or plain text first; never invent them or create an agenda item. Use a separate agenda fence when possible and keep its fallback complete for older clients.
+Choose UI from real content: multiple data points suggest metrics plus a plot or table; option comparisons suggest comparison or choices; a multi-step plan suggests steps; missing details suggest a form. For known date-and-time plans, use agenda and request review/confirmation. Simple conversation does not require UI. Prefer one main presentation plus only necessary interaction; avoid repeating the answer in several blocks. Never create example dates or progress that look like real user data.
+Example of all six new types (illustrative facts and proposed schedule; the dates are explicitly marked as an example):
+```orialis-ui
+{"version":1,"title":"学习安排示例","fallback":"示例数据：数学和英语各安排一段学习时间。先查看重点与步骤，再核对公式。日程仅为示例草案，需用户确认后才会本机保存并进入同步队列；示例日期不是用户的真实安排。","blocks":[{"type":"callout","items":[{"label":"安排说明","content":"以下内容仅演示协议结构，不代表已创建或已添加日程。","tone":"info"}]},{"type":"steps","items":[{"label":"复习导数","detail":"整理定义并完成练习。","status":"pending"},{"label":"复习词汇","detail":"复习本周词汇。","status":"pending"}]},{"type":"comparison","columns":["数学","英语"],"recommendedIndex":0,"items":[{"label":"学习时长","values":["60 分钟","30 分钟"]}]},{"type":"facts","items":[{"label":"总时长","value":"90 分钟","detail":"按示例时长相加"}]},{"type":"code","items":[{"label":"时长合计","language":"text","source":"数学 60 分钟 + 英语 30 分钟 = 90 分钟"}]},{"type":"agenda","items":[{"id":"example-math-session","label":"数学学习（示例）","title":"复习导数","startAt":"2030-01-02T09:00:00+08:00","endAt":"2030-01-02T10:00:00+08:00","notes":"仅用于展示格式；须替换为用户确认的真实安排。","location":"自习室"}]}]}
 ```
 """
