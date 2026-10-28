@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lumina_ui/lumina_ui.dart';
 
-Widget _harness(Widget child, {bool highPerformance = true}) => LuminaTheme(
+Widget _harness(Widget child, {bool highPerformance = false}) => LuminaTheme(
   highPerformanceMode: highPerformance,
   child: Directionality(
     textDirection: TextDirection.ltr,
@@ -33,12 +33,12 @@ void main() {
     test('high-performance chrome is cheaper than balanced mode', () {
       final config = LuminaBlurConfig.highPerformanceChrome;
       expect(config.backend, isNot(LuminaBlurBackend.legacyGaussian));
-      expect(config.level, LuminaBlurLevel.blurS);
+      expect(config.level, LuminaBlurLevel.blurXS);
       expect(
         config.level.sigma,
         lessThan(LuminaBlurConfig.flowingGlass.level.sigma),
       );
-      expect(config.imageFilter(), isNotNull);
+      expect(config.imageFilter(), isNull);
     });
 
     test('auto-downgrade never drops chrome below BlurS', () {
@@ -82,7 +82,7 @@ void main() {
       policy.useLegacyFallback();
       expect(seen, LuminaBlurLevel.blurXL);
       policy.useHighPerformanceChrome();
-      expect(seen, LuminaBlurLevel.blurS);
+      expect(seen, LuminaBlurLevel.blurXS);
       policy.useFlowingGlass();
       expect(seen, LuminaBlurLevel.blurM);
     });
@@ -120,7 +120,7 @@ void main() {
         expect(policy.chrome.level, LuminaBlurLevel.blurM);
         policy.useHighPerformanceChrome();
         frames(240, 8);
-        expect(policy.chrome.level, LuminaBlurLevel.blurS);
+        expect(policy.chrome.level, LuminaBlurLevel.blurXS);
         policy.useDisabled();
         frames(240, 30);
         expect(policy.chrome.level, LuminaBlurLevel.blurXS);
@@ -140,6 +140,23 @@ void main() {
         );
       }
       expect(policy.chrome.level, LuminaBlurLevel.blurS);
+    });
+
+    test('120 Hz chrome can drop below the normal blur floor', () {
+      final policy = LuminaBlurPolicy.instance;
+      policy.configure(
+        LuminaBlurConfig.flowingGlass.copyWith(level: LuminaBlurLevel.blurS),
+      );
+      addTearDown(policy.useFlowingGlass);
+      for (var i = 0; i < 12; i++) {
+        policy.observeFrame(
+          build: const Duration(microseconds: 9000),
+          raster: const Duration(milliseconds: 2),
+          budget: const Duration(microseconds: 8333),
+          elapsed: Duration(milliseconds: i * 9),
+        );
+      }
+      expect(policy.chrome.level, LuminaBlurLevel.blurXS);
     });
 
     test('filters are cached by backend and level', () {
@@ -214,10 +231,10 @@ void main() {
     );
     policy.useHighPerformanceChrome();
     await tester.pump();
-    expect(
-      tester.widget<BackdropFilter>(find.byType(BackdropFilter)).filter,
-      same(LuminaBlurFilters.forConfig(policy.chrome)),
-    );
+    expect(find.byType(BackdropFilter), findsNothing);
+    policy.useFlowingGlass();
+    await tester.pump();
+    expect(find.byType(BackdropFilter), findsOneWidget);
     policy.useDisabled();
     await tester.pump();
     expect(find.byType(BackdropFilter), findsNothing);

@@ -212,9 +212,10 @@ class _LuminaSurfaceState extends State<LuminaSurface>
         };
     final transparent = tint.a == 0 && !glass;
     // Live backdrop blur stays off by default. Opt-in via [LuminaSurface.backdrop]
-    // for persistent chrome only (the floating bottom bar). High-performance
-    // mode still keeps that single nav blur — it is one saveLayer, not a list.
-    final blur = widget.backdrop && glass && !opaque
+    // for persistent chrome only. Performance mode uses painted frost even if
+    // a surrounding app has configured a higher shared blur budget.
+    final blur =
+        widget.backdrop && glass && !opaque && !theme.highPerformanceMode
         ? LuminaBlurPolicy.instance.chrome
         : LuminaBlurConfig.disabled;
     final backdrop = widget.backdrop && glass && !opaque && blur.enabled;

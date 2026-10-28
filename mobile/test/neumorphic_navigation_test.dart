@@ -13,6 +13,7 @@ Future<({int Function() selected, ValueChanged<bool> setKeyboard})> _mount(
   TextDirection direction = TextDirection.ltr,
   int? disabledIndex,
   bool highContrast = false,
+  bool highPerformance = true,
   bool disableAnimations = false,
   bool reduceTransparency = false,
   double width = 400,
@@ -43,6 +44,7 @@ Future<({int Function() selected, ValueChanged<bool> setKeyboard})> _mount(
                 viewInsets: EdgeInsets.only(bottom: keyboard ? 280 : 0),
               ),
               child: LuminaTheme(
+                highPerformanceMode: highPerformance,
                 reduceTransparency: reduceTransparency,
                 data: const LuminaThemeData(
                   neumorphic: true,
@@ -83,6 +85,20 @@ Transform _engraving(WidgetTester tester, int index) =>
     tester.widget<Transform>(find.byKey(ValueKey('nav-engraving-$index')));
 
 void main() {
+  testWidgets('performance navigation paints frost without sampling the page', (
+    tester,
+  ) async {
+    final policy = LuminaBlurPolicy.instance;
+    policy.useFlowingGlass();
+    addTearDown(policy.useFlowingGlass);
+    await _mount(tester, highPerformance: false);
+    expect(find.byType(BackdropFilter), findsOneWidget);
+    await _mount(tester);
+    expect(find.byType(BackdropFilter), findsNothing);
+    expect(find.byType(OrialisNavigationGlassLens), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'compact chrome clears the gesture area at narrow widths and large text',
     (tester) async {
@@ -101,7 +117,7 @@ void main() {
               .bottom;
           expect(reserved, greaterThanOrEqualTo(880 - 24 - frame.top));
           expect(find.byType(ImageFiltered), findsNothing);
-          expect(find.byType(BackdropFilter), findsOneWidget);
+          expect(find.byType(BackdropFilter), findsNothing);
           final lens = tester.getRect(
             find.byKey(const ValueKey('nav-glass-slider')),
           );

@@ -382,9 +382,11 @@ void main() {
     expect(find.text('玻璃按钮'), findsOneWidget);
   });
 
-  testWidgets('bottom navigation keeps its one live backdrop blur', (
+  testWidgets('performance chrome omits live blur while balanced retains it', (
     tester,
   ) async {
+    LuminaBlurPolicy.instance.useFlowingGlass();
+    addTearDown(LuminaBlurPolicy.instance.useHighPerformanceChrome);
     await tester.pumpWidget(
       harness(
         Center(
@@ -400,7 +402,7 @@ void main() {
     );
     expect(find.byType(BackdropFilter), findsOneWidget);
 
-    // High-performance mode keeps the chrome blur; only body glass drops it.
+    // Performance mode wins even when the shared policy still requests blur.
     await tester.pumpWidget(
       harness(
         Center(
@@ -414,7 +416,7 @@ void main() {
         highPerformance: true,
       ),
     );
-    expect(find.byType(BackdropFilter), findsOneWidget);
+    expect(find.byType(BackdropFilter), findsNothing);
   });
 
   testWidgets('page entrance is light and respects reduced motion', (

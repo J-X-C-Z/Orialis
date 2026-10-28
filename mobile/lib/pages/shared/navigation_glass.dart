@@ -16,37 +16,67 @@ class OrialisNavigationGlassFrame extends StatelessWidget {
     final theme = LuminaTheme.of(context);
     final opaque =
         theme.reduceTransparency || MediaQuery.highContrastOf(context);
-    return Stack(
-      fit: StackFit.passthrough,
-      clipBehavior: Clip.none,
-      children: [
-        Positioned.fill(
-          child: IgnorePointer(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(1000),
-              child: opaque
-                  ? ColoredBox(color: theme.colors.surface)
-                  : BackdropFilter(
-                      filter: ui.ImageFilter.blur(
-                        sigmaX: theme.highPerformanceMode ? 3.5 : 6,
-                        sigmaY: theme.highPerformanceMode ? 3.5 : 6,
-                      ),
-                      child: ColoredBox(
-                        color: theme.colors.surface.withValues(alpha: .62),
-                      ),
-                    ),
+    return ListenableBuilder(
+      listenable: LuminaBlurPolicy.instance.chromeListenable,
+      builder: (context, _) {
+        final blur = LuminaBlurFilters.forConfig(
+          theme.highPerformanceMode
+              ? LuminaBlurConfig.highPerformanceChrome
+              : LuminaBlurPolicy.instance.chrome,
+        );
+        return Stack(
+          fit: StackFit.passthrough,
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              child: IgnorePointer(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(1000),
+                  child: opaque
+                      ? ColoredBox(color: theme.colors.surface)
+                      : blur == null
+                      ? DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Color.lerp(
+                                  theme.colors.surface,
+                                  const Color(0xFFFFFFFF),
+                                  theme.colors.toneValue(.13, .035),
+                                )!,
+                                theme.colors.surface,
+                                Color.lerp(
+                                  theme.colors.surface,
+                                  theme.colors.accent,
+                                  theme.colors.toneValue(.07, .10),
+                                )!,
+                              ],
+                              stops: const [0, .54, 1],
+                            ),
+                          ),
+                        )
+                      : BackdropFilter(
+                          filter: blur,
+                          child: ColoredBox(
+                            color: theme.colors.surface.withValues(alpha: .62),
+                          ),
+                        ),
+                ),
+              ),
             ),
-          ),
-        ),
-        CustomPaint(
-          foregroundPainter: _NavigationGlassPaint(
-            colors: theme.colors,
-            opaque: opaque,
-            frame: true,
-          ),
-          child: Padding(padding: innerInsets, child: child),
-        ),
-      ],
+            CustomPaint(
+              foregroundPainter: _NavigationGlassPaint(
+                colors: theme.colors,
+                opaque: opaque,
+                frame: true,
+              ),
+              child: Padding(padding: innerInsets, child: child),
+            ),
+          ],
+        );
+      },
     );
   }
 }

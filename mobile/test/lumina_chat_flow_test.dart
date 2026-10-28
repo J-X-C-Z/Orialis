@@ -193,8 +193,9 @@ void main() {
       await incoming;
       await tester.pumpAndSettle();
       expect(position.pixels, closeTo(before, 1));
-      expect(find.text('新消息 ↓'), findsOneWidget);
-      await tester.tap(find.text('新消息 ↓'));
+      expect(find.text('新消息 ↓'), findsNothing);
+      expect(find.text('↓'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('chat-jump-latest')));
       await tester.pumpAndSettle();
       expect(position.extentAfter, lessThan(1));
       await tester.tap(iconAction('返回会话列表'));

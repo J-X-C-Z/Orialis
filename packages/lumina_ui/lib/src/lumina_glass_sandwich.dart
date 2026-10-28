@@ -24,47 +24,61 @@ class LuminaGlassWell extends StatelessWidget {
       tint ?? theme.colors.surface,
       .32,
     )!;
-    Widget frost = ColoredBox(
-      color: backing.withValues(alpha: opaque ? 1 : .16),
+    final material = _LuminaMaterial(
+      colors: theme.colors,
+      tint: backing,
+      radius: radius,
+      depth: LuminaSurfaceDepth.recessed,
+      shoulder: false,
+      contrast: MediaQuery.highContrastOf(context),
+      focused: focused,
+      pressed: false,
+      neumorphic: true,
+      cheapShadow: theme.highPerformanceMode && opaque,
+    );
+    Widget well = CustomPaint(
+      isComplex: true,
+      painter: theme.highPerformanceMode && !opaque
+          ? _LuminaBakedWell(material)
+          : material,
+      child: const SizedBox.expand(),
     );
     if (!opaque && !theme.highPerformanceMode) {
-      // Normal mode softens the well's own gradient. The performance path
-      // keeps the painted frost without a per-control backdrop sampling pass.
-      frost = BackdropFilter(
-        filter: ui.ImageFilter.blur(
-          sigmaX: theme.highPerformanceMode ? 2 : 4,
-          sigmaY: theme.highPerformanceMode ? 2 : 4,
-        ),
-        child: frost,
+      // The opaque well hides the backdrop: filter only its own static paint.
+      well = ImageFiltered(
+        imageFilter: ui.ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+        child: well,
       );
     }
-    return CustomPaint(
-      painter: _LuminaMaterial(
-        colors: theme.colors,
-        tint: backing,
-        radius: radius,
-        depth: LuminaSurfaceDepth.recessed,
-        shoulder: false,
-        contrast: MediaQuery.highContrastOf(context),
-        focused: focused,
-        pressed: false,
-        neumorphic: true,
-        cheapShadow: theme.highPerformanceMode,
-      ),
-      child: Stack(
-        fit: StackFit.passthrough,
-        children: [
-          Positioned.fill(
-            child: IgnorePointer(
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        Positioned.fill(
+          child: IgnorePointer(
+            child: RepaintBoundary(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(radius),
-                child: frost,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    well,
+                    if (opaque)
+                      ColoredBox(color: backing)
+                    else
+                      CustomPaint(
+                        painter: _LuminaFrostFilm(
+                          colors: theme.colors,
+                          backing: backing,
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
-          child,
-        ],
-      ),
+        ),
+        child,
+      ],
     );
   }
 }
@@ -100,6 +114,7 @@ class LuminaGlassCoat extends StatelessWidget {
             pressed: pressed,
             liquidGlass: true,
             embeddedGlass: true,
+            cheapShadow: theme.highPerformanceMode,
           ),
           child: const SizedBox.expand(),
         ),
@@ -140,4 +155,109 @@ class LuminaGlassSandwich extends StatelessWidget {
       ),
     ],
   );
+}
+
+/// A cached, paint-only frost film shared by both quality modes.
+class _LuminaFrostFilm extends CustomPainter {
+  const _LuminaFrostFilm({required this.colors, required this.backing});
+  final LuminaColors colors;
+  final Color backing;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final rect = Offset.zero & size;
+    final light = colors.tone(const Color(0xFFFFFFFF), const Color(0xFF71869C));
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = _LuminaMaterial._cachedGradient(
+          _LuminaMaterial._bodyGradientCache,
+          ('frost-film', size, backing, light, colors.accent),
+          () => ui.Gradient.linear(
+            rect.topLeft,
+            rect.bottomRight,
+            [
+              Color.lerp(backing, light, .20)!.withValues(alpha: .23),
+              backing.withValues(alpha: .13),
+              Color.lerp(backing, colors.accent, .10)!.withValues(alpha: .20),
+            ],
+            [0, .50, 1],
+          ),
+        ),
+    );
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = _LuminaMaterial._grainShader
+        ..color = Color.fromRGBO(255, 255, 255, colors.toneValue(.16, .10)),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_LuminaFrostFilm old) =>
+      old.backing != backing ||
+      old.colors.darkProgress != colors.darkProgress ||
+      old.colors.accent != colors.accent;
+}
+
+/// Cache the normal well including its local frost blur; text is never baked.
+/// Fixed 2x resolution is sufficient for this soft layer, independent of DPR.
+class _LuminaBakedWell extends CustomPainter {
+  const _LuminaBakedWell(this.material);
+  final _LuminaMaterial material;
+  static final _cache = <Object, ui.Image>{};
+  static int _bytes = 0;
+  static const _byteLimit = 12 * 1024 * 1024;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final key = (
+      size,
+      material.radius,
+      material.tint,
+      material.colors.surface,
+      material.colors.accent,
+      material.colors.darkProgress,
+      material.focused,
+    );
+    var image = _cache.remove(key);
+    if (image == null) {
+      final scale = math.min(2.0, 1024 / size.longestSide);
+      final width = (size.width * scale).ceil();
+      final height = (size.height * scale).ceil();
+      final recorder = ui.PictureRecorder();
+      final baked = Canvas(recorder)..scale(scale);
+      final bounds = Offset.zero & size;
+      baked.saveLayer(
+        bounds.inflate(12),
+        Paint()..imageFilter = ui.ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+      );
+      material.paint(baked, size);
+      baked.restore();
+      final picture = recorder.endRecording();
+      image = picture.toImageSync(width, height);
+      picture.dispose();
+      final bytes = width * height * 4;
+      while (_cache.isNotEmpty &&
+          (_cache.length >= 48 || _bytes + bytes > _byteLimit)) {
+        final old = _cache.remove(_cache.keys.first)!;
+        _bytes -= old.width * old.height * 4;
+        old.dispose();
+      }
+      _bytes += bytes;
+    }
+    _cache[key] = image;
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      Offset.zero & size,
+      Paint()..filterQuality = FilterQuality.low,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_LuminaBakedWell old) =>
+      material.shouldRepaint(old.material);
 }

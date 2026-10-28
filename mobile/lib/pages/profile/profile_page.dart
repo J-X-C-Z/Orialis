@@ -277,7 +277,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     ),
                     LuminaListRow(
                       title: '高性能模式',
-                      subtitle: '减少实时玻璃模糊，保留色彩、阴影与自然动效',
+                      subtitle: '静态磨砂与柔和光影，优先保持滑动流畅',
                       trailing: LuminaSwitch(
                         value: ref.watch(highPerformanceModeProvider),
                         onChanged: (value) async {

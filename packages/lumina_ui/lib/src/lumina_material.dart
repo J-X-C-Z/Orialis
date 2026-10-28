@@ -85,7 +85,6 @@ class _LuminaCardBoxPainter extends BoxPainter {
       pressed: false,
       cheapShadow: decoration.highPerformance,
       neumorphic: decoration.colors.neumorphic,
-      physicalShadow: true,
     ).paint(canvas, size);
     canvas.restore();
   }
@@ -109,7 +108,6 @@ class _LuminaMaterial extends CustomPainter {
     this.embeddedGlass = false,
     this.neumorphic = false,
     this.cheapShadow = false,
-    this.physicalShadow = false,
     this.blurCompensation = 0,
   });
 
@@ -125,7 +123,6 @@ class _LuminaMaterial extends CustomPainter {
   final bool embeddedGlass;
   final bool neumorphic;
   final bool cheapShadow;
-  final bool physicalShadow;
 
   /// 0–1 — rises as blur level drops so tint + micro-noise + rim replace sigma.
   final double blurCompensation;
@@ -268,30 +265,14 @@ class _LuminaMaterial extends CustomPainter {
             ..addPath(path, Offset.zero),
         );
       }
-      // One drop-shadow blur only; the top-left rim comes from the final
-      // gradient stroke so list/control surfaces do not stack two blurs.
-      // High-performance mode swaps the blur for a flat offset wash —
-      // MaskFilter.blur forces an offscreen layer per surface.
-      final shadowPaint = Paint()
-        ..color = shade.withValues(
-          alpha: glass ? .14 : colors.toneValue(.22, .28),
-        );
-      if (!cheapShadow) {
-        shadowPaint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
-      }
-      if (cheapShadow && physicalShadow) {
-        // Group cards retain a soft shadow in performance mode without a
-        // per-card mask-filter layer. Individual inset rows stay inexpensive.
-        canvas.drawShadow(path, shade.withValues(alpha: .32), 4, false);
-      } else {
-        canvas.drawPath(path.shift(Offset(2, pressed ? 1 : 5)), shadowPaint);
-      }
-      if (cheapShadow && !physicalShadow) {
-        canvas.drawPath(
-          path.shift(Offset(1, pressed ? 0 : 2)),
-          Paint()..color = shade.withValues(alpha: .10),
-        );
-      }
+      _paintSoftPath(
+        canvas,
+        path,
+        rect,
+        Offset(2, pressed ? 1 : 5),
+        shade.withValues(alpha: glass ? .14 : colors.toneValue(.22, .28)),
+        6,
+      );
       canvas.restore();
     }
     if (!inset && !glass && !contrast) {
@@ -372,6 +353,14 @@ class _LuminaMaterial extends CustomPainter {
         );
       }
     }
+    if (glass && diffuseGlass && !contrast) {
+      canvas.drawRect(
+        rect,
+        Paint()
+          ..shader = _grainShader
+          ..color = Color.fromRGBO(255, 255, 255, colors.toneValue(.16, .10)),
+      );
+    }
     if (glass && !contrast) {
       // A refractive inner rim, not a card's left-hand highlight stripe.
       // Gradient strokes add lens depth without another blur or offscreen layer.
@@ -382,13 +371,13 @@ class _LuminaMaterial extends CustomPainter {
         path.shift(Offset(0, pressed ? 1 : 2.5)),
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = pressed ? 2 : 3.5
+          ..strokeWidth = diffuseGlass ? 1 : (pressed ? 2 : 3.5)
           ..shader = _cachedGradient(_rimGradientCache, rimKey, () {
             return ui.Gradient.linear(
               rect.topCenter,
               rect.bottomCenter,
               [
-                light.withValues(alpha: .70),
+                light.withValues(alpha: diffuseGlass ? .25 : .70),
                 light.withValues(alpha: .02),
                 colors.accent.withValues(alpha: diffuseGlass ? .07 : .18),
               ],
@@ -400,11 +389,11 @@ class _LuminaMaterial extends CustomPainter {
         path.shift(const Offset(0, -1.5)),
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
+          ..strokeWidth = diffuseGlass ? .7 : 2
           ..shader = _cachedGradient(_rimGradientCache, rimShiftKey, () {
             return ui.Gradient.linear(rect.topCenter, rect.bottomCenter, [
               light.withValues(alpha: 0),
-              light.withValues(alpha: .65),
+              light.withValues(alpha: diffuseGlass ? .18 : .65),
             ]);
           }),
       );
@@ -412,14 +401,15 @@ class _LuminaMaterial extends CustomPainter {
     if (inset && !contrast) {
       // Stroke inside the clip: the soft rim reads as an inner shadow with
       // one small blur, instead of a large even-odd path over the backdrop.
-      final insetPaint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 7
-        ..color = shade.withValues(alpha: .34);
-      if (!cheapShadow) {
-        insetPaint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
-      }
-      canvas.drawPath(path.shift(const Offset(1.5, 2)), insetPaint);
+      _paintSoftPath(
+        canvas,
+        path,
+        rect,
+        const Offset(1.5, 2),
+        shade.withValues(alpha: .34),
+        2,
+        strokeWidth: 7,
+      );
       canvas.drawPath(
         path,
         Paint()
@@ -485,17 +475,21 @@ class _LuminaMaterial extends CustomPainter {
           ..addRect(rect.inflate(48))
           ..addPath(path, Offset.zero),
       );
-      canvas.drawPath(
-        path.shift(Offset(0, pressed ? 2 : 7)),
-        Paint()
-          ..color = shadow.withValues(alpha: colors.toneValue(.085, .22))
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 14),
+      _paintSoftPath(
+        canvas,
+        path,
+        rect,
+        Offset(0, pressed ? 2 : 7),
+        shadow.withValues(alpha: colors.toneValue(.085, .22)),
+        14,
       );
-      canvas.drawPath(
-        path.shift(const Offset(0, 1)),
-        Paint()
-          ..color = shadow.withValues(alpha: colors.toneValue(.045, .12))
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+      _paintSoftPath(
+        canvas,
+        path,
+        rect,
+        const Offset(0, 1),
+        shadow.withValues(alpha: colors.toneValue(.045, .12)),
+        3,
       );
       canvas.restore();
     }
@@ -627,11 +621,13 @@ class _LuminaMaterial extends CustomPainter {
         ..addRect(rect.inflate(8))
         ..addPath(face, Offset.zero),
     );
-    canvas.drawPath(
-      path.shift(Offset(0, height)),
-      Paint()
-        ..color = contact.withValues(alpha: colors.toneValue(.22, .35))
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.3),
+    _paintSoftPath(
+      canvas,
+      path,
+      rect,
+      Offset(0, height),
+      contact.withValues(alpha: colors.toneValue(.22, .35)),
+      1.3,
     );
     canvas.drawPath(
       path.shift(Offset(0, height)),
@@ -686,6 +682,39 @@ class _LuminaMaterial extends CustomPainter {
           ),
         ),
     );
+  }
+
+  /// Use the normal light model, changing only where the blur is evaluated.
+  void _paintSoftPath(
+    Canvas canvas,
+    Path path,
+    Rect rect,
+    Offset offset,
+    Color color,
+    double blur, {
+    double strokeWidth = 0,
+  }) {
+    if (cheapShadow) {
+      final shaped = shoulder && !neumorphic;
+      _LuminaShadowMask.forShape(
+        rect.size,
+        radius,
+        blur,
+        false,
+        strokeWidth: strokeWidth,
+        outline: shaped ? path : null,
+        outlineKey: shaped ? (shoulder, shoulderWidth) : null,
+      ).paint(canvas, rect, offset, color);
+    } else {
+      canvas.drawPath(
+        path.shift(offset),
+        Paint()
+          ..color = color
+          ..style = strokeWidth > 0 ? PaintingStyle.stroke : PaintingStyle.fill
+          ..strokeWidth = strokeWidth
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, blur),
+      );
+    }
   }
 
   static final Map<Size, List<Offset>> _glassGrainPoints = {};
@@ -753,19 +782,17 @@ class _LuminaMaterial extends CustomPainter {
       rect.shortestSide * (inset ? .055 : .075),
       inset ? 3.0 : 4.0,
     );
-    final blur = distance * (cheapShadow ? .9 : 1.35);
+    final blur = distance * 1.35;
     final offset = Offset(distance, distance);
-    final paint = Paint()..maskFilter = MaskFilter.blur(BlurStyle.normal, blur);
+    final paint = Paint();
+    if (!cheapShadow) {
+      paint.maskFilter = MaskFilter.blur(BlurStyle.normal, blur);
+    }
     if (!inset && !contrast) {
       if (cheapShadow) {
-        canvas.save();
-        canvas.translate(-offset.dx, -offset.dy);
-        canvas.drawShadow(path, light.withValues(alpha: .30), 1.5, false);
-        canvas.restore();
-        canvas.save();
-        canvas.translate(offset.dx, offset.dy);
-        canvas.drawShadow(path, shade.withValues(alpha: .22), 2, false);
-        canvas.restore();
+        final mask = _LuminaShadowMask.forShape(rect.size, radius, blur, false);
+        mask.paint(canvas, rect, -offset, light.withValues(alpha: .38));
+        mask.paint(canvas, rect, offset, shade.withValues(alpha: .24));
       } else {
         canvas.drawPath(
           path.shift(-offset),
@@ -797,7 +824,14 @@ class _LuminaMaterial extends CustomPainter {
               ))
           : (Paint()..color = base),
     );
-    if (inset && !contrast) {
+    if (inset && !contrast && cheapShadow) {
+      final mask = _LuminaShadowMask.forShape(rect.size, radius, blur, true);
+      canvas.save();
+      canvas.clipPath(path);
+      mask.paint(canvas, rect, offset, shade);
+      mask.paint(canvas, rect, -offset, light);
+      canvas.restore();
+    } else if (inset && !contrast) {
       // Clip the blurred outside shape into the well, without a saveLayer.
       final outside = Path()
         ..fillType = PathFillType.evenOdd
@@ -838,6 +872,129 @@ class _LuminaMaterial extends CustomPainter {
       old.diffuseGlass != diffuseGlass ||
       old.liquidGlass != liquidGlass ||
       old.cheapShadow != cheapShadow ||
-      old.physicalShadow != physicalShadow ||
       old.blurCompensation != blurCompensation;
+}
+
+/// Color-independent rounded shadows are rasterized once, then nine-sliced.
+/// The center strips stretch; the curved corners and blur widths stay fixed.
+class _LuminaShadowMask {
+  _LuminaShadowMask(
+    this.image,
+    this.center,
+    this.padding,
+    this.bytes,
+    this.scale,
+  );
+  final ui.Image image;
+  final Rect center;
+  final double padding;
+  final int bytes;
+  final double scale;
+
+  static final _cache = <Object, _LuminaShadowMask>{};
+  static int _bytes = 0;
+  static const _byteLimit = 8 * 1024 * 1024;
+
+  static _LuminaShadowMask forShape(
+    Size size,
+    double radius,
+    double blur,
+    bool inset, {
+    double strokeWidth = 0,
+    Path? outline,
+    Object? outlineKey,
+  }) {
+    final r = radius.clamp(0.0, size.shortestSide / 2).toDouble();
+    final edge = r + blur * 3 + strokeWidth / 2;
+    final template = outline != null
+        ? size
+        : Size(
+            math.min(size.width, edge * 2 + 2),
+            math.min(size.height, edge * 2 + 2),
+          );
+    final key = (template, r, blur, inset, strokeWidth, outlineKey);
+    final hit = _cache.remove(key);
+    if (hit != null) {
+      _cache[key] = hit;
+      return hit;
+    }
+    final padding = (blur * 3 + strokeWidth / 2).ceilToDouble() + 1;
+    final width = template.width + padding * 2;
+    final height = template.height + padding * 2;
+    // Bound both unusual large controls and the process-wide texture budget.
+    final scale = math.min(2.0, 1024 / math.max(width, height));
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder)..scale(scale);
+    final rect = Rect.fromLTWH(
+      padding,
+      padding,
+      template.width,
+      template.height,
+    );
+    final path =
+        outline?.shift(Offset(padding, padding)) ??
+        (Path()..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(r))));
+    final maskPath = inset
+        ? (Path()
+            ..fillType = PathFillType.evenOdd
+            ..addRect(rect.inflate(padding + blur * 3))
+            ..addPath(path, Offset.zero))
+        : path;
+    canvas.drawPath(
+      maskPath,
+      Paint()
+        ..color = const Color(0xFFFFFFFF)
+        ..style = strokeWidth > 0 ? PaintingStyle.stroke : PaintingStyle.fill
+        ..strokeWidth = strokeWidth
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, blur),
+    );
+    final picture = recorder.endRecording();
+    final pixelsWide = (width * scale).ceil();
+    final pixelsHigh = (height * scale).ceil();
+    final image = picture.toImageSync(pixelsWide, pixelsHigh);
+    picture.dispose();
+    final result = _LuminaShadowMask(
+      image,
+      Rect.fromLTWH(
+        (padding + template.width / 2 - .5) * scale,
+        (padding + template.height / 2 - .5) * scale,
+        scale,
+        scale,
+      ),
+      padding,
+      pixelsWide * pixelsHigh * 4,
+      scale,
+    );
+    while (_cache.isNotEmpty &&
+        (_cache.length >= 64 || _bytes + result.bytes > _byteLimit)) {
+      final old = _cache.remove(_cache.keys.first)!;
+      _bytes -= old.bytes;
+      old.image.dispose();
+    }
+    _cache[key] = result;
+    _bytes += result.bytes;
+    return result;
+  }
+
+  void paint(Canvas canvas, Rect rect, Offset offset, Color color) {
+    // drawImageNine preserves source corner dimensions in *pixels*. Paint in
+    // that coordinate system, then restore logical size, including the blur.
+    canvas.save();
+    canvas.scale(1 / scale);
+    final target = rect.inflate(padding).shift(offset);
+    canvas.drawImageNine(
+      image,
+      center,
+      Rect.fromLTRB(
+        target.left * scale,
+        target.top * scale,
+        target.right * scale,
+        target.bottom * scale,
+      ),
+      Paint()
+        ..filterQuality = FilterQuality.low
+        ..colorFilter = ColorFilter.mode(color, BlendMode.srcIn),
+    );
+    canvas.restore();
+  }
 }

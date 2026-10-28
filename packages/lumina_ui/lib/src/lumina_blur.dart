@@ -17,7 +17,7 @@ enum LuminaBlurLevel {
 
   bool get enabled => sigma > 0;
 
-  /// Auto-downgrade stops at BlurS — chrome never silently drops to tint-only.
+  /// The default floor is BlurS; high-refresh displays can degrade to BlurXS.
   LuminaBlurLevel get degradedSafe {
     switch (this) {
       case LuminaBlurLevel.blurXL:
@@ -69,10 +69,11 @@ class LuminaBlurConfig {
   /// Default Flowing Glass level.
   static const LuminaBlurConfig flowingGlass = LuminaBlurConfig();
 
-  /// High-performance chrome keeps a small live frost with the lowest sigma.
+  /// Static frost keeps scrolling content out of chrome rendering passes.
   static const LuminaBlurConfig highPerformanceChrome = LuminaBlurConfig(
-    level: LuminaBlurLevel.blurS,
-    backend: LuminaBlurBackend.downsampleGaussian,
+    level: LuminaBlurLevel.blurXS,
+    backend: LuminaBlurBackend.tintNoise,
+    autoDowngrade: false,
   );
 
   /// Explicit quality-off switch used by BlurXS / reduce-transparency.
@@ -179,7 +180,7 @@ class LuminaBlurPolicy {
   void useHighPerformanceChrome() =>
       configure(LuminaBlurConfig.highPerformanceChrome);
 
-  /// Auto-downgrade after a streak of slow frames (frame budget > 16.6ms).
+  /// Auto-downgrade after sustained misses of the active display's frame budget.
   void ensureFrameWatcher() {
     if (_timingsHooked) return;
     _timingsHooked = true;
@@ -230,7 +231,7 @@ class LuminaBlurPolicy {
     if (!_requested.autoDowngrade || !_requested.enabled) return;
     final cost = build > raster ? build : raster;
     final ratio = cost.inMicroseconds / budget.inMicroseconds;
-    if (ratio > 1.25) {
+    if (ratio > 1.0) {
       _slowFrames++;
       _stableFrames = 0;
     } else {
@@ -241,10 +242,11 @@ class LuminaBlurPolicy {
         _lastChange == null ||
         elapsed - _lastChange! >= const Duration(seconds: 2);
     var level = _chrome.level;
-    if (_slowFrames >= 12 &&
-        cooled &&
-        level.index > LuminaBlurLevel.blurS.index) {
-      level = level.degradedSafe;
+    final minimumLevel = budget <= const Duration(milliseconds: 10)
+        ? LuminaBlurLevel.blurXS
+        : LuminaBlurLevel.blurS;
+    if (_slowFrames >= 12 && cooled && level.index > minimumLevel.index) {
+      level = level.degraded;
     } else if (_stableFrames >= 120 &&
         cooled &&
         level.index < _requested.level.index) {

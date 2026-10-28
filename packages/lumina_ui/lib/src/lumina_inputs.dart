@@ -13,6 +13,7 @@ class LuminaTextField extends StatefulWidget {
     this.keyboardType,
     this.autofocus = false,
     this.readOnly = false,
+    this.frosted = false,
     this.enabled = true,
     this.onTap,
     this.onSubmitted,
@@ -25,6 +26,9 @@ class LuminaTextField extends StatefulWidget {
   final String? label, hint, hintText;
   final int? maxLines, minLines, maxLength;
   final bool obscureText, autofocus, readOnly, enabled;
+
+  /// A single soft frost layer, without the glass control's clear outer coat.
+  final bool frosted;
   final ValueChanged<String>? onChanged, onSubmitted;
   final TextInputType? keyboardType;
   final TextInputAction? textInputAction;
@@ -156,9 +160,13 @@ class _LuminaTextFieldState extends State<LuminaTextField> {
                 ),
               ),
             );
+            if (widget.frosted) {
+              return LuminaGlassWell(radius: 16, child: field);
+            }
             return neumorphic
                 ? LuminaSurface(
                     depth: LuminaSurfaceDepth.recessed,
+                    glass: true,
                     radius: 16,
                     padding: EdgeInsets.zero,
                     child: field,
@@ -677,10 +685,8 @@ class _LuminaSelectionWell extends StatelessWidget {
         theme.data.neumorphic ||
         theme.reduceTransparency ||
         MediaQuery.highContrastOf(context);
-    final config =
-        theme.highPerformanceMode &&
-            budget.level.index > LuminaBlurLevel.blurS.index
-        ? budget.copyWith(level: LuminaBlurLevel.blurS)
+    final config = theme.highPerformanceMode
+        ? LuminaBlurConfig.highPerformanceChrome
         : budget;
     final filter = opaque || !backdrop
         ? null
