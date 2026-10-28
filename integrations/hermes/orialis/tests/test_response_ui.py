@@ -35,7 +35,7 @@ class ResponseUiTests(unittest.TestCase):
 
     def test_generation_examples_and_shared_mobile_fixture_match_advertised_format(self):
         examples = re.findall(r'```orialis-ui\n(.*?)\n```', PLATFORM_HINT, re.S)
-        self.assertEqual(len(examples), 6)
+        self.assertEqual(len(examples), 7)
         fixture = Path(__file__).resolve().parents[4] / 'docs/contracts/response-ui-v1.example.json'
         examples.append(fixture.read_text(encoding='utf-8'))
         extended_fixture = fixture.with_name('response-ui-v1.extended.example.json')
@@ -126,6 +126,12 @@ class ResponseUiTests(unittest.TestCase):
         for instruction in (
             'multiple separate closed fences',
             'Output only\nthe client-supported types',
+            'Lead with a concise, scannable conclusion',
+            'use timeline for event histories and logs, facts for concise facts about one',
+            'Use a table only for genuinely comparable rows with the same fields',
+            'Every table row label must\nsummarize its subject and change or result',
+            'multiple data points\nalone do not call for a table or metrics plus a chart',
+            'Put the key information first and avoid controls that repeat the same information',
             'Never fabricate quota, task completion, or live progress',
             'observed or user-provided data',
             'author-supplied data or verified service state',
@@ -134,6 +140,29 @@ class ResponseUiTests(unittest.TestCase):
             'do not automatically send',
         ):
             self.assertIn(instruction, PLATFORM_HINT)
+        self.assertIn('Choose UI from the content shape: event histories and logs use timeline',
+                      PLATFORM_HINT)
+        self.assertNotRegex(PLATFORM_HINT,
+                            r'multiple data points\s+suggest metrics plus a plot or table')
+        dsh_hint = (Path(__file__).resolve().parents[4] /
+                    'integrations/dsh/response-ui.mjs').read_text(encoding='utf-8')
+        self.assertIn('event histories and logs are timelines', dsh_hint)
+        self.assertIn('multiple values alone do not justify a table', dsh_hint)
+        self.assertNotRegex(dsh_hint,
+                            r'multiple data points\s+suggest metrics plus a plot or table')
+
+    def test_event_history_example_uses_scan_readable_timeline_entries(self):
+        raw, = re.findall(r'Example event history \(illustrative\):\n```orialis-ui\n(.*?)\n```',
+                          PLATFORM_HINT, re.S)
+        doc = json.loads(raw)
+        self.assertIn('示例', doc['fallback'])
+        timeline, = doc['blocks']
+        self.assertEqual(timeline['type'], 'timeline')
+        self.assertEqual(len(timeline['items']), 2)
+        for item in timeline['items']:
+            self.assertRegex(item['label'], r'^.+[:：].+')
+            datetime.fromisoformat(item['time'])
+            self.assertTrue(item['detail'].strip())
 
     def test_capabilities_distinguish_plugin_format_from_server_discovery(self):
         with patch.dict('os.environ', {'ORIALIS_SERVER_URL': 'https://example.test'}), \

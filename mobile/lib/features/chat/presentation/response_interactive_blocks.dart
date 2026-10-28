@@ -28,6 +28,7 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
   final _controllers = <String, TextEditingController>{};
   final _expanded = <int>{};
   bool _submitted = false;
+  bool _hasChanges = false;
   String? _notice;
 
   List<Map<String, dynamic>> get _items =>
@@ -43,6 +44,7 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
     _values.clear();
     _expanded.clear();
     _submitted = false;
+    _hasChanges = false;
     _notice = null;
     if (widget.data['type'] != 'form') return;
     for (final item in _items) {
@@ -102,34 +104,39 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
             padding: const EdgeInsets.only(bottom: 16),
             child: _field(item),
           ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        Row(
           children: [
-            LuminaButton(
-              onPressed: widget.onPromptSelected == null
-                  ? null
-                  : () {
-                      final error = responseFormError(widget.data, _values);
-                      setState(() => _submitted = true);
-                      if (error == null) {
-                        widget.onPromptSelected!(
-                          responseFormPrompt(widget.data, _values),
-                        );
-                        setState(() => _notice = '已填入输入框，请确认后发送');
-                      }
-                    },
-              child: const Text('填入输入框'),
+            Expanded(
+              child: LuminaButton(
+                onPressed: widget.onPromptSelected == null
+                    ? null
+                    : () {
+                        final error = responseFormError(widget.data, _values);
+                        setState(() => _submitted = true);
+                        if (error == null) {
+                          widget.onPromptSelected!(
+                            responseFormPrompt(widget.data, _values),
+                          );
+                          setState(() => _notice = '已填入输入框，请确认后发送');
+                        }
+                      },
+                child: const Text('填入输入框'),
+              ),
             ),
-            LuminaButton(
-              key: const ValueKey('form-reset'),
-              primary: false,
-              onPressed: () {
-                FocusScope.of(context).unfocus();
-                setState(_reset);
-              },
-              child: const Text('重置表单'),
-            ),
+            if (_hasChanges) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: LuminaButton(
+                  key: const ValueKey('form-reset'),
+                  primary: false,
+                  onPressed: () {
+                    FocusScope.of(context).unfocus();
+                    setState(_reset);
+                  },
+                  child: const Text('重置表单'),
+                ),
+              ),
+            ],
           ],
         ),
         const SizedBox(height: 8),
@@ -188,6 +195,7 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
 
   void _changeValue(String id, Object? value) => setState(() {
     _values[id] = value;
+    _hasChanges = true;
     _notice = null;
   });
 
@@ -263,6 +271,7 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
                           : _values[id] == option,
                       onPressed: () => setState(() {
                         _notice = null;
+                        _hasChanges = true;
                         if (multiple) {
                           final selected = _values[id] as List<String>;
                           selected.contains(option)
@@ -391,31 +400,39 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                  Row(
                     children: [
-                      LuminaButton(
-                        primary: false,
-                        onPressed: () =>
-                            _openSource(_items[i]['url'] as String),
-                        child: const Text('打开来源'),
-                      ),
-                      LuminaButton(
-                        primary: false,
-                        onPressed: () => Clipboard.setData(
-                          ClipboardData(text: _items[i]['url'] as String),
-                        ),
-                        child: const Text('复制地址'),
-                      ),
-                      if (_items[i]['excerpt'] != null)
-                        LuminaButton(
+                      Expanded(
+                        child: LuminaButton(
                           primary: false,
-                          onPressed: () => _toggle(i),
-                          child: Text(_expanded.contains(i) ? '收起摘录' : '查看摘录'),
+                          onPressed: () =>
+                              _openSource(_items[i]['url'] as String),
+                          child: const Text('打开来源'),
                         ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: LuminaButton(
+                          primary: false,
+                          onPressed: () => Clipboard.setData(
+                            ClipboardData(text: _items[i]['url'] as String),
+                          ),
+                          child: const Text('复制地址'),
+                        ),
+                      ),
                     ],
                   ),
+                  if (_items[i]['excerpt'] != null) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: LuminaButton(
+                        primary: false,
+                        onPressed: () => _toggle(i),
+                        child: Text(_expanded.contains(i) ? '收起摘录' : '查看摘录'),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   if (_items[i]['sourceId'] != null)
                     Text(

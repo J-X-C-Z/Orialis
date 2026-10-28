@@ -42,17 +42,20 @@ class _Launcher extends UrlLauncherPlatform {
   }
 }
 
-Widget _host(Widget child) => MaterialApp(
-  home: LuminaTheme(
-    highPerformanceMode: true,
-    child: MediaQuery(
-      data: const MediaQueryData(textScaler: TextScaler.linear(2)),
-      child: Scaffold(
-        body: SingleChildScrollView(child: SizedBox(width: 240, child: child)),
+Widget _host(Widget child, {double width = 240, double textScale = 2}) =>
+    MaterialApp(
+      home: LuminaTheme(
+        highPerformanceMode: true,
+        child: MediaQuery(
+          data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
+          child: Scaffold(
+            body: SingleChildScrollView(
+              child: SizedBox(width: width, child: child),
+            ),
+          ),
+        ),
       ),
-    ),
-  ),
-);
+    );
 
 Future<void> _tap(WidgetTester tester, Finder finder) async {
   await tester.ensureVisible(finder);
@@ -202,8 +205,49 @@ void main() {
       ),
     );
     final data = _table();
-    await tester.pumpWidget(_host(ResponseInteractiveBlock(data: data)));
+    await tester.pumpWidget(
+      _host(ResponseInteractiveBlock(data: data), width: 800, textScale: 1),
+    );
+    expect(find.byKey(const ValueKey('table-search')), findsNothing);
+    await _tap(tester, find.byKey(const ValueKey('table-tools')));
+    expect(find.byKey(const ValueKey('table-search')), findsOneWidget);
+    expect(find.byKey(const ValueKey('table-sort-column')), findsOneWidget);
+    expect(find.byKey(const ValueKey('table-page-size')), findsOneWidget);
+    expect(find.text('复制 CSV'), findsOneWidget);
+    expect(find.text('导出 CSV'), findsOneWidget);
     expect(_tableWidget(tester).rows.length, 5);
+    expect(
+      tester.widget<LuminaButton>(
+        find.byKey(const ValueKey('table-previous-page')),
+      ),
+      isA<LuminaButton>(),
+    );
+    expect(
+      tester.widget<LuminaButton>(
+        find.byKey(const ValueKey('table-next-page')),
+      ),
+      isA<LuminaButton>(),
+    );
+    final footer = find
+        .ancestor(
+          of: find.byKey(const ValueKey('table-page-status')),
+          matching: find.byType(Row),
+        )
+        .first;
+    expect(
+      find.descendant(
+        of: footer,
+        matching: find.byKey(const ValueKey('table-previous-page')),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: footer,
+        matching: find.byKey(const ValueKey('table-next-page')),
+      ),
+      findsOneWidget,
+    );
     expect(_cells(tester, 0).first, 'match-0');
     await _tap(tester, find.byKey(const ValueKey('table-next-page')));
     expect(_cells(tester, 0).first, 'match-5');
@@ -220,11 +264,12 @@ void main() {
     expect(_cells(tester, 0).first, 'match-0');
     await _pageSize(tester, 0);
     expect(_tableWidget(tester).rows.length, 12);
+    expect(find.byKey(const ValueKey('table-page-status')), findsNothing);
     await _pageSize(tester, 5);
     await _tap(tester, find.byKey(const ValueKey('table-next-page')));
     await tester.enterText(_editor('table-search'), 'MATCH');
     await tester.pumpAndSettle();
-    expect(find.text('显示 8 / 12 行；点击列名排序'), findsOneWidget);
+    expect(find.text('8 / 12 条匹配'), findsOneWidget);
     expect(_cells(tester, 0).first, 'match-0');
     _tableWidget(tester).columns[2].onSort!(2, true);
     await tester.pumpAndSettle();
@@ -272,50 +317,85 @@ void main() {
     await _tap(tester, find.byKey(const ValueKey('table-clear-search')));
     expect(_cells(tester, 0).first, 'match-0');
     expect(find.byKey(const ValueKey('table-empty')), findsNothing);
-    expect(find.text('显示 12 / 12 行；点击列名排序'), findsOneWidget);
+    expect(find.text('12 条记录'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'narrow table horizontally scrolls and opens selectable full details',
-    (tester) async {
-      tester.view.physicalSize = const Size(240, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final data = _table();
-      final detail = '很长的完整说明。' * 80;
-      data['items'][0]['cells'][0] = detail;
-      await tester.pumpWidget(_host(ResponseInteractiveBlock(data: data)));
-      expect(
-        find.byWidgetPredicate(
-          (widget) =>
-              widget is SingleChildScrollView &&
-              widget.scrollDirection == Axis.horizontal,
-        ),
-        findsOneWidget,
-      );
-      await _tap(tester, find.text('展开行').first);
-      expect(find.byType(AlertDialog), findsOneWidget);
-      expect(
-        find.descendant(
-          of: find.byType(AlertDialog),
-          matching: find.text(detail),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(
-          of: find.byType(AlertDialog),
-          matching: find.byType(LuminaSelectableText),
-        ),
-        findsWidgets,
-      );
-      expect(tester.takeException(), isNull);
-      await _tap(tester, find.text('关闭详情'));
-      expect(find.byType(AlertDialog), findsNothing);
-    },
-  );
+  testWidgets('narrow table summary opens selectable full details', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final data = _table();
+    final detail = '很长的完整说明。' * 80;
+    data['items'][0]['cells'][0] = detail;
+    await tester.pumpWidget(
+      _host(ResponseInteractiveBlock(data: data), width: 240),
+    );
+    expect(find.byType(DataTable), findsNothing);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is SingleChildScrollView &&
+            widget.scrollDirection == Axis.horizontal,
+      ),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('table-row-0')), findsOneWidget);
+    expect(
+      tester.widget<LuminaIconButton>(
+        find.byKey(const ValueKey('table-next-page')),
+      ),
+      isA<LuminaIconButton>(),
+    );
+    expect(
+      tester.widget<LuminaIconButton>(
+        find.byKey(const ValueKey('table-previous-page')),
+      ),
+      isA<LuminaIconButton>(),
+    );
+    final compactFooter = find
+        .ancestor(
+          of: find.byKey(const ValueKey('table-page-status')),
+          matching: find.byType(Row),
+        )
+        .first;
+    expect(
+      find.descendant(
+        of: compactFooter,
+        matching: find.byKey(const ValueKey('table-previous-page')),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: compactFooter,
+        matching: find.byKey(const ValueKey('table-next-page')),
+      ),
+      findsOneWidget,
+    );
+    await _tap(tester, find.byKey(const ValueKey('table-row-0')));
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text(detail),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(LuminaSelectableText),
+      ),
+      findsWidgets,
+    );
+    expect(tester.takeException(), isNull);
+    await _tap(tester, find.text('关闭详情'));
+    expect(find.byType(AlertDialog), findsNothing);
+  });
 
   testWidgets(
     'form reset restores every original value without touching composer draft',

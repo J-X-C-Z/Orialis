@@ -317,32 +317,33 @@ class _ResponseUiViewState extends State<ResponseUiView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: LuminaSpacing.compact),
-            child: LuminaGlassTitleScope.of(context)
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      LuminaCardHeader(
-                        title: block.title ?? _typeLabel(block.type),
-                      ),
-                    ],
-                  )
-                : Semantics(
-                    header: true,
-                    child: Column(
+          if (block.title != null || block.type != 'accordion')
+            Padding(
+              padding: const EdgeInsets.only(bottom: LuminaSpacing.compact),
+              child: LuminaGlassTitleScope.of(context)
+                  ? Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          block.title ?? _typeLabel(block.type),
-                          style: LuminaTheme.of(context)
-                              .textTheme
-                              .recessedTitle,
+                        LuminaCardHeader(
+                          title: block.title ?? _typeLabel(block.type),
                         ),
                       ],
+                    )
+                  : Semantics(
+                      header: true,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            block.title ?? _typeLabel(block.type),
+                            style: LuminaTheme.of(context)
+                                .textTheme
+                                .recessedTitle,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-          ),
+            ),
           content,
         ],
       ),

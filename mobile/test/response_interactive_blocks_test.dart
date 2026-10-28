@@ -90,15 +90,17 @@ Map<String, dynamic> _table() => {
 Widget _host(
   Map<String, dynamic> data, {
   ValueChanged<String>? onPromptSelected,
+  double width = 240,
+  double textScale = 2,
 }) => MaterialApp(
   home: LuminaTheme(
     highPerformanceMode: true,
     child: MediaQuery(
-      data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+      data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
       child: Scaffold(
         body: SingleChildScrollView(
           child: SizedBox(
-            width: 240,
+            width: width,
             child: ResponseInteractiveBlock(
               data: data,
               onPromptSelected: onPromptSelected,
@@ -371,7 +373,10 @@ void main() {
         null,
       ),
     );
-    await tester.pumpWidget(_host(_table()));
+    await tester.pumpWidget(_host(_table(), width: 800, textScale: 1));
+    expect(find.byKey(const ValueKey('table-search')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('table-tools')));
+    await tester.pumpAndSettle();
     final table = tester.widget<DataTable>(find.byType(DataTable));
     table.columns.last.onSort!(2, true);
     await tester.pump();
@@ -382,7 +387,7 @@ void main() {
     expect(clipboard, '"姓名","分数"\r\n"Bob","2"\r\n"Alice","10"');
     await tester.enterText(find.byType(EditableText), 'Alice');
     await tester.pump();
-    expect(find.text('显示 1 / 2 行；点击列名排序'), findsOneWidget);
+    expect(find.text('1 / 2 条匹配'), findsOneWidget);
     await tester.ensureVisible(find.text('导出 CSV'));
     await tester.tap(find.text('导出 CSV'));
     await tester.pumpAndSettle();
@@ -399,7 +404,7 @@ void main() {
   testWidgets(
     'table rows open full readable details on a narrow large-text screen',
     (tester) async {
-      tester.view.physicalSize = const Size(240, 700);
+      tester.view.physicalSize = const Size(280, 700);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -407,9 +412,11 @@ void main() {
       final data = _table();
       data['columns'] = ['说明', '分数'];
       data['items'][0]['cells'][0] = detail;
-      await tester.pumpWidget(_host(data));
-      await tester.ensureVisible(find.text('展开行').first);
-      await tester.tap(find.text('展开行').first);
+      await tester.pumpWidget(_host(data, width: 240));
+      expect(find.byType(DataTable), findsNothing);
+      expect(find.byKey(const ValueKey('table-row-0')), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const ValueKey('table-row-0')));
+      await tester.tap(find.byKey(const ValueKey('table-row-0')));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
       final dialog = find.byType(AlertDialog);

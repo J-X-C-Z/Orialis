@@ -2,7 +2,7 @@
 
 Assistant replies may mix ordinary Markdown with closed code fences whose language is exactly `orialis-ui`. Each fence contains one JSON document. Multiple fences compose a larger answer; each document independently retains the 12-block and 32,768-byte limits. The document is stored unchanged in the ordinary message `content`; existing Gateway replies, final stream snapshots, sync and history carry the same content. No database migration or separate UI event is required.
 
-Use this format when interaction helps a comparison, data summary or plan. Simple answers remain ordinary text. The mobile implementation uses existing Lumina components and does not execute generated HTML or JavaScript.
+Use this format when interaction helps. Simple answers remain ordinary text. The mobile implementation uses existing Lumina components and does not execute generated HTML or JavaScript.
 
 ## Document
 
@@ -46,6 +46,24 @@ types and [the Board example](response-ui-v1.board.example.json) for `progress`,
 contains a compact Chinese example for the six types added here. Together these
 fixtures and the prompt example cover all 26 advertised types; each document
 remains independently bounded v1 JSON with a complete readable fallback.
+
+## Choosing a presentation
+
+Lead with a concise conclusion that can be scanned before opening controls. Use
+`timeline` for event histories and logs, `facts` for concise facts about one
+subject, and ordinary text or an `accordion` with a meaningful summary label for
+long narrative. Use `table` only when rows share the same fields and side-by-side
+comparison, sorting or CSV is useful. Multiple data points alone do not justify
+a table or a metrics-plus-chart pair. Each table row label must summarize its
+subject and change or result; an index, timestamp or “details” alone is not a
+useful label. Put the primary information first and avoid controls that repeat it.
+
+For example, report “备份完成，保留 7 天；搜索索引更新失败，3 条待重试” in
+the introduction and fallback, then use a timeline to show the event details:
+
+```json
+{"version":1,"title":"同步事件示例","fallback":"示例：10:05 备份完成并保留 7 天；10:07 搜索索引更新失败，3 条记录待重试。","blocks":[{"type":"timeline","items":[{"label":"备份完成：保留 7 天","time":"2030-01-02T10:05:00+08:00","detail":"示例事件；备份任务成功。"},{"label":"搜索索引更新失败：3 条待重试","time":"2030-01-02T10:07:00+08:00","detail":"示例事件；源数据仍保留，索引更新可重试。"}]}]}
+```
 
 ## Extended block constraints
 

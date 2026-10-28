@@ -347,6 +347,8 @@ class _ResponseChartPlotState extends State<ResponseChartPlot> {
         ],
         const SizedBox(height: 8),
         Semantics(
+          container: true,
+          explicitChildNodes: true,
           label: '${item['label']}，点击图表查看数值；也可展开查看数据',
           child: SizedBox(
             key: const ValueKey('response-chart-surface'),
@@ -378,7 +380,6 @@ class _ResponseChartPlotState extends State<ResponseChartPlot> {
             liveRegion: true,
             child: Text(_inspection!, style: theme.textTheme.titleSmall),
           ),
-        const Text('点击图表查看数值'),
         if (kind == 'radar')
           Wrap(
             spacing: 12,
