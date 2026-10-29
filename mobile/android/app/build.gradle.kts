@@ -71,7 +71,7 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        if (newsApp && providers.gradleProperty("target-platform").orNull == "android-arm64") {
+        if (providers.gradleProperty("target-platform").orNull == "android-arm64") {
             // Do not advertise other plugin ABIs without their Flutter runtime.
             ndk.abiFilters.clear()
             ndk.abiFilters.add("arm64-v8a")
