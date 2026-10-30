@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart' show MaterialApp;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
@@ -5,6 +8,7 @@ import 'package:orialis_mobile/features/memory/data/memory_repository.dart';
 import 'package:orialis_mobile/features/memory/domain/memory_record.dart';
 import 'package:orialis_mobile/features/memory/presentation/memory_page.dart';
 import 'package:orialis_mobile/features/chat/presentation/safe_markdown.dart';
+import 'package:orialis_mobile/features/chat/presentation/response_ui_view.dart';
 import 'package:url_launcher_platform_interface/link.dart';
 import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 
@@ -25,6 +29,25 @@ class FakeMemoryRepository extends MemoryRepository {
   bool fail = false;
   MemoryStatus captureStatus = const MemoryStatus(supported: true);
   int captureSettingsRequests = 0;
+  Map<String, dynamic> shortcuts = {
+    for (final entry in defaultMemoryShortcuts.entries)
+      entry.key: Map<String, dynamic>.from(entry.value),
+  };
+  final recordingStates = <bool>[];
+  bool failShortcuts = false;
+  @override
+  Future<Map<String, dynamic>> getShortcuts() async => shortcuts;
+  @override
+  Future<void> setShortcutRecording(bool recording) async =>
+      recordingStates.add(recording);
+  @override
+  Future<void> setShortcuts(Map<String, dynamic> value) async {
+    if (failShortcuts) {
+      throw PlatformException(code: 'conflict', message: '快捷键已被占用');
+    }
+    shortcuts = value;
+  }
+
   final records = <MemoryRecord>[
     MemoryRecord(
       id: 'bili',
@@ -73,6 +96,7 @@ Future<void> showMemory(
   WidgetTester tester,
   FakeMemoryRepository repository, {
   Future<void> Function(MemoryRecord)? analyze,
+  bool desktop = false,
 }) async {
   tester.view.physicalSize = const Size(430, 1000);
   tester.view.devicePixelRatio = 1;
@@ -88,13 +112,216 @@ Future<void> showMemory(
           ),
         ),
       ),
-      home: MemoryPage(repository: repository, onAnalyze: analyze),
+      home: MemoryPage(
+        repository: repository,
+        onAnalyze: analyze,
+        desktop: desktop,
+      ),
     ),
   );
   await tester.pumpAndSettle();
 }
 
 void main() {
+  String uiFence(Map<String, Object?> block, {int version = 1}) =>
+      '```orialis-ui\n${jsonEncode({
+        'version': version,
+        'title': '已整理重点',
+        'fallback': '先准备高质量数据，再检查模型输出。',
+        'blocks': [block],
+      })}\n```';
+
+  for (final field in ['summary', 'videoSummary']) {
+    testWidgets('search finds decoded UI fallback in $field', (tester) async {
+      final repository = FakeMemoryRepository();
+      addTearDown(repository.dispose);
+      repository.records[0] = MemoryRecord.fromMap({
+        ...repository.records[0].toMap(),
+        field: uiFence({
+          'type': 'facts',
+          'items': [
+            {'label': '重点', 'value': '数据质量'},
+          ],
+        }).replaceAll('高质量数据', r'\u9ad8\u8d28\u91cf\u6570\u636e'),
+      });
+      await showMemory(tester, repository);
+      await tester.enterText(find.byType(EditableText), '高质量数据');
+      await tester.pumpAndSettle();
+      expect(find.text('视频收藏'), findsOneWidget);
+      expect(find.text('今日菜单'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final desktop in [false, true]) {
+    testWidgets('memory renders facts and interactive video details on '
+        '${desktop ? 'desktop' : 'mobile'}', (tester) async {
+      final repository = FakeMemoryRepository();
+      addTearDown(repository.dispose);
+      repository.records[0] = MemoryRecord.fromMap({
+        ...repository.records[0].toMap(),
+        'analysisStatus': 'completed',
+        'summary':
+            '# 视频收藏\n\n优先检查数据质量。\n\n${uiFence({
+              'type': 'facts',
+              'items': [
+                {'label': '数据质量', 'value': '决定训练效果'},
+              ],
+            })}',
+        'videoStatus': 'analyzed',
+        'videoSummary': uiFence({
+          'type': 'accordion',
+          'items': [
+            {'label': '训练前检查', 'content': '先去除重复数据，再检查标签一致性。'},
+          ],
+        }),
+      });
+      var analyses = 0;
+      await showMemory(
+        tester,
+        repository,
+        desktop: desktop,
+        analyze: (_) async => analyses++,
+      );
+      expect(find.text('优先检查数据质量。'), findsOneWidget);
+      expect(find.textContaining('"blocks"'), findsNothing);
+      await tester.tap(find.text('视频收藏'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ResponseUiView), findsNWidgets(2));
+      expect(find.text('数据质量'), findsOneWidget);
+      expect(find.text('决定训练效果'), findsOneWidget);
+      final markdown = tester.widgetList<SafeMarkdownView>(
+        find.byType(SafeMarkdownView),
+      );
+      expect(markdown.every((view) => view.allowResponseUi), isTrue);
+      expect(
+        markdown.every(
+          (view) => view.onPromptSelected == null && view.actionScope == null,
+        ),
+        isTrue,
+      );
+      final toggle = find.byKey(const ValueKey('accordion-toggle-0'));
+      await tester.ensureVisible(toggle);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(find.text('先去除重复数据，再检查标签一致性。'), findsOneWidget);
+      expect(analyses, 0);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('UI-only memory uses readable fallback in list and detail', (
+    tester,
+  ) async {
+    final repository = FakeMemoryRepository();
+    addTearDown(repository.dispose);
+    repository.records[0] = MemoryRecord.fromMap({
+      ...repository.records[0].toMap(),
+      'summary':
+          '# 视频收藏\n\n${uiFence({
+            'type': 'facts',
+            'items': [
+              {'label': '重点', 'value': '训练数据'},
+            ],
+          }, version: 2)}',
+    });
+    await showMemory(tester, repository);
+    expect(find.text('先准备高质量数据，再检查模型输出。'), findsOneWidget);
+    expect(find.textContaining('"blocks"'), findsNothing);
+    await tester.tap(find.text('视频收藏'));
+    await tester.pumpAndSettle();
+    expect(find.text('先准备高质量数据，再检查模型输出。'), findsOneWidget);
+    expect(find.textContaining('"blocks"'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'shortcut recording rejects plain keys and duplicate combinations',
+    (tester) async {
+      final repository = FakeMemoryRepository();
+      await showMemory(tester, repository, desktop: true);
+      await tester.tap(find.text('自定义快捷键'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('memory-shortcut-screen')));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyX);
+      await tester.pump();
+      expect(find.text('请同时按住 ⌘、⌥ 或 ⌃ 中的至少一个键'), findsOneWidget);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump();
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(find.text('两项快捷键不能相同'), findsOneWidget);
+      expect(repository.shortcuts['screen']['key'], 'M');
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(repository.recordingStates, [true, false]);
+    },
+  );
+
+  testWidgets(
+    'desktop shortcut records combination, saves and restores registration',
+    (tester) async {
+      final repository = FakeMemoryRepository();
+      await showMemory(tester, repository, desktop: true);
+      await tester.tap(find.text('自定义快捷键'));
+      await tester.pumpAndSettle();
+      expect(repository.recordingStates, [true]);
+      await tester.tap(find.byKey(const ValueKey('memory-shortcut-screen')));
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump();
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(repository.shortcuts['screen']['key'], 'K');
+      expect(repository.recordingStates, [true, false]);
+      expect(find.textContaining('⌥⌘K 记录屏幕'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'shortcut save failure keeps dialog and cancel resumes old shortcuts',
+    (tester) async {
+      final repository = FakeMemoryRepository()..failShortcuts = true;
+      await showMemory(tester, repository, desktop: true);
+      await tester.tap(find.text('自定义快捷键'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('恢复默认'));
+      await tester.pump();
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(find.text('快捷键已被占用'), findsOneWidget);
+      expect(repository.recordingStates, [true]);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(repository.recordingStates, [true, false]);
+      expect(repository.shortcuts['screen']['key'], 'M');
+    },
+  );
+
+  testWidgets('desktop memory shows capture and global shortcut guidance', (
+    tester,
+  ) async {
+    final repository = FakeMemoryRepository();
+    await showMemory(tester, repository, desktop: true);
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel('记录屏幕'), findsOneWidget);
+    expect(find.textContaining('全局快捷键'), findsOneWidget);
+    expect(find.textContaining('控制中心截屏'), findsNothing);
+    await tester.tap(find.bySemanticsLabel('截屏设置'));
+    await tester.pumpAndSettle();
+    expect(repository.captureSettingsRequests, 1);
+  });
+
   testWidgets(
     'capture settings explains one-time access and opens only on request',
     (tester) async {

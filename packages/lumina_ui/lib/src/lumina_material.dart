@@ -102,6 +102,7 @@ class _LuminaMaterial extends CustomPainter {
     required this.contrast,
     required this.focused,
     required this.pressed,
+    this.pressProgress,
     this.glass = false,
     this.diffuseGlass = false,
     this.liquidGlass = false,
@@ -116,6 +117,9 @@ class _LuminaMaterial extends CustomPainter {
   final double radius;
   final LuminaSurfaceDepth depth;
   final bool shoulder, contrast, focused, pressed;
+  final double? pressProgress;
+  double get pressure =>
+      (pressProgress ?? (pressed ? 1.0 : 0.0)).clamp(0.0, 1.0);
   final double? shoulderWidth;
   final bool glass;
   final bool diffuseGlass;
@@ -269,7 +273,7 @@ class _LuminaMaterial extends CustomPainter {
         canvas,
         path,
         rect,
-        Offset(2, pressed ? 1 : 5),
+        Offset(2, 5 - 4 * pressure),
         shade.withValues(alpha: glass ? .14 : colors.toneValue(.22, .28)),
         6,
       );
@@ -278,7 +282,7 @@ class _LuminaMaterial extends CustomPainter {
     if (!inset && !glass && !contrast) {
       // A narrow solid lower edge adds material thickness without another blur.
       canvas.drawPath(
-        path.shift(Offset(0, pressed ? 1 : 3)),
+        path.shift(Offset(0, 3 - 2 * pressure)),
         Paint()..color = Color.lerp(tint, shade, colors.toneValue(.24, .42))!,
       );
     }
@@ -365,13 +369,13 @@ class _LuminaMaterial extends CustomPainter {
       // A refractive inner rim, not a card's left-hand highlight stripe.
       // Gradient strokes add lens depth without another blur or offscreen layer.
       final rimKey =
-          '${colors.darkProgress}|$diffuseGlass|${pressed ? 1 : 0}|${colors.accent.toARGB32()}|${rect.height}';
+          '${colors.darkProgress}|$diffuseGlass|${colors.accent.toARGB32()}|${rect.height}';
       final rimShiftKey = '$rimKey|shift';
       canvas.drawPath(
-        path.shift(Offset(0, pressed ? 1 : 2.5)),
+        path.shift(Offset(0, 2.5 - 1.5 * pressure)),
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = diffuseGlass ? 1 : (pressed ? 2 : 3.5)
+          ..strokeWidth = diffuseGlass ? 1 : (3.5 - 1.5 * pressure)
           ..shader = _cachedGradient(_rimGradientCache, rimKey, () {
             return ui.Gradient.linear(
               rect.topCenter,
@@ -479,7 +483,7 @@ class _LuminaMaterial extends CustomPainter {
         canvas,
         path,
         rect,
-        Offset(0, pressed ? 2 : 7),
+        Offset(0, 7 - 5 * pressure),
         shadow.withValues(alpha: colors.toneValue(.085, .22)),
         14,
       );
@@ -611,8 +615,8 @@ class _LuminaMaterial extends CustomPainter {
     const white = Color(0xFFFFFFFF);
     final wall = Color.lerp(base, colors.accent, .16)!;
     final contact = Color.lerp(base, const Color(0xFF152337), .28)!;
-    final height = pressed ? .35 : 1.4;
-    final face = path.shift(Offset(0, pressed ? .15 : -.7));
+    final height = 1.4 - 1.05 * pressure;
+    final face = path.shift(Offset(0, -.7 + .85 * pressure));
     final gradientKey = (rect.size, base, colors.accent, colors.darkProgress);
     canvas.save();
     canvas.clipPath(
@@ -766,42 +770,52 @@ class _LuminaMaterial extends CustomPainter {
   }
 
   void _paintNeumorphic(Canvas canvas, Path path, Rect rect) {
-    final inset = pressed || depth == LuminaSurfaceDepth.recessed;
+    final inset = depth == LuminaSurfaceDepth.recessed ? 1.0 : pressure;
     final base = Color.alphaBlend(tint, colors.surface).withValues(alpha: 1);
-    final light = inset
-        ? Color.lerp(base, const Color(0xFFFFFFFF), colors.toneValue(.62, .14))!
-        : colors.tone(const Color(0xFFFAFAFA), const Color(0xFF3B414B));
-    final shade = inset
-        ? Color.lerp(
-            Color.lerp(base, colors.accent, .10),
-            const Color(0xFF152337),
-            colors.toneValue(.22, .28),
-          )!
-        : colors.tone(const Color(0xFFB7B7B7), const Color(0xFF181B20));
-    final distance = math.min(
-      rect.shortestSide * (inset ? .055 : .075),
-      inset ? 3.0 : 4.0,
+    final raisedLight = colors.tone(
+      const Color(0xFFFAFAFA),
+      const Color(0xFF3B414B),
     );
-    final blur = distance * 1.35;
-    final offset = Offset(distance, distance);
-    final paint = Paint();
-    if (!cheapShadow) {
-      paint.maskFilter = MaskFilter.blur(BlurStyle.normal, blur);
-    }
-    if (!inset && !contrast) {
+    final raisedShade = colors.tone(
+      const Color(0xFFB7B7B7),
+      const Color(0xFF181B20),
+    );
+    final insetLight = Color.lerp(
+      base,
+      const Color(0xFFFFFFFF),
+      colors.toneValue(.62, .14),
+    )!;
+    final insetShade = Color.lerp(
+      Color.lerp(base, colors.accent, .10),
+      const Color(0xFF152337),
+      colors.toneValue(.22, .28),
+    )!;
+    // Keep the two blur masks fixed and blend their strengths. Animating the
+    // blur radius would allocate a new cached texture on every frame.
+    final raisedDistance = math.min(rect.shortestSide * .075, 4.0);
+    final insetDistance = math.min(rect.shortestSide * .055, 3.0);
+    final raisedOffset = Offset(raisedDistance, raisedDistance);
+    final insetOffset = Offset(insetDistance, insetDistance);
+    if (inset < 1 && !contrast) {
+      final light = raisedLight.withValues(alpha: .38 * (1 - inset));
+      final shade = raisedShade.withValues(alpha: .24 * (1 - inset));
       if (cheapShadow) {
-        final mask = _LuminaShadowMask.forShape(rect.size, radius, blur, false);
-        mask.paint(canvas, rect, -offset, light.withValues(alpha: .38));
-        mask.paint(canvas, rect, offset, shade.withValues(alpha: .24));
+        final mask = _LuminaShadowMask.forShape(
+          rect.size,
+          radius,
+          raisedDistance * 1.35,
+          false,
+        );
+        mask.paint(canvas, rect, -raisedOffset, light);
+        mask.paint(canvas, rect, raisedOffset, shade);
       } else {
-        canvas.drawPath(
-          path.shift(-offset),
-          paint..color = light.withValues(alpha: .38),
-        );
-        canvas.drawPath(
-          path.shift(offset),
-          paint..color = shade.withValues(alpha: .24),
-        );
+        final paint = Paint()
+          ..maskFilter = MaskFilter.blur(
+            BlurStyle.normal,
+            raisedDistance * 1.35,
+          );
+        canvas.drawPath(path.shift(-raisedOffset), paint..color = light);
+        canvas.drawPath(path.shift(raisedOffset), paint..color = shade);
       }
     }
     canvas.drawPath(
@@ -810,37 +824,64 @@ class _LuminaMaterial extends CustomPainter {
           ? (Paint()
               ..shader = _cachedGradient(
                 _bodyGradientCache,
-                (inset ? 'well' : 'raised', rect.size, base, shade, light),
+                (
+                  'depth',
+                  rect.size,
+                  base,
+                  raisedShade,
+                  raisedLight,
+                  insetShade,
+                  insetLight,
+                  inset,
+                ),
                 () => ui.Gradient.linear(
                   rect.topLeft,
                   rect.bottomRight,
                   [
-                    Color.lerp(base, shade, inset ? .16 : .045)!,
+                    Color.lerp(
+                      Color.lerp(base, raisedShade, .045),
+                      Color.lerp(base, insetShade, .16),
+                      inset,
+                    )!,
                     base,
-                    Color.lerp(base, light, inset ? .08 : .055)!,
+                    Color.lerp(
+                      Color.lerp(base, raisedLight, .055),
+                      Color.lerp(base, insetLight, .08),
+                      inset,
+                    )!,
                   ],
                   [0, .52, 1],
                 ),
               ))
           : (Paint()..color = base),
     );
-    if (inset && !contrast && cheapShadow) {
-      final mask = _LuminaShadowMask.forShape(rect.size, radius, blur, true);
+    if (inset > 0 && !contrast) {
+      final shade = insetShade.withValues(alpha: inset);
+      final light = insetLight.withValues(alpha: inset);
       canvas.save();
       canvas.clipPath(path);
-      mask.paint(canvas, rect, offset, shade);
-      mask.paint(canvas, rect, -offset, light);
-      canvas.restore();
-    } else if (inset && !contrast) {
-      // Clip the blurred outside shape into the well, without a saveLayer.
-      final outside = Path()
-        ..fillType = PathFillType.evenOdd
-        ..addRect(rect.inflate(40))
-        ..addPath(path, Offset.zero);
-      canvas.save();
-      canvas.clipPath(path);
-      canvas.drawPath(outside.shift(offset), paint..color = shade);
-      canvas.drawPath(outside.shift(-offset), paint..color = light);
+      if (cheapShadow) {
+        final mask = _LuminaShadowMask.forShape(
+          rect.size,
+          radius,
+          insetDistance * 1.35,
+          true,
+        );
+        mask.paint(canvas, rect, insetOffset, shade);
+        mask.paint(canvas, rect, -insetOffset, light);
+      } else {
+        final outside = Path()
+          ..fillType = PathFillType.evenOdd
+          ..addRect(rect.inflate(40))
+          ..addPath(path, Offset.zero);
+        final paint = Paint()
+          ..maskFilter = MaskFilter.blur(
+            BlurStyle.normal,
+            insetDistance * 1.35,
+          );
+        canvas.drawPath(outside.shift(insetOffset), paint..color = shade);
+        canvas.drawPath(outside.shift(-insetOffset), paint..color = light);
+      }
       canvas.restore();
     }
     if (focused || contrast) {
@@ -867,7 +908,7 @@ class _LuminaMaterial extends CustomPainter {
       old.shoulder != shoulder ||
       old.contrast != contrast ||
       old.focused != focused ||
-      old.pressed != pressed ||
+      old.pressure != pressure ||
       old.glass != glass ||
       old.diffuseGlass != diffuseGlass ||
       old.liquidGlass != liquidGlass ||

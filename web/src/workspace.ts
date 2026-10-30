@@ -7,6 +7,7 @@ type Page = "tasks" | "projects" | "chat";
 interface WorkspaceOptions {
   projectId?: string;
   openProjectTasks?: (projectId: string) => void;
+  onRefresh?: (refresh: () => Promise<void>) => void;
 }
 
 const field = (
@@ -203,7 +204,7 @@ function taskRows(tasks: Task[], projects: Project[]): string {
     .join("")}</div>`;
 }
 
-async function renderTasks(root: HTMLElement, projectId = ""): Promise<void> {
+async function renderTasks(root: HTMLElement, projectId = "", options: WorkspaceOptions = {}): Promise<void> {
   root.innerHTML = `<div class="toolbar"><p class="muted">查看进度、截止日期和项目归属。</p><div class="actions"><button class="secondary" type="button" data-refresh>刷新</button><button class="primary" type="button" data-new-task disabled>新建任务</button></div></div>
     <div class="task-filters">
       <label class="field task-search">搜索任务<input type="search" data-query placeholder="标题、备注或项目名称"></label>
@@ -288,10 +289,12 @@ async function renderTasks(root: HTMLElement, projectId = ""): Promise<void> {
   root.querySelector("[data-new-task]")!.addEventListener("click", () => {
     void openTaskEditor(root, null, projects, reload, filters.projectId === "none" ? "" : filters.projectId).catch((error) => showError(root, error));
   });
+  options.onRefresh?.(reload);
   await reload();
 }
 
 async function renderProjects(root: HTMLElement, options: WorkspaceOptions = {}): Promise<void> {
+  options.onRefresh?.(() => renderProjects(root, options));
   root.innerHTML = `<div class="toolbar"><div><p class="muted">把目标、截止日期和行动项放在一起。</p></div><div class="actions"><button class="secondary" type="button" data-refresh-projects>刷新</button><button class="primary" type="button" data-new-project>新建项目</button></div></div><div data-content><p class="muted">正在加载项目…</p></div>`;
   root
     .querySelector("[data-new-project]")!
@@ -381,7 +384,7 @@ export async function renderWorkspace(
   page: Page,
   options: WorkspaceOptions = {},
 ): Promise<void> {
-  if (page === "tasks") return renderTasks(root, options.projectId);
+  if (page === "tasks") return renderTasks(root, options.projectId, options);
   if (page === "projects") return renderProjects(root, options);
   return renderChat(root);
 }

@@ -1,5 +1,9 @@
+import '../features/calendar_sync/calendar_sync_controller.dart';
+
 import 'dart:async';
 import 'dart:io';
+
+import 'design/mobile_motion.dart';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
@@ -8,6 +12,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config/app_config.dart';
+import '../features/desktop_widgets/desktop_widget_sync.dart';
 import '../features/devices/application/device_center_controller.dart';
 import '../features/devices/data/device_data_source.dart';
 import '../core/database/app_database.dart';
@@ -20,6 +25,7 @@ import '../features/chat/application/chat_share_coordinator.dart';
 import '../pages/chat/chat_page.dart' show agentChatServiceProvider;
 import '../features/memory/application/memory_analyzer.dart';
 import '../features/memory/application/memory_coordinator.dart';
+import '../features/memory/application/memory_cloud_sync.dart';
 import '../features/memory/data/memory_repository.dart';
 import '../core/realtime/mobile_realtime_client.dart';
 import '../core/sync/sync_engine.dart';
@@ -42,6 +48,19 @@ final nodeHeartbeatLifecycleProvider = Provider<NodeHeartbeatLifecycle?>((ref) {
   unawaited(lifecycle.resumeLocalNode());
   ref.onDispose(lifecycle.dispose);
   return lifecycle;
+});
+
+final desktopWidgetSyncProvider = Provider<DesktopWidgetSync?>((ref) {
+  if (kIsWeb ||
+      defaultTargetPlatform != TargetPlatform.macOS ||
+      !ref.watch(desktopModeProvider)) {
+    return null;
+  }
+  final sync = DesktopWidgetSync(
+    ref.watch(taskRepositoryProvider).watchTasks(),
+  );
+  ref.onDispose(sync.dispose);
+  return sync;
 });
 
 final desktopModeProvider = Provider<bool>((ref) => false);
@@ -91,15 +110,25 @@ final memoryRepositoryProvider = Provider<MemoryRepository>((ref) {
 });
 
 final memoryCoordinatorProvider = Provider<MemoryCoordinator?>((ref) {
-  if (ref.watch(desktopModeProvider) ||
-      kIsWeb ||
-      defaultTargetPlatform != TargetPlatform.android) {
+  final desktop = ref.watch(desktopModeProvider);
+  if (kIsWeb ||
+      (defaultTargetPlatform != TargetPlatform.android &&
+          !(desktop &&
+              {
+                TargetPlatform.macOS,
+                TargetPlatform.windows,
+                TargetPlatform.linux,
+              }.contains(defaultTargetPlatform)))) {
     return null;
   }
   final repository = ref.watch(memoryRepositoryProvider);
   final coordinator = MemoryCoordinator(
     config: ref.watch(appConfigProvider),
     repository: repository,
+    cloudSync: MemoryCloudSync(
+      repository: repository,
+      agents: ref.watch(agentChatServiceProvider),
+    ),
     analyzer: MemoryAnalyzer(
       repository: repository,
       agents: ref.watch(agentChatServiceProvider),
@@ -218,6 +247,18 @@ final scheduleRepositoryProvider = Provider<ScheduleRepository>(
   (ref) => ScheduleRepository(delegate: ref.watch(eventRepositoryProvider)),
 );
 
+final calendarSyncProvider = ChangeNotifierProvider<CalendarSyncController>((
+  ref,
+) {
+  final controller = CalendarSyncController(
+    database: ref.watch(databaseProvider),
+    repository: ref.watch(eventRepositoryProvider),
+    scope: ref.watch(desktopDatabaseNameProvider),
+  );
+  unawaited(controller.start());
+  return controller;
+});
+
 final projectRepositoryProvider = Provider<ProjectRepository>(
   (ref) => ProjectRepository(ref.watch(databaseProvider)),
 );
@@ -259,9 +300,7 @@ final syncCoordinatorProvider = Provider<SyncCoordinator>((ref) {
     flushChatMessage: ref.watch(syncEngineProvider).flushChatMessage,
     realtime: ref.watch(realtimeClientProvider),
     chatRepository: ref.watch(chatRepositoryProvider),
-    localChanges: ref.watch(desktopModeProvider)
-        ? watchDesktopLocalChanges(ref.watch(databaseProvider))
-        : null,
+    localChanges: watchDesktopLocalChanges(ref.watch(databaseProvider)),
     onChatMessage: ref.watch(desktopModeProvider)
         ? null
         : (payload) async {
@@ -319,6 +358,10 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
     if (system != null) unawaited(system.start());
     final memory = ref.read(memoryCoordinatorProvider);
     _memoryCoordinator = memory;
+    memory?.onCaptureError = (message) {
+      final context = _router.routerDelegate.navigatorKey.currentContext;
+      if (mounted && context != null) showLuminaToast(context, message);
+    };
     memory?.onRoute = (route) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _router.go(route);
@@ -361,6 +404,9 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    ref
+        .read(syncCoordinatorProvider)
+        .setForeground(state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.resumed) {
       unawaited(ref.read(realtimeClientProvider).connect().catchError((_) {}));
       unawaited(ref.read(syncCoordinatorProvider).requestSync());
@@ -376,6 +422,7 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
     WidgetsBinding.instance.removeObserver(this);
     _systemIntegration?.onRoute = null;
     _memoryCoordinator?.onRoute = null;
+    _memoryCoordinator?.onCaptureError = null;
     _memoryCoordinator?.onScopeWillChange = null;
     _chatShareCoordinator?.onShare = null;
     _router.routeInformationProvider.removeListener(_rememberChatRoute);
@@ -386,6 +433,8 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
   @override
   Widget build(BuildContext context) {
     ref.watch(nodeHeartbeatLifecycleProvider);
+    ref.watch(desktopWidgetSyncProvider);
+    ref.watch(calendarSyncProvider.notifier);
     ref.listen(syncCoordinatorProvider, (previous, next) {
       unawaited(next.start());
     });
@@ -450,7 +499,12 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
                         child: Column(
                           children: [
                             const LegacyRecoveryNotice(),
-                            Expanded(child: child ?? const SizedBox.shrink()),
+                            Expanded(
+                              child: OrialisMobileMotionScope(
+                                enabled: !ref.watch(desktopModeProvider),
+                                child: child ?? const SizedBox.shrink(),
+                              ),
+                            ),
                           ],
                         ),
                       ),

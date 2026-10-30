@@ -48,7 +48,9 @@ export class ApiError extends Error {
   }
 }
 let token = sessionStorage.getItem("orialis.session") || "";
+let sessionVersion = 0;
 export function setToken(value: string) {
+  sessionVersion++;
   token = value;
   value
     ? sessionStorage.setItem("orialis.session", value)
@@ -62,6 +64,7 @@ export async function request<T>(
   method = "GET",
   body?: unknown,
 ): Promise<T> {
+  const version = sessionVersion;
   let response: Response;
   try {
     response = await fetch("/api/v1" + path, {
@@ -75,6 +78,7 @@ export async function request<T>(
   } catch {
     throw new Error("无法连接服务，请检查网络后重试。");
   }
+  if (version !== sessionVersion) throw new Error("登录状态已变更。");
   if (!response.ok) {
     let detail = "";
     try {
@@ -84,6 +88,7 @@ export async function request<T>(
           ? value.error
           : value.error?.message || value.message || "";
     } catch {}
+    if (version !== sessionVersion) throw new Error("登录状态已变更。");
     throw new ApiError(
       response.status,
       response.status === 409
@@ -93,7 +98,9 @@ export async function request<T>(
           : detail || `请求失败（${response.status}），请重试。`,
     );
   }
-  return response.status === 204 ? (undefined as T) : response.json();
+  const value = response.status === 204 ? (undefined as T) : await response.json();
+  if (version !== sessionVersion) throw new Error("登录状态已变更。");
+  return value;
 }
 export async function list<T>(path: string): Promise<T[]> {
   const items: T[] = [];

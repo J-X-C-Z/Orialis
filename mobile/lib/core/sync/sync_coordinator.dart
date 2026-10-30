@@ -16,6 +16,7 @@ class SyncCoordinator {
     this.onScheduleUpdate,
     this.flushChatMessage,
     this.localChangeDelay = const Duration(milliseconds: 250),
+    this.refreshInterval = const Duration(seconds: 30),
   });
 
   final Future<SyncState> Function() sync;
@@ -30,9 +31,12 @@ class SyncCoordinator {
   })?
   flushChatMessage;
   final Duration localChangeDelay;
+  final Duration refreshInterval;
   StreamSubscription<MobileEnvelope>? _events;
   StreamSubscription<void>? _localChanges;
   Timer? _localChangeTimer;
+  Timer? _refreshTimer;
+  bool _foreground = true;
   Future<SyncState>? _inFlight;
   final Set<Future<void>> _chatFlushes = {};
   bool _queued = false;
@@ -57,7 +61,23 @@ class SyncCoordinator {
       });
     });
     unawaited(realtime.connect().catchError((_) {}));
+    _scheduleRefresh();
     await requestSync();
+  }
+
+  void setForeground(bool foreground) {
+    _foreground = foreground;
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
+    if (foreground) _scheduleRefresh();
+  }
+
+  void _scheduleRefresh() {
+    if (!_started || _disposed || !_foreground || _refreshTimer != null) return;
+    // A missed push or a half-open socket must not leave a client stale.
+    _refreshTimer = Timer.periodic(refreshInterval, (_) {
+      if (_inFlight == null) unawaited(requestSync());
+    });
   }
 
   Future<SyncState> requestSync() {
@@ -91,7 +111,9 @@ class SyncCoordinator {
 
   Future<SyncState> _runSync() async {
     try {
-      return await sync();
+      return await Future<SyncState>.sync(sync);
+    } catch (_) {
+      return SyncState.error;
     } finally {
       _inFlight = null;
       if (_queued && !_disposed) {
@@ -131,6 +153,8 @@ class SyncCoordinator {
 
   Future<void> dispose() async {
     _disposed = true;
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
     _localChangeTimer?.cancel();
     _localChangeTimer = null;
     await _localChanges?.cancel();

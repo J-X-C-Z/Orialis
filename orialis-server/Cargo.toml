@@ -22,3 +22,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
 url = "2"
+openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }

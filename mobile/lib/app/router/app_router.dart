@@ -23,7 +23,7 @@ import '../../features/web_services/web_services_page.dart';
 
 StatefulShellBranch _chatBranch() => StatefulShellBranch(
   routes: [
-    GoRoute(
+    _animatedRoute(
       path: '/chat',
       builder: (context, state) => Consumer(
         builder: (context, ref, _) {
@@ -49,9 +49,9 @@ GoRouter buildRouter({bool desktop = false}) {
   return GoRouter(
     initialLocation: '/today',
     routes: [
-      GoRoute(path: '/auth', builder: (_, _) => const AuthPage()),
+      _animatedRoute(path: '/auth', builder: (_, _) => const AuthPage()),
       if (!desktop)
-        GoRoute(
+        _animatedRoute(
           path: '/memory',
           builder: (_, _) => Consumer(
             builder: (context, ref, _) => MemoryPage(
@@ -64,22 +64,28 @@ GoRouter buildRouter({bool desktop = false}) {
           ),
         ),
       if (!desktop)
-        GoRoute(path: '/system', builder: (_, _) => const SystemSettingsPage()),
+        _animatedRoute(
+          path: '/system',
+          builder: (_, _) => const SystemSettingsPage(),
+        ),
       if (!desktop)
-        GoRoute(path: '/wear', builder: (_, _) => const WearConnectionPage()),
-      GoRoute(path: '/devices', builder: (_, _) => const DeviceCenterPage()),
+        _animatedRoute(
+          path: '/wear',
+          builder: (_, _) => const WearConnectionPage(),
+        ),
+      _animatedRoute(
+        path: '/devices',
+        builder: (_, _) => const DeviceCenterPage(),
+      ),
       if (!desktop)
-        GoRoute(path: '/projects', builder: (_, _) => const ProjectsPage()),
+        _animatedRoute(
+          path: '/projects',
+          builder: (_, _) => const ProjectsPage(),
+        ),
       StatefulShellRoute(
         navigatorContainerBuilder: (context, shell, children) =>
             LuminaBranchTransition(
               index: shell.currentIndex,
-              // A 220 ms full-page translation is costly on 120 Hz screens:
-              // each frame has only 8.3 ms, and moving content forces the
-              // persistent glass navigation to sample a changing backdrop.
-              // Keep the local navigation indicator animation on those
-              // screens, but switch the page immediately.
-              animate: _animateBranchTransition(desktop),
               children: children,
             ),
         builder: (context, state, navigationShell) => desktop
@@ -88,7 +94,7 @@ GoRouter buildRouter({bool desktop = false}) {
         branches: [
           StatefulShellBranch(
             routes: [
-              GoRoute(
+              _animatedRoute(
                 path: '/today',
                 builder: (_, _) => desktop
                     ? const TodayPage()
@@ -98,7 +104,7 @@ GoRouter buildRouter({bool desktop = false}) {
           ),
           StatefulShellBranch(
             routes: [
-              GoRoute(
+              _animatedRoute(
                 path: '/events',
                 builder: (_, _) => desktop
                     ? const EventsPage()
@@ -109,7 +115,7 @@ GoRouter buildRouter({bool desktop = false}) {
           if (desktop)
             StatefulShellBranch(
               routes: [
-                GoRoute(
+                _animatedRoute(
                   path: '/projects',
                   builder: (_, _) => const ProjectsPage(),
                 ),
@@ -118,11 +124,11 @@ GoRouter buildRouter({bool desktop = false}) {
           if (!desktop) _chatBranch(),
           StatefulShellBranch(
             routes: [
-              GoRoute(
+              _animatedRoute(
                 path: '/calendar',
                 builder: (_, _) => const CalendarPage(),
                 routes: [
-                  GoRoute(
+                  _animatedRoute(
                     path: 'schedule/:id',
                     builder: (_, state) => CalendarPage(
                       initialScheduleId: state.pathParameters['id'],
@@ -137,13 +143,16 @@ GoRouter buildRouter({bool desktop = false}) {
           ),
           StatefulShellBranch(
             routes: [
-              GoRoute(path: '/profile', builder: (_, _) => const ProfilePage()),
+              _animatedRoute(
+                path: '/profile',
+                builder: (_, _) => const ProfilePage(),
+              ),
             ],
           ),
           if (desktop) ...[
             StatefulShellBranch(
               routes: [
-                GoRoute(
+                _animatedRoute(
                   path: '/news/aihot',
                   builder: (_, _) =>
                       const DesktopNewsPage(section: DesktopNewsSection.aiHot),
@@ -152,7 +161,7 @@ GoRouter buildRouter({bool desktop = false}) {
             ),
             StatefulShellBranch(
               routes: [
-                GoRoute(
+                _animatedRoute(
                   path: '/news/github',
                   builder: (_, _) =>
                       const DesktopNewsPage(section: DesktopNewsSection.github),
@@ -161,7 +170,7 @@ GoRouter buildRouter({bool desktop = false}) {
             ),
             StatefulShellBranch(
               routes: [
-                GoRoute(
+                _animatedRoute(
                   path: '/news/project',
                   builder: (_, _) => const DesktopNewsPage(
                     section: DesktopNewsSection.project,
@@ -171,25 +180,37 @@ GoRouter buildRouter({bool desktop = false}) {
             ),
             StatefulShellBranch(
               routes: [
-                GoRoute(
+                _animatedRoute(
                   path: '/services',
                   builder: (_, _) => const WebServicesPage(),
                 ),
               ],
             ),
             _chatBranch(),
+            StatefulShellBranch(
+              routes: [
+                _animatedRoute(
+                  path: '/memory',
+                  builder: (_, _) => Consumer(
+                    builder: (context, ref, _) => MemoryPage(
+                      key: ValueKey(ref.watch(desktopDatabaseNameProvider)),
+                      desktop: true,
+                      repository: ref.watch(memoryRepositoryProvider),
+                      onAnalyze: (record) async {
+                        await ref
+                            .read(memoryCoordinatorProvider)
+                            ?.retry(record);
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ],
         ],
       ),
     ],
   );
-}
-
-bool _animateBranchTransition(bool desktop) {
-  if (desktop) return true;
-  final views = WidgetsBinding.instance.platformDispatcher.views;
-  if (views.isEmpty) return true;
-  return views.first.display.refreshRate < 110;
 }
 
 class PlaceholderPage extends StatelessWidget {
@@ -205,3 +226,20 @@ class PlaceholderPage extends StatelessWidget {
     );
   }
 }
+
+GoRoute _animatedRoute({
+  required String path,
+  required Widget Function(BuildContext, GoRouterState) builder,
+  List<RouteBase> routes = const [],
+}) => GoRoute(
+  path: path,
+  routes: routes,
+  pageBuilder: (context, state) => CustomTransitionPage<void>(
+    key: state.pageKey,
+    transitionDuration: LuminaMotion.page,
+    reverseTransitionDuration: LuminaMotion.fast,
+    child: builder(context, state),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+        luminaPageTransition(context, animation, child),
+  ),
+);

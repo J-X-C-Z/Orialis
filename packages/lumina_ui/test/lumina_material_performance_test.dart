@@ -400,7 +400,7 @@ void main() {
   });
 
   for (final performance in [true, false]) {
-    testWidgets('ordinary tap ticker follows performance=$performance', (
+    testWidgets('ordinary taps animate then idle in performance=$performance', (
       tester,
     ) async {
       var taps = 0;
@@ -420,10 +420,7 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 120));
       await tester.pump();
-      expect(
-        tester.binding.transientCallbackCount,
-        performance ? 0 : greaterThan(0),
-      );
+      expect(tester.binding.transientCallbackCount, greaterThan(0));
       await press.up();
       await tester.pumpAndSettle();
       expect(taps, 1);

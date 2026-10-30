@@ -506,7 +506,7 @@ void main() {
             ),
           );
           await tester.scrollUntilVisible(
-            find.text('登录').last,
+            find.text('使用统一账号登录'),
             200,
             scrollable: find.byType(Scrollable).first,
           );
@@ -514,7 +514,7 @@ void main() {
           expect(tester.takeException(), isNull);
           tester.view.viewInsets = const FakeViewPadding(bottom: 300);
           await tester.pumpAndSettle();
-          await tester.ensureVisible(find.text('登录').last);
+          await tester.ensureVisible(find.text('使用统一账号登录'));
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
         },

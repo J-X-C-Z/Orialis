@@ -9,6 +9,15 @@ from .. import tools
 
 
 class ToolTests(unittest.TestCase):
+    def test_schedule_granularity_in_published_tools(self):
+        for name in ("create_schedule", "create_calendar_event", "update_schedule", "update_calendar_event"):
+            description = tools.HANDLERS[name][0]["description"]
+            self.assertIn("One event per activity in each date/time slot", description)
+            self.assertIn("continuous overnight train", description)
+        for name in ("create_schedules", "create_calendar_events"):
+            self.assertIn("separate activities on the same day", tools.HANDLERS[name][0]["description"])
+
+
     def test_schedule_read_uses_collection_pagination(self):
         pages = [
             {"ok": True, "data": {"items": [{"id": "other"}], "hasMore": True, "nextCursor": "next"}},

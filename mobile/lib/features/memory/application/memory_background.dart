@@ -8,6 +8,7 @@ import '../../chat/data/agent_chat_service.dart';
 import '../data/memory_repository.dart';
 import 'memory_analyzer.dart';
 import 'memory_coordinator.dart';
+import 'memory_cloud_sync.dart';
 
 /// Uses the same secure session and stable analysis IDs as the visible app.
 Future<void> runMemoryBackground({
@@ -17,6 +18,7 @@ Future<void> runMemoryBackground({
   MethodChannel lifecycle = const MethodChannel(
     'top.jxcz.orialis/memoryBackground',
   ),
+  bool syncCloud = true,
   Duration budget = const Duration(seconds: 330),
 }) async {
   MemoryRepository? inbox;
@@ -30,14 +32,20 @@ Future<void> runMemoryBackground({
     final appConfig = config ?? AppConfig();
     inbox = repository ?? MemoryRepository();
     service = agents ?? _BackgroundAgents(appConfig, lifecycle);
+    final cloud = syncCloud
+        ? MemoryCloudSync(repository: inbox, agents: service)
+        : null;
     final worker = coordinator = MemoryCoordinator(
       config: appConfig,
       repository: inbox,
+      cloudSync: cloud,
       analyzer: MemoryAnalyzer(repository: inbox, agents: service),
     );
     await (() async {
       await worker.start();
       await worker.scan();
+      await cloud?.sync();
+      if (cloud?.hasPending == true) retry = true;
     })().timeout(budget);
     completed = true;
   } on PlatformException {

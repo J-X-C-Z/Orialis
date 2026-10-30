@@ -28,8 +28,28 @@ class _Api extends OrialisApiClient {
   Completer<void>? gate;
   void Function()? onSubmit;
   Map<String, dynamic>? result;
+  final jobs = <String, Map<String, dynamic>>{};
+  bool holdFirst = false;
   @override
-  Future<Map<String, dynamic>?> memoryAnalysis(String id) async => result;
+  Future<Map<String, dynamic>?> memoryAnalysis(String id) async {
+    final job = jobs[id];
+    if (holdFirst && jobs.length == 1 && job != null) {
+      throw StateError(
+        'Must upload the next memory before waiting for this result',
+      );
+    }
+    if (job?['status'] == 'analyzing') {
+      return jobs[id] = {
+        ...job!,
+        'status': 'completed',
+        'content': '# 后台记忆\n\n已整理。',
+        'category': 'ai',
+        'videoStatus': 'none',
+      };
+    }
+    return job;
+  }
+
   @override
   Future<Map<String, dynamic>> createMemoryAnalysis({
     required String id,
@@ -40,7 +60,10 @@ class _Api extends OrialisApiClient {
     submissions++;
     onSubmit?.call();
     await gate?.future;
-    return result = {
+    if (holdFirst) {
+      return jobs[id] = {'id': id, 'status': 'analyzing'};
+    }
+    return jobs[id] = result = {
       'id': id,
       'status': 'completed',
       'content': '# 后台记忆\n\n已在不显示界面的情况下完成。',
@@ -68,6 +91,7 @@ void main() {
   final binding = TestDefaultBinaryMessengerBinding.instance;
   late String nativeScope;
   late Map<String, Object?> record;
+  late List<Map<String, Object?>> records;
   late List<String> inboxCalls;
   late List<Map<Object?, Object?>> finishes;
   late _Api api;
@@ -85,6 +109,7 @@ void main() {
       'urls': <String>[],
       'analysisStatus': 'pending',
     };
+    records = [record];
     inboxCalls = [];
     finishes = [];
     api = _Api();
@@ -107,19 +132,24 @@ void main() {
         case 'setScope':
           return null;
         case 'list':
-          return [record];
+          return records;
         case 'read':
-          return record;
+          return records.singleWhere(
+            (r) => r['id'] == (call.arguments as Map)['id'],
+          );
         case 'update':
+          final target = records.singleWhere(
+            (r) => r['id'] == (call.arguments as Map)['id'],
+          );
           final expected = (call.arguments as Map)['expectedAnalysisRequestId'];
           if (expected != null &&
-              (record['analysisRequestId'] ?? '') != expected) {
+              (target['analysisRequestId'] ?? '') != expected) {
             throw PlatformException(code: 'memory_analysis_changed');
           }
-          record.addAll(
+          target.addAll(
             Map<String, Object?>.from((call.arguments as Map)['fields'] as Map),
           );
-          return record;
+          return target;
         default:
           throw StateError('Unexpected UI/native call: ${call.method}');
       }
@@ -145,6 +175,7 @@ void main() {
   Future<void> run({Duration budget = const Duration(seconds: 1)}) {
     final config = _Config();
     return runMemoryBackground(
+      syncCloud: false,
       config: config,
       repository: MemoryRepository(channel: inboxChannel),
       agents: _Agents(config, api),
@@ -163,6 +194,21 @@ void main() {
     expect(inboxCalls, isNot(contains('capture')));
     expect(finishes.single, {'completed': true, 'retry': false});
   });
+
+  test(
+    'all captures upload before waiting for the first model result',
+    () async {
+      records.add({...record, 'id': 'captured-two'});
+      api.holdFirst = true;
+      await run();
+      expect(api.submissions, 2);
+      expect(
+        records.map((r) => r['analysisStatus']),
+        everyElement('completed'),
+      );
+      expect(finishes.single, {'completed': true, 'retry': false});
+    },
+  );
 
   for (final unclaimed in [null, '']) {
     test(

@@ -96,6 +96,7 @@ internal object SystemSnapshot {
         val lines = JSONArray()
         (widget["lines"] as? List<*>)?.take(5)?.forEach { lines.put((it as? String ?: "").take(256)) }
         val next = JSONObject().put("scope", scope).put("enabled", arguments["enabled"] == true)
+            .put("liveSchedules", ScheduleLiveTracking.validateRows(arguments["liveSchedules"]))
             .put("reminders", reminders).put("widget", JSONObject()
                 .put("date", (widget["date"] as? String ?: "").take(32))
                 .put("title", (widget["title"] as? String ?: "今日").take(128))
@@ -126,6 +127,7 @@ internal object SystemSnapshot {
     fun clear(context: Context) = withLock(context) {
         val previous = read(context)
         file(context).delete()
+        ScheduleLiveTracking.clear(context)
         cancelAlarms(context, previous)
         cancelNotifications(context, previous)
         TodayWidgetProvider.requestRefresh(context)
@@ -228,7 +230,10 @@ internal object SystemSnapshot {
         }
     }
 
-    fun restore(context: Context) = withLock(context) { restoreUnlocked(context) }
+    fun restore(context: Context) = withLock(context) {
+        ScheduleLiveTracking.refresh(context)
+        restoreUnlocked(context)
+    }
 
     private fun restoreUnlocked(context: Context) {
         val snapshot = read(context) ?: return

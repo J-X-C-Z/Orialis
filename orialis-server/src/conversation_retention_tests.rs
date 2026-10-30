@@ -33,16 +33,8 @@ async fn expires_only_conversations_without_activity_for_seven_days() {
         .unwrap();
     }
     for (id, conversation_id, created_at) in [
-        (
-            "old-message",
-            "old-with-old-message",
-            "2026-01-01T00:00:00Z",
-        ),
-        (
-            "recent-message",
-            "old-with-recent-message",
-            "2026-10-24T00:00:00Z",
-        ),
+        ("old-message", "old-with-old-message", "2026-01-01T00:00:00Z"),
+        ("recent-message", "old-with-recent-message", "2026-10-24T00:00:00Z"),
     ] {
         sqlx::query(
             "INSERT INTO messages (id,user_id,conversation_id,role,content,created_at,updated_at)
@@ -57,9 +49,7 @@ async fn expires_only_conversations_without_activity_for_seven_days() {
         .unwrap();
     }
 
-    expire_inactive_conversations(&pool, Some("u1"))
-        .await
-        .unwrap();
+    expire_inactive_conversations(&pool, Some("u1")).await.unwrap();
     let rows = sqlx::query_as::<_, (String, Option<String>)>(
         "SELECT id,deleted_at FROM conversations WHERE user_id='u1' ORDER BY id",
     )

@@ -56,6 +56,25 @@ request/delivery ID 并按能力协商执行。调度触发仍由 Hermes Cron �
 
 ## 配置
 
+### 西湖主模型与 Luna 备用路由
+
+正文模型由运行 Orialis 插件的 Hermes profile 配置。将
+[`westlake-fallback.yaml.example`](westlake-fallback.yaml.example) 合并到该 profile
+的 `config.yaml`，保留原西湖 `model` 及认证配置，并先确保该 profile 的
+`openai-codex` 已登录且能调用 `gpt-6-luna`。示例中的 `agent` 字段应合并进已有
+`agent`，不要覆盖其他设置。模型的实际标识为 `gpt-6-luna`。
+
+Hermes 原生 API 重试预算设为 3 次尝试（首次加 2 次重试）；服务错误重试耗尽后
+在当前执行上下文内切换 Luna，保留对话和已完成工具结果，不重投整条用户消息。
+连接故障可能先触发一次原生传输恢复；鉴权或不可重试错误可提前切换，空回复和
+仅思考无正文沿用 Hermes 原生恢复预算，耗尽后也尝试备用路由。这里的失败指
+调用错误或无有效正文，正常返回的拒答或“不知道”不会按内容自动改派模型。
+该配置只作用于正文，不改变首回应、进度摘要和视觉辅助模型。
+
+支持 `_refresh_fallback_model` 的 Hermes 网关会在下一轮创建/复用 Agent 时重读
+备用链，正在执行的轮次不受影响。旧版本需在当前任务结束后重启其 Hermes 网关。
+若已设置其他备用链，应先核对顺序；`fallback_providers` 优先于旧字段 `fallback_model`。
+
 手机工作区（目录、文本预览、上传下载、Git diff、可选交互终端）的配置与线协议见
 [`workspace-v1.md`](../../../protocol/agent-gateway/workspace-v1.md)。默认不共享任何目录。
 通过 `ORIALIS_WORKSPACES` 或平台 `extra.workspaces` 显式配置允许目录；终端还需

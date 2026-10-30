@@ -1,4 +1,3 @@
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import 'package:go_router/go_router.dart';
@@ -14,6 +13,8 @@ import 'package:orialis_mobile/app/design/lumina_compat.dart'
 import '../shared/page_parts.dart';
 import '../../core/config/app_config.dart';
 import '../../core/network/orialis_api_client.dart';
+import '../../core/network/unified_login.dart';
+import '../../core/network/unified_login_fields.dart';
 import '../../core/sync/sync_engine.dart';
 
 class ProfilePage extends ConsumerStatefulWidget {
@@ -396,59 +397,80 @@ class AuthPage extends ConsumerStatefulWidget {
 }
 
 class _AuthPageState extends ConsumerState<AuthPage> {
-  final _usernameController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _register = false;
+  UnifiedLogin? _login;
   bool _submitting = false;
+  bool _needsTotp = false;
   String? _error;
 
   @override
   void dispose() {
-    _usernameController.dispose();
-    _passwordController.dispose();
+    _login?.cancel();
     super.dispose();
   }
 
-  Future<void> _submit() async {
-    final username = _usernameController.text.trim();
-    final password = _passwordController.text;
-    if (username.length < 3 || password.length < 8) {
-      setState(() => _error = '用户名至少 3 个字符，密码至少 8 个字符');
-      return;
-    }
+  Future<void> _submit(String username, String password, String? totp) async {
+    if (_submitting) return;
     setState(() {
       _submitting = true;
       _error = null;
     });
-    var authenticated = false;
+    final config = ref.read(appConfigProvider);
+    // Capture the app scope so a page disposed during account drain can resume it.
+    final container = ProviderScope.containerOf(context, listen: false);
+    var suspended = false;
     try {
-      await suspendDesktopSync(ref);
-      final config = ref.read(appConfigProvider);
-      final api = OrialisApiClient(
-        baseUrl: await config.serverUrl(),
-        deviceId: await config.deviceId(),
-        config: config,
+      final server = await config.serverUrl();
+      if (!mounted) return;
+      final login = UnifiedLogin(baseUrl: server);
+      _login = login;
+      final result = await login.login(
+        username: username,
+        password: password,
+        totp: totp,
+        onConsent: (details) =>
+            confirmUnifiedLoginConsent(context, details, login),
       );
-      if (_register) {
-        await api.register(username: username, password: password);
-      } else {
-        await api.login(username: username, password: password);
+      if (!mounted) return;
+      if (await config.serverUrl() != server) {
+        throw const FormatException('服务器已更改，请重试');
       }
-      await config.setSessionUsername(username);
+      // Cancellation leaves the current account and sync running.
+      suspended = true;
+      await suspendDesktopSync(ref);
+      if (!mounted) return;
+      await config.setSessionToken(result.session.accessToken);
+      await config.setSessionUsername(result.username);
       await reloadDesktopAccount(ref);
-      authenticated = true;
+      suspended = false;
       if (mounted) context.pop(true);
-    } on DioException catch (error) {
-      final status = error.response?.statusCode;
+    } on UnifiedLoginCancelled {
+      // Cancellation is an ordinary exit; the primary button can retry.
+    } on UnifiedLoginTotpRequired catch (error) {
       if (mounted) {
-        setState(() => _error = status == 409 ? '用户名已存在' : '登录信息不正确或服务器暂不可用');
+        setState(() {
+          _needsTotp = true;
+          _error = error.message;
+        });
       }
+    } on FormatException catch (error) {
+      if (mounted) setState(() => _error = error.message);
     } catch (_) {
-      if (mounted) setState(() => _error = '操作失败，请稍后重试');
-    } finally {
-      if (!authenticated && mounted) {
-        await reloadDesktopAccount(ref);
+      if (mounted) {
+        setState(() => _error = '统一登录失败或超时，请重试');
       }
+    } finally {
+      if (suspended) {
+        if (mounted) {
+          await reloadDesktopAccount(ref);
+        } else {
+          final name = await config.desktopDatabaseName();
+          container.read(desktopDatabaseNameProvider.notifier).state = name;
+          container.invalidate(realtimeClientProvider);
+          container.invalidate(syncEngineProvider);
+          container.invalidate(syncCoordinatorProvider);
+        }
+      }
+      _login = null;
       if (mounted) setState(() => _submitting = false);
     }
   }
@@ -456,7 +478,7 @@ class _AuthPageState extends ConsumerState<AuthPage> {
   @override
   Widget build(BuildContext context) => OrialisPageScaffold(
     padding: EdgeInsets.zero,
-    title: _register ? '注册账户' : '登录账户',
+    title: '统一账号登录',
     leading: LuminaIconButton(
       tooltip: '返回',
       icon: const LuminaIcon(LuminaIcons.back),
@@ -476,26 +498,13 @@ class _AuthPageState extends ConsumerState<AuthPage> {
             children: [
               const SizedBox(height: 20),
               Text(
-                _register ? '从这里开始' : '欢迎回来',
+                '欢迎回来',
                 style: LuminaTheme.of(context).textTheme.headlineMedium,
               ),
               QuietLabel(
                 ref.watch(desktopModeProvider)
                     ? '同步任务、日程和项目。各账户本地内容分别保留。'
                     : '同步你的任务、日程和消息，本地内容始终保留。',
-              ),
-              LuminaTextField(
-                controller: _usernameController,
-                label: '用户名',
-                textInputAction: TextInputAction.next,
-              ),
-              LuminaTextField(
-                controller: _passwordController,
-                label: '密码',
-                obscureText: true,
-                onSubmitted: (_) {
-                  if (!_submitting) _submit();
-                },
               ),
               if (_error != null)
                 Text(
@@ -504,26 +513,17 @@ class _AuthPageState extends ConsumerState<AuthPage> {
                     color: LuminaTheme.of(context).colors.danger,
                   ),
                 ),
-              LuminaButton(
-                onPressed: _submitting ? null : _submit,
-                child: Text(
-                  _submitting
-                      ? '处理中…'
-                      : _register
-                      ? '注册并登录'
-                      : '登录',
+              UnifiedLoginFields(
+                onSubmit: _submit,
+                busy: _submitting,
+                needsTotp: _needsTotp,
+              ),
+              if (_submitting)
+                LuminaButton(
+                  primary: false,
+                  onPressed: () => _login?.cancel(),
+                  child: const Text('取消'),
                 ),
-              ),
-              LuminaButton(
-                primary: false,
-                onPressed: _submitting
-                    ? null
-                    : () => setState(() {
-                        _register = !_register;
-                        _error = null;
-                      }),
-                child: Text(_register ? '已有账户？去登录' : '还没有账户？去注册'),
-              ),
             ],
           ),
         ],

@@ -255,6 +255,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
       }),
     );
     if (!mounted || generation != _listGeneration) return;
+    final current = rows.where((row) => row.id == _conversationId).firstOrNull;
+    if (current != null && current.title != _conversationTitle) {
+      setState(() => _conversationTitle = current.title);
+    }
     _visibleTargets.clear();
     for (var i = 0; i < rows.length; i++) {
       _visibleTargets[rows[i].id] = cached[i];
@@ -2028,6 +2032,17 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
   }
 
+  Future<void> _viewSchedule() async {
+    if (_sending) return;
+    if (_controller.text.trim().isNotEmpty || _attachments.isNotEmpty) {
+      showLuminaToast(context, '请先发送或清空当前草稿，再查看日程。');
+      return;
+    }
+    _controller.text = chatSchedulePrompt;
+    _composerFocus.unfocus();
+    await _send();
+  }
+
   Future<void> _send() async {
     if (_sending || (_controller.text.trim().isEmpty && _attachments.isEmpty)) {
       return;
@@ -2582,6 +2597,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                                     ),
                                                 child: ChatEmptySuggestions(
                                                   onSelect: _fillPrompt,
+                                                  onSchedule: _sending
+                                                      ? null
+                                                      : _viewSchedule,
                                                 ),
                                               ),
                                           ],
@@ -3124,8 +3142,24 @@ class _ReplyGesture extends StatefulWidget {
   State<_ReplyGesture> createState() => _ReplyGestureState();
 }
 
-class _ReplyGestureState extends State<_ReplyGesture> {
-  double _distance = 0;
+class _ReplyGestureState extends State<_ReplyGesture>
+    with SingleTickerProviderStateMixin {
+  LuminaSpring? _spring;
+  LuminaSpring get _position =>
+      _spring ??= LuminaSpring(vsync: this, value: 0)
+        ..addListener(_motionChanged);
+  double get _distance => _spring?.value ?? 0;
+
+  void _motionChanged() => setState(() {});
+
+  void _returnToRest() =>
+      _spring?.settle(0, reducedMotion: LuminaTheme.motionReducedOf(context));
+
+  @override
+  void dispose() {
+    _spring?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -3135,16 +3169,21 @@ class _ReplyGestureState extends State<_ReplyGesture> {
     child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onLongPress: widget.onLongPress,
-      onHorizontalDragUpdate: (details) => setState(() {
+      onHorizontalDragStart: (_) => _spring?.stop(),
+      onHorizontalDragUpdate: (details) {
         final direction = Directionality.of(context) == TextDirection.rtl
             ? -1
             : 1;
-        _distance = (_distance + details.delta.dx * direction).clamp(0, 72);
-      }),
-      onHorizontalDragCancel: () => setState(() => _distance = 0),
+        _position.value = (_distance + details.delta.dx * direction).clamp(
+          0,
+          72,
+        );
+      },
+      onHorizontalDragCancel: _returnToRest,
       onHorizontalDragEnd: (_) {
-        if (_distance >= 48) widget.onReply();
-        setState(() => _distance = 0);
+        final reply = _distance >= 48;
+        _returnToRest();
+        if (reply) widget.onReply();
       },
       child: Stack(
         alignment: AlignmentDirectional.centerStart,
@@ -3374,7 +3413,7 @@ class _ModelSettingsSheetState extends State<_ModelSettingsSheet> {
 
   static const _commonLevels = <String, String>{
     'reset': '跟随默认',
-    'none': '关闭',
+    'none': '关闭思考',
     'low': '低',
     'medium': '中',
     'high': '高',
@@ -3442,7 +3481,9 @@ class _ModelSettingsSheetState extends State<_ModelSettingsSheet> {
     if (!mounted) return;
     setState(() {
       _busy = false;
-      _feedback = confirmed ? '当前会话已更新思考强度' : '尚未收到设置确认，请查看聊天中的指令结果';
+      _feedback = confirmed
+          ? (level == 'none' ? '当前会话已设为关闭思考' : '当前会话已更新思考强度')
+          : '尚未收到设置确认，请查看聊天中的指令结果';
       if (confirmed) _reasoning = level;
     });
   }
@@ -3488,7 +3529,10 @@ class _ModelSettingsSheetState extends State<_ModelSettingsSheet> {
         const SizedBox(height: 20),
         Text('思考强度', style: theme.textTheme.titleMedium),
         const SizedBox(height: 6),
-        Text('Hermes 会按当前模型能力执行；较高档位可能折算。', style: theme.textTheme.bodySmall),
+        Text(
+          '关闭思考仅对当前会话生效；跟随默认会恢复设备设置。模型不支持的档位可能折算。',
+          style: theme.textTheme.bodySmall,
+        ),
         const SizedBox(height: 10),
         Wrap(
           spacing: 8,

@@ -44,6 +44,8 @@ class XiaomiWearAdapter(context: Context) : WearAdapter {
     private var messageObserver: ((WearIncomingMessage) -> Unit)? = null
     private var pendingStatus: ((WearDiagnostics) -> Unit)? = null
     private var statusTimeout: Runnable? = null
+    private var reconnectAttempt = 0
+    private var reconnect: Runnable? = null
     private var cleanupCount = 0
     private val afterCleanup = mutableListOf<Pair<Long, () -> Unit>>()
     private data class PendingCall(val done: (WearFailure?) -> Unit, val timeout: Runnable)
@@ -53,19 +55,16 @@ class XiaomiWearAdapter(context: Context) : WearAdapter {
         override fun onServiceConnected() = onMain {
             if (disposed) return@onMain
             service = WearServiceState.ONLINE
-            if (enabled) publish()
+            if (enabled) {
+                publish()
+                if (session == null && pendingStatus == null) scheduleReconnect(0L)
+            }
         }
         override fun onServiceDisconnected() = onMain {
             if (disposed) return@onMain
             service = WearServiceState.OFFLINE
             if (enabled) {
-                revoke("wearable_service_disconnected")
-                nodes = emptyList()
-                nodeCount = null
-                installed = null
-                permitted = null
-                error = "wearable_service_disconnected"
-                finishStatus()
+                connectionLost("wearable_service_disconnected")
             }
         }
     }
@@ -92,6 +91,7 @@ class XiaomiWearAdapter(context: Context) : WearAdapter {
     private fun current(op: Long) = !disposed && enabled && operation == op && pendingStatus != null
 
     private fun begin(done: (WearDiagnostics) -> Unit, timeoutMs: Long = 8000L): Long {
+        cancelReconnect()
         val previous = pendingStatus
         pendingStatus = null
         statusTimeout?.let(main::removeCallbacks)
@@ -119,6 +119,39 @@ class XiaomiWearAdapter(context: Context) : WearAdapter {
         pendingStatus = null
         publish()
         callback?.invoke(snapshot())
+        if (session != null) reconnectAttempt = 0
+        else if (enabled && (selected != null || nodes.isEmpty()) &&
+            error !in setOf("permission_required", "permission_denied", "wear_app_not_installed")) {
+            scheduleReconnect()
+        }
+    }
+
+    private fun cancelReconnect() {
+        reconnect?.let(main::removeCallbacks)
+        reconnect = null
+    }
+
+    private fun scheduleReconnect(delayMs: Long? = null) {
+        if (disposed || !enabled || pendingStatus != null) return
+        if (delayMs == 0L) cancelReconnect()
+        if (reconnect != null) return
+        val delay = delayMs ?: minOf(1000L shl minOf(reconnectAttempt++, 5), 30000L)
+        reconnect = Runnable {
+            reconnect = null
+            if (!disposed && enabled && pendingStatus == null && session == null) refresh { }
+        }.also { main.postDelayed(it, delay) }
+    }
+
+    private fun connectionLost(reason: String) {
+        // Invalidate discovery callbacks before revoking this transport lifetime.
+        operation++
+        revoke(reason)
+        nodes = emptyList()
+        nodeCount = null
+        installed = null
+        permitted = null
+        error = reason
+        finishStatus()
     }
 
     private fun fail(op: Long, code: String) {
@@ -198,7 +231,7 @@ class XiaomiWearAdapter(context: Context) : WearAdapter {
             val node = selected
             if (node != null && !nodes.contains(node)) {
                 revoke("selected_node_disconnected")
-                selected = null
+                // Keep the explicit target for recovery; never choose another node.
                 installed = null
                 permitted = null
                 error = "selected_node_disconnected"
@@ -308,13 +341,7 @@ class XiaomiWearAdapter(context: Context) : WearAdapter {
                 if (!disposed && enabled && generation == lifetime && source == selected &&
                     item.type == DataItem.ITEM_CONNECTION.type &&
                     change.connectedStatus != DataSubscribeResult.RESULT_CONNECTION_CONNECTED) {
-                    revoke("selected_node_disconnected")
-                    nodes = nodes.filter { it != source }
-                    nodeCount = nodes.size
-                    installed = null
-                    permitted = null
-                    error = "selected_node_disconnected"
-                    finishStatus()
+                    connectionLost("selected_node_disconnected")
                 }
             }
         }
@@ -367,6 +394,8 @@ class XiaomiWearAdapter(context: Context) : WearAdapter {
 
     override fun disconnect(done: (WearFailure?) -> Unit) = onMain {
         enabled = false
+        cancelReconnect()
+        reconnectAttempt = 0
         operation++
         revoke("session_revoked")
         nodes = emptyList()
@@ -396,6 +425,9 @@ class XiaomiWearAdapter(context: Context) : WearAdapter {
         fun finish(failure: WearFailure?) {
             val call = pendingCalls.remove(id) ?: return
             main.removeCallbacks(call.timeout)
+            if (failure != null && code == "message_send_failed" && generation == lifetime) {
+                connectionLost("message_send_failed")
+            }
             call.done(if (generation == lifetime && session == expectedSession) failure
                 else WearFailure("session_revoked", "Wearable session changed"))
         }

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orialis_mobile/core/config/app_config.dart';
 import 'package:orialis_mobile/core/database/app_database.dart';
+import 'package:orialis_mobile/features/wear/wear_protocol.dart';
 import 'package:orialis_mobile/features/wear/wear_snapshot_producer.dart';
 
 class _Config extends AppConfig {
@@ -33,6 +34,89 @@ class _Config extends AppConfig {
 }
 
 void main() {
+  test(
+    '16 KiB snapshot includes a new schedule ahead of ended history',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final config = _Config('http://127.0.0.1:${server.port}');
+      final future = DateTime.now().toUtc().add(const Duration(days: 2));
+      final schedules = [
+        for (var i = 0; i < 400; i++)
+          {
+            'id': 'old-$i',
+            'title': '旧日程 ${'旧' * 80} $i',
+            'startAt': '2000-01-01T09:00:00Z',
+            'endAt': '2000-01-01T10:00:00Z',
+          },
+        {
+          'id': 'new-confirmed',
+          'title': '新确认日程',
+          'startAt': future.toIso8601String(),
+          'endAt': future.add(const Duration(hours: 1)).toIso8601String(),
+        },
+      ];
+      server.listen((request) async {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode(
+            request.uri.path == '/api/v1/auth/session'
+                ? {'userId': 'user-A', 'username': 'server-name'}
+                : {
+                    'cursor': 1,
+                    'tasks': [
+                      {
+                        'id': 'done',
+                        'title': '已完成',
+                        'due': '2000-01-01',
+                        'completed': true,
+                      },
+                      {
+                        'id': 'open',
+                        'title': '当前未完成',
+                        'due': DateTime.now().toIso8601String().substring(
+                          0,
+                          10,
+                        ),
+                        'completed': false,
+                      },
+                    ],
+                    'calendarEvents': schedules,
+                    'projects': [],
+                    'milestones': [],
+                  },
+          ),
+        );
+        await request.response.close();
+      });
+      final db = AppDatabase(executor: AppDatabase.inMemoryExecutor());
+      addTearDown(db.close);
+
+      final preview = await WearSnapshotProducer(db, config).read();
+      final organizer = (preview.snapshot['view'] as Map)['organizer'] as Map;
+      final includedSchedules = organizer['schedules'] as List;
+      final includedTasks = organizer['tasks'] as List;
+      final coverage = organizer['coverage'] as Map;
+
+      expect(preview.accountScopeVerified, isTrue);
+      expect(preview.bytes, lessThanOrEqualTo(16384));
+      expect(preview.bytes, lessThanOrEqualTo(WearProtocol.maxSnapshotBytes));
+      expect(preview.total['schedules'], 401);
+      expect(preview.included['schedules'], lessThan(401));
+      expect(
+        includedSchedules.any((row) => row['id'] == 'new-confirmed'),
+        isTrue,
+      );
+      expect(includedSchedules.any((row) => row['id'] == 'old-399'), isFalse);
+      expect(includedTasks.first['id'], 'open');
+      expect(coverage['schedules'], {
+        'included': preview.included['schedules'],
+        'total': 401,
+      });
+      expect(coverage['truncated'], isTrue);
+    },
+  );
+
   for (final scenario in [
     'success',
     'unauthorized',

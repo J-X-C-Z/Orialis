@@ -59,15 +59,19 @@ class LuminaRadio<T> extends StatelessWidget {
             child: ExcludeSemantics(
               child: SizedBox.square(
                 dimension: 26,
-                child: LuminaSurface(
+                child: _LuminaSelectionSurface(
                   padding: const EdgeInsets.all(6),
                   radius: 13,
                   glass: selected && enabled,
-                  depth: LuminaSurfaceDepth.raised,
                   color: selected && enabled
                       ? theme.colors.accentSoft
                       : theme.colors.recessedSurface,
-                  child: DecoratedBox(
+                  child: AnimatedContainer(
+                    key: const ValueKey('lumina-radio-dot'),
+                    duration: LuminaTheme.motionReducedOf(context)
+                        ? Duration.zero
+                        : LuminaMotion.fast,
+                    curve: luminaEaseOut,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: selected
@@ -200,7 +204,7 @@ class LuminaMultiSegmented<T> extends StatelessWidget {
                               focused ||
                               states.contains(m.WidgetState.hovered) ||
                               states.contains(m.WidgetState.pressed);
-                          return LuminaSurface(
+                          return _LuminaSelectionSurface(
                             padding: EdgeInsets.zero,
                             glass: active,
                             diffuseGlass: active,
@@ -372,11 +376,10 @@ class LuminaChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = LuminaTheme.of(context);
     return LuminaMaterialBridge(
-      child: LuminaSurface(
+      child: _LuminaSelectionSurface(
         padding: EdgeInsets.zero,
         glass: selected,
         diffuseGlass: selected,
-        depth: LuminaSurfaceDepth.raised,
         radius: LuminaControlSize.capsuleRadius,
         color: selected ? theme.colors.accentSoft : theme.colors.surface,
         child: m.RawChip(
@@ -386,7 +389,7 @@ class LuminaChip extends StatelessWidget {
           onDeleted: onDeleted,
           tapEnabled: onSelected != null,
           isEnabled: onSelected != null || onDeleted != null,
-          showCheckmark: selected,
+          showCheckmark: true,
           checkmarkColor: theme.colors.accent,
           labelStyle: theme.textTheme.labelMedium,
           deleteIcon: Semantics(
@@ -422,21 +425,22 @@ class LuminaChip extends StatelessWidget {
   }
 }
 
-/// A positioned surface contributes no speculative intrinsic measurements.
-/// Flutter menus measure their children before laying out the popup.
-class _LuminaMenuGlass extends StatelessWidget {
-  const _LuminaMenuGlass({
+/// Cross-fade only the skin so selection changes keep native control state.
+/// Positioned paint also leaves menu intrinsic measurement to its content.
+class _LuminaSelectionSurface extends StatelessWidget {
+  const _LuminaSelectionSurface({
     required this.child,
     required this.radius,
     required this.color,
     this.glass = false,
+    this.diffuseGlass = false,
     this.liquidGlass,
     this.padding = EdgeInsets.zero,
   });
   final Widget child;
   final double radius;
   final Color color;
-  final bool glass;
+  final bool glass, diffuseGlass;
   final bool? liquidGlass;
   final EdgeInsetsGeometry padding;
   @override
@@ -445,14 +449,24 @@ class _LuminaMenuGlass extends StatelessWidget {
       Positioned.fill(
         child: IgnorePointer(
           child: ExcludeSemantics(
-            child: LuminaSurface(
-              padding: EdgeInsets.zero,
-              depth: LuminaSurfaceDepth.raised,
-              glass: glass,
-              liquidGlass: liquidGlass,
-              color: color,
-              radius: radius,
-              child: const SizedBox.expand(),
+            child: AnimatedSwitcher(
+              key: const ValueKey('lumina-selection-surface-transition'),
+              duration: LuminaTheme.motionReducedOf(context)
+                  ? Duration.zero
+                  : LuminaMotion.fast,
+              switchInCurve: luminaEaseOut,
+              switchOutCurve: luminaEaseOut,
+              child: LuminaSurface(
+                key: ValueKey((color, glass, diffuseGlass, liquidGlass)),
+                padding: EdgeInsets.zero,
+                depth: LuminaSurfaceDepth.raised,
+                glass: glass,
+                diffuseGlass: diffuseGlass,
+                liquidGlass: liquidGlass,
+                color: color,
+                radius: radius,
+                child: const SizedBox.expand(),
+              ),
             ),
           ),
         ),
@@ -491,7 +505,7 @@ m.ButtonStyle _luminaMenuButtonStyle(BuildContext context) {
           focused ||
           states.contains(m.WidgetState.hovered) ||
           states.contains(m.WidgetState.pressed);
-      return _LuminaMenuGlass(
+      return _LuminaSelectionSurface(
         padding: EdgeInsets.zero,
         radius: 14,
         glass: active,
@@ -582,7 +596,7 @@ class LuminaMenuAnchor extends StatelessWidget {
             SizedBox(
               width: ((MediaQuery.maybeOf(context)?.size.width ?? 400) - 32)
                   .clamp(64.0, 280.0),
-              child: _LuminaMenuGlass(
+              child: _LuminaSelectionSurface(
                 color: LuminaTheme.of(context).colors.raisedSurface,
                 liquidGlass: false,
                 radius: 22,
@@ -955,6 +969,11 @@ class _LuminaSliderValue extends m.SliderComponentShape {
       height: height,
     );
     final body = RRect.fromRectAndRadius(bubble, const Radius.circular(14));
+    // Fade the entire indicator, including its label, on press and release.
+    context.canvas.saveLayer(
+      bubble.inflate(2),
+      Paint()..color = Color.fromRGBO(255, 255, 255, activationAnimation.value),
+    );
     context.canvas.drawRRect(
       body,
       Paint()..color = sliderTheme.valueIndicatorColor!,
@@ -970,5 +989,6 @@ class _LuminaSliderValue extends m.SliderComponentShape {
       context.canvas,
       bubble.center - Offset(labelPainter.width / 2, labelPainter.height / 2),
     );
+    context.canvas.restore();
   }
 }

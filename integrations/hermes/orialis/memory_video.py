@@ -258,6 +258,10 @@ class VideoEvidence:
         return {"status": self.status, "sourceUrl": self.source_url,
                 "metadata": self.metadata, "captions": self.captions,
                 "frameTimesSeconds": [frame[0] for frame in self.frames],
+                "evidenceCoverage": {
+                    "hasCaptions": bool(self.captions), "frameCount": len(self.frames),
+                    "continuousVideo": False, "audioUnderstood": False,
+                },
                 "limitations": "字幕仅代表平台提供的文字；画面为故事板抽样帧，不代表完整观看或已理解音频。",
                 "error": self.error}
 
@@ -286,9 +290,16 @@ def _frames(http, bvid, cid, duration):
     sheets = snapshot.get("image") or []
     if not entries or not sheets:
         return []
-    covered = min(duration, max(stamp for stamp, _ in entries)) if duration > 0 else max(stamp for stamp, _ in entries)
+    entries = sorted((stamp, index) for stamp, index in entries
+                     if duration <= 0 or stamp <= duration)
+    if not entries:
+        return []
+    covered = entries[-1][0]
+    # Include opening and ending; allocate more evidence to longer videos.
+    count = min(24, max(8, math.ceil(covered / 30) + 1))
     selected = dict((index, stamp) for stamp, index in (
-        min(entries, key=lambda entry: abs(entry[0] - covered * fraction)) for fraction in (.25, .5, .75)
+        min(entries, key=lambda entry: abs(entry[0] - covered * step / (count - 1)))
+        for step in range(count)
     ))
     width, height = int(snapshot.get("img_x_size") or 480), int(snapshot.get("img_y_size") or 270)
     if not 0 < width <= 1920 or not 0 < height <= 1080:
@@ -404,16 +415,22 @@ def collect_video(source_urls, *, detected_bvid=None, search_title=None, search_
                     if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end < start or end > latest:
                         raise VideoUnavailable("平台字幕时间与视频分段不一致，已弃用该字幕轨")
                 lines = []
-                size = 0
-                for segment in body[:3000]:
+                for segment in sorted(body, key=lambda item: float(item["from"])):
                     text = str(segment.get("content") or "").strip()[:1000]
                     if not text:
                         continue
                     line = f"[{float(segment.get('from') or 0):.1f}s] {text}"
-                    size += len(line.encode("utf-8"))
-                    if size > 60000:
-                        break
                     lines.append(line)
+                total = len(lines)
+                # Retain evidence across the whole timeline when text exceeds budget.
+                while sum(len(line.encode("utf-8")) + 1 for line in lines) > 60000 and len(lines) > 1:
+                    target = max(2, len(lines) // 2)
+                    lines = [lines[round(i * (len(lines) - 1) / (target - 1))]
+                             for i in range(target)]
+                result.metadata["captionCoverage"] = {
+                    "totalSegments": total, "includedSegments": len(lines),
+                    "complete": len(lines) == total,
+                }
                 if lines and all(re.fullmatch(r"[♪♫\s]*(?:音乐|music|BGM)[♪♫\s]*", line.partition("] ")[2], re.IGNORECASE) for line in lines):
                     lines = []
                     caption_error = "平台字幕仅包含音乐标记，改用视频抽样画面"
@@ -422,8 +439,14 @@ def collect_video(source_urls, *, detected_bvid=None, search_title=None, search_
             caption_error = str(error)
         except (OSError, ValueError, KeyError, TypeError, HTTPException):
             pass
-        if not result.captions:
+        try:
             result.frames = _frames(http, bvid, cid, duration)
+        except Exception:
+            if not result.captions:
+                raise
+            result.metadata["visualWarning"] = "画面读取失败，本次仅取得字幕证据"
+        if caption_error:
+            result.metadata["captionWarning"] = caption_error
         if result.captions or result.frames:
             result.status = "analyzed"
         else:

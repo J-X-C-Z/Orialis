@@ -64,6 +64,13 @@ function demoSnapshot() {
       { id: 'demo-nas', name: '家中 NAS', platform: 'NAS', status: 'unknown' }
     ] } }
 }
+function syncTimestamp(value, offset) {
+  const epoch = Date.parse(value)
+  if (!isFinite(epoch)) return '上次同步时间未知'
+  const knownOffset = typeof offset === 'number' && isFinite(offset)
+  const local = new Date(epoch + (knownOffset ? offset : 0) * 60000)
+  return '上次同步 ' + local.toISOString().replace('T', ' ').slice(0, 19) + (knownOffset ? '' : ' UTC')
+}
 function view() {
   const current = demo ? demoSnapshot() : snapshot
   const data = current && current.view && typeof current.view === 'object' ? current.view : {}
@@ -87,13 +94,14 @@ function view() {
   const tasks = empty ? [] : list(data.tasks, 'task')
   const organizerData = demo ? demoOrganizer : organizer.normalize(empty ? null : data.organizer)
   return {
+    versionLabel: '手环 1.3.0 · 适配手机 1.3.0',
     cacheLoading: cacheLoading && !current, demo, compact, haptics, reducedMotion, stale, mock, organizer: organizerData, hasSnapshot: !!current, tasks, commands: empty ? [] : list(data.commands, 'command'), devices: empty ? [] : deviceList,
     title: text(current && current.title, 80), targetId, previewTargetId: previewId,
     sourceShort: demo ? '演示数据' : mock ? '手机演示数据' : empty ? '无数据' : current ? (stale ? '缓存数据' : '手机同步') : '无数据',
     targetName: target ? target.name : targetId ? '目标资料待同步' : '尚未选择目标',
     phoneLabel: STATUS[states.phone], orialisLabel: STATUS[states.orialis], targetLabel: STATUS[states.target], states,
     provenance: demo ? '演示数据 · 只读预览' : mock ? '手机演示数据 · 只读' : empty ? '无数据 · 手机快照为空' : current ? (stale ? '缓存数据 · 只读' : '手机同步 · 只读') : '无数据 · 等待手机同步',
-    syncLabel: timestamp ? '上次同步 ' + timestamp.replace('T', ' ').slice(0, 19) : '上次同步时间未知',
+    syncLabel: syncTimestamp(timestamp, organizerData.utcOffsetMinutes),
     scopeLabel: !demo && current && scopeKey(current.scope) ? '会话尚未通过真机验收' : '未验证会话 · 操作待接入',
     currentTask: tasks[0] || null,
     connectionStatus: diagnostic.connectionStatus, detail: diagnostic.detail,

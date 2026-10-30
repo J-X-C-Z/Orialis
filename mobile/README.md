@@ -56,7 +56,7 @@ flutter build macos --release --target lib/main_desktop.dart   --dart-define=ORI
 
 ## Windows
 
-在已配置 Flutter 的 Windows PowerShell 中运行：
+从 Visual Studio 的 **x64 Native Tools Command Prompt** 启动 PowerShell，再进入 `mobile/` 运行以下命令。PDF 组件需要该开发环境提供的 Windows SDK 头文件和库路径；只让 `flutter doctor` 通过仍可能在编译时找不到 `windows.h`。
 
 ```powershell
 flutter run -d windows -t lib/main_desktop.dart

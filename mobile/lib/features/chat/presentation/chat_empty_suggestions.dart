@@ -1,11 +1,23 @@
-import 'package:flutter/material.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
-/// Suggestions only fill a draft through [onSelect]; they never send a message.
+/// Ordinary suggestions fill a draft; the schedule action starts a read-only query.
+const chatSchedulePrompt =
+    '请帮我快捷查看日程：先发现并使用当前可用的数据来源，'
+    '读取最近7天消息中枢的消息，以及其他已接入且有权限访问的通知、笔记、记忆和已有日历内容。'
+    '以当前本地日期和时区为准，整理今天及未来7天的课程、会议、活动、截止时间和待办。'
+    '合并重复内容，按时间排列，标明每项的来源、时间和地点；时间不明确或冲突的事项单列为待确认。'
+    '先给出今天最需要关注的安排，再展示近期日程。无法访问的来源请明确说明，不要猜测或把未读取的来源说成已读取。'
+    '本次仅查看和整理，不创建、修改日程或发送消息。';
+
 class ChatEmptySuggestions extends StatelessWidget {
-  const ChatEmptySuggestions({required this.onSelect, super.key});
+  const ChatEmptySuggestions({
+    required this.onSelect,
+    this.onSchedule,
+    super.key,
+  });
 
   final ValueChanged<String> onSelect;
+  final VoidCallback? onSchedule;
 
   @override
   Widget build(BuildContext context) {
@@ -19,7 +31,32 @@ class ChatEmptySuggestions extends StatelessWidget {
           child: Text('从一个想法开始', style: theme.textTheme.titleSmall),
         ),
         const SizedBox(height: 4),
-        Text('选择方向，编辑后再发送', style: theme.textTheme.bodySmall),
+        Text('一键查看日程，或选择方向开始提问', style: theme.textTheme.bodySmall),
+        const SizedBox(height: LuminaSpacing.compact),
+        LuminaButton(
+          key: const ValueKey('chat-suggestion-日程'),
+          primary: false,
+          onPressed: onSchedule,
+          child: Row(
+            children: [
+              LuminaIcon(LuminaIcons.calendar, color: theme.colors.accent),
+              const SizedBox(width: LuminaSpacing.tight),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('查看日程', style: theme.textTheme.labelMedium),
+                    const SizedBox(height: 4),
+                    Text(
+                      '读取近期消息与其他来源，整理近期安排',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: LuminaSpacing.compact),
         LayoutBuilder(
           builder: (context, constraints) {

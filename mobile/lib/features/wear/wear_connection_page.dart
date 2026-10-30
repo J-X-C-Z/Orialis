@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show OrialisPageScaffold;
+
 import '../../pages/shared/page_parts.dart';
 import 'wear_protocol.dart';
 import 'wear_transport.dart';
@@ -153,6 +154,9 @@ class _WearConnectionPageState extends ConsumerState<WearConnectionPage>
                   title: '同步到手环',
                   child: ContentStack(
                     children: [
+                      const QuietLabel(
+                        '连接就绪时，当前账户已确认的任务、日程、项目与里程碑变更会自动同步；重连后自动更新最新内容。',
+                      ),
                       const QuietLabel('今日、事件、日历、项目与我的的数据副本；不包含聊天、附件或凭据。'),
                       if (state.snapshot case final preview?) ...[
                         Text(preview.sourceLabel),
@@ -180,7 +184,7 @@ class _WearConnectionPageState extends ConsumerState<WearConnectionPage>
                         if (preview.truncated)
                           const QuietLabel('容量有限，当前为部分内容；未收入的记录没有删除或修改。'),
                       ] else
-                        const QuietLabel('先刷新内容，再同步到手环。'),
+                        const QuietLabel('连接就绪后会自动读取并同步，也可手动刷新内容。'),
                       if (state.snapshot != null &&
                           !state.snapshot!.accountScopeVerified)
                         const QuietLabel('当前为本地预览。请登录并连接服务，读取当前账户内容后再同步。'),
@@ -205,10 +209,11 @@ class _WearConnectionPageState extends ConsumerState<WearConnectionPage>
                                     )
                                 ? null
                                 : manager.sendCurrentSnapshot,
-                            child: const Text('同步到手环'),
+                            child: const Text('手动同步'),
                           ),
                         ],
                       ),
+                      const QuietLabel('如内容尚未更新，可刷新内容后手动同步。'),
                       const QuietLabel('同步完成表示手环已保存内容，可离线查看；不会修改手机上的任务或日程。'),
                     ],
                   ),
@@ -236,7 +241,7 @@ class _WearConnectionPageState extends ConsumerState<WearConnectionPage>
                             : manager.ping,
                         child: const Text('检查消息连接'),
                       ),
-                      const QuietLabel('断开、换账户或换手环后需要重新连接和同步。'),
+                      const QuietLabel('暂时掉线会自动重连并同步；主动断开或更换账户后，请重新连接并选择手环。'),
                     ],
                   ),
                 ),

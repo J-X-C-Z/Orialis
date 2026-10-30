@@ -7,11 +7,11 @@ void main() {
   testWidgets('navigation edge compresses once and releases inside the well', (
     tester,
   ) async {
-    var haptics = 0;
-    LuminaHaptics.confirmHandler = () async {
-      haptics++;
+    final haptics = <String>[];
+    LuminaHaptics.effectHandler = (effect) async {
+      haptics.add(effect);
     };
-    addTearDown(() => LuminaHaptics.confirmHandler = null);
+    addTearDown(() => LuminaHaptics.effectHandler = null);
     await tester.pumpWidget(
       harness(
         Center(
@@ -31,7 +31,7 @@ void main() {
     final start = tester.getTopLeft(well) + const Offset(50, 24);
     final gesture = await tester.startGesture(start);
     await tester.pump(const Duration(milliseconds: 600));
-    expect(haptics, 1, reason: 'drag pickup');
+    expect(haptics, ['dragStart'], reason: 'drag pickup');
     await gesture.moveTo(start - const Offset(100, 0));
     await tester.pump();
     final deformation = tester.widget<Transform>(
@@ -44,7 +44,10 @@ void main() {
     );
     await gesture.moveTo(start - const Offset(120, 0));
     await tester.pump();
-    expect(haptics, 2); // one pickup and one edge contact
+    expect(haptics, [
+      'dragStart',
+      'thresholdActivate',
+    ]); // one pickup and one edge contact
     await gesture.up();
     await tester.pumpAndSettle();
     expect(

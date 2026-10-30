@@ -59,6 +59,47 @@ class FakeHTTP:
 
 
 class VideoEvidenceTests(unittest.TestCase):
+    def test_visual_failure_preserves_valid_captions(self):
+        http = FakeHTTP()
+        original = http.data
+        def data(path, params):
+            if path.endswith("/videoshot"):
+                raise VideoUnavailable("平台暂不可用")
+            return original(path, params)
+        http.data = data
+        evidence = collect_video([URL], http=http)
+        self.assertEqual(evidence.status, "analyzed")
+        self.assertTrue(evidence.captions)
+        self.assertFalse(evidence.frames)
+        self.assertIn("visualWarning", evidence.metadata)
+
+    def test_long_captions_keep_ending_and_disclose_omissions(self):
+        body = [{"from": i, "to": i + 1, "content": f"第{i}句" + "内容" * 50}
+                for i in range(1000)]
+        evidence = collect_video([URL], http=self.caption_track(body, duration=1000))
+        self.assertIn("第0句", evidence.captions)
+        self.assertIn("第999句", evidence.captions)
+        self.assertLessEqual(len(evidence.captions.encode()), 60000)
+        self.assertFalse(evidence.metadata["captionCoverage"]["complete"])
+
+    def test_dense_storyboard_keeps_opening_ending_and_budget(self):
+        http = FakeHTTP(captions=False)
+        original = http.data
+        def data(path, params):
+            result = original(path, params)
+            if path.endswith("/view"):
+                result["pages"][1]["duration"] = 1200
+            if path.endswith("/videoshot"):
+                result.update(index=list(range(0, 1201, 10)), image=["//i0.hdslb.com/sheet.png"] * 41)
+            return result
+        http.data = data
+        evidence = collect_video([URL], http=http)
+        stamps = [stamp for stamp, _ in evidence.frames]
+        self.assertEqual(len(stamps), 24)
+        self.assertEqual(stamps[0], 0)
+        self.assertEqual(stamps[-1], 1200)
+        self.assertEqual(stamps, sorted(set(stamps)))
+
     def test_wbi_search_uses_public_nav_keys_and_sdk_compatible_signature(self):
         def fetch(url, **kwargs):
             if "/nav?" in url:
@@ -167,7 +208,7 @@ class VideoEvidenceTests(unittest.TestCase):
         self.assertTrue(any(path == "/x/player/videoshot" for path, _ in http.calls))
         self.assertNotIn("手表", json.dumps(evidence.model_context(), ensure_ascii=False))
 
-    def test_valid_caption_rounding_tolerance_keeps_subtitles_without_storyboard(self):
+    def test_valid_caption_rounding_tolerance_keeps_subtitles_and_storyboard(self):
         http = self.caption_track([
             {"from": 0, "to": 3.2, "content": "展示插件设置"},
             {"from": 155.5, "to": 159.9, "content": "演示结束"},
@@ -175,8 +216,8 @@ class VideoEvidenceTests(unittest.TestCase):
         evidence = collect_video([URL], http=http)
         self.assertIn("展示插件设置", evidence.captions)
         self.assertIn("演示结束", evidence.captions)
-        self.assertFalse(evidence.frames)
-        self.assertFalse(any(path == "/x/player/videoshot" for path, _ in http.calls))
+        self.assertTrue(evidence.frames)
+        self.assertTrue(any(path == "/x/player/videoshot" for path, _ in http.calls))
 
     def test_music_markers_use_storyboard_but_do_not_remove_real_speech(self):
         body = [{"from": 0.8, "to": 3.1, "content": "♪ 音乐 ♪"},
@@ -189,7 +230,7 @@ class VideoEvidenceTests(unittest.TestCase):
             *body, {"from": 50, "to": 55, "content": "让DSH按关键词搜索视频"},
         ]))
         self.assertIn("按关键词搜索视频", speech.captions)
-        self.assertFalse(speech.frames)
+        self.assertTrue(speech.frames)
 
     def test_invalid_times_anywhere_in_track_discard_all_caption_lines(self):
         for segment in [
@@ -213,11 +254,11 @@ class VideoEvidenceTests(unittest.TestCase):
         self.assertEqual(evidence.status, "analyzed")
         self.assertEqual(evidence.source_url, URL)
         self.assertIn("模型通过训练学习特征", evidence.captions)
-        self.assertEqual(evidence.frames, [])
+        self.assertTrue(evidence.frames)
         self.assertEqual(evidence.metadata["part"], 2)
         player = next(params for path, params in http.calls if path == "/x/player/v2")
         self.assertEqual(player["cid"], 202)
-        self.assertFalse(any(path == "/x/player/videoshot" for path, _ in http.calls))
+        self.assertTrue(any(path == "/x/player/videoshot" for path, _ in http.calls))
 
     def test_storyboard_fallback_is_actual_cropped_jpeg_evidence(self):
         http = FakeHTTP(captions=False)

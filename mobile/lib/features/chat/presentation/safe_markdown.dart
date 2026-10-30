@@ -445,7 +445,7 @@ class _BlockView extends StatelessWidget {
   final String? actionScope;
 
   Widget _heading(TextStyle style) => allowResponseUi
-      ? _headingWithSymbol(block.lines.single, style)
+      ? _textWithSymbol(block.lines.single, style)
       : _InlineText(text: block.lines.single, style: style);
 
   @override
@@ -564,7 +564,14 @@ class _BlockView extends StatelessWidget {
                           softWrap: false,
                         ),
                       ),
-                      Expanded(child: _InlineText(text: block.lines[index])),
+                      Expanded(
+                        child: allowResponseUi
+                            ? _textWithSymbol(
+                                block.lines[index],
+                                DefaultTextStyle.of(context).style,
+                              )
+                            : _InlineText(text: block.lines[index]),
+                      ),
                     ],
                   ),
                 ),
@@ -617,7 +624,21 @@ class _BlockView extends StatelessWidget {
       case MarkdownBlockType.paragraph:
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
-          child: _InlineText(text: block.lines.join('\n')),
+          child:
+              allowResponseUi &&
+                  block.lines.any(
+                    (line) =>
+                        chatSymbolForEmoji(line.split(RegExp(r'\s+')).first) !=
+                        null,
+                  )
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final line in block.lines)
+                      _textWithSymbol(line, DefaultTextStyle.of(context).style),
+                  ],
+                )
+              : _InlineText(text: block.lines.join('\n')),
         );
       case MarkdownBlockType.quote:
         return Container(
@@ -647,7 +668,7 @@ class _BlockView extends StatelessWidget {
   }
 }
 
-Widget _headingWithSymbol(String text, TextStyle style) {
+Widget _textWithSymbol(String text, TextStyle style) {
   final match = RegExp(r'^(\S+)\s+(.+)$').firstMatch(text);
   final kind = match == null ? null : chatSymbolForEmoji(match.group(1)!);
   if (kind == null) return _InlineText(text: text, style: style);

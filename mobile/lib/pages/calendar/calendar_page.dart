@@ -1,3 +1,5 @@
+import '../../app/design/mobile_motion.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app.dart';
@@ -8,9 +10,11 @@ import 'package:orialis_mobile/app/design/lumina_compat.dart'
 
 import '../../core/database/app_database.dart';
 import '../../features/events/presentation/task_children.dart';
+import '../../features/system_integration/schedule_tracking_button.dart';
 import '../../features/events/presentation/task_editor.dart';
 import '../shared/page_parts.dart';
 import '../shared/glass_segmented.dart';
+import 'calendar_week_view.dart';
 
 typedef Schedule = CalendarEvent;
 
@@ -62,7 +66,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     for (final entries in _schedulesByDay.values) {
       entries.sort(
         (a, b) => a.allDay == b.allDay
-            ? a.startAt.compareTo(b.startAt)
+            ? DateTime.parse(a.startAt).compareTo(DateTime.parse(b.startAt))
             : a.allDay
             ? -1
             : 1,
@@ -76,7 +80,6 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   }
 
   List<Schedule> _on(DateTime day) => _schedulesByDay[dateKey(day)] ?? const [];
-  final _weekDayKeys = List.generate(7, (_) => GlobalKey());
   @override
   void initState() {
     super.initState();
@@ -84,18 +87,26 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     _tasks = ref.read(taskRepositoryProvider).watchTasks();
   }
 
+  double _direction = 0;
+
   void _move(int direction) => setState(() {
+    _direction = direction.toDouble();
     _date = _view == 2
         ? DateTime(_date.year, _date.month + direction, 1)
-        : _date.add(Duration(days: direction * (_view == 1 ? 7 : 1)));
+        : DateTime(
+            _date.year,
+            _date.month,
+            _date.day + direction * (_view == 1 ? 7 : 1),
+          );
   });
 
-  Future<void> _edit([Schedule? event]) async {
+  Future<void> _edit([Schedule? event, DateTime? start]) async {
     await showLuminaSheet<void>(
       context: context,
       builder: (_) => _ScheduleEditor(
         event: event,
-        date: _date,
+        date: start ?? _date,
+        initialStart: start,
         onSave: (d) async {
           final r = ref.read(scheduleRepositoryProvider);
           if (event == null) {
@@ -177,7 +188,19 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         }
         return LuminaFloatingHeader(
           header: _viewSelector(),
-          bodyBuilder: (context, topInset) => _calendarContent(topInset),
+          bodyBuilder: (context, topInset) => GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragEnd: (details) {
+              final velocity = details.primaryVelocity ?? 0;
+              if (velocity.abs() < 250) return;
+              _move(velocity < 0 ? 1 : -1);
+            },
+            child: OrialisContentTransition(
+              changeKey: (_view, dateKey(_date)),
+              direction: _direction,
+              child: _calendarContent(topInset),
+            ),
+          ),
         );
       },
     ),
@@ -185,15 +208,23 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
 
   Widget _viewSelector({bool desktop = false}) => desktop
       ? LuminaSegmented<int>(
+          key: const ValueKey('calendar-view-selector'),
           transparent: true,
           items: const {0: '日', 1: '周', 2: '月'},
           value: _view,
-          onChanged: (v) => setState(() => _view = v),
+          onChanged: (v) => setState(() {
+            _direction = (v - _view).sign.toDouble();
+            _view = v;
+          }),
         )
       : OrialisGlassSegmented<int>(
+          key: const ValueKey('calendar-view-selector'),
           items: const {0: '日', 1: '周', 2: '月'},
           value: _view,
-          onChanged: (v) => setState(() => _view = v),
+          onChanged: (v) => setState(() {
+            _direction = (v - _view).sign.toDouble();
+            _view = v;
+          }),
         );
 
   Widget _calendarContent(double topInset, {bool desktop = false}) =>
@@ -236,6 +267,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       );
 
   Widget _desktopCalendar() {
+    if (_view == 1) return _weekTimeline();
     if (_view == 0) {
       return Align(
         alignment: Alignment.topLeft,
@@ -244,7 +276,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
           child: ListView(
             key: const PageStorageKey('desktop-calendar-day'),
             padding: EdgeInsets.zero,
-            children: [_agenda(_date)],
+            children: [_dayFocus(), const SizedBox(height: 20), _agenda(_date)],
           ),
         ),
       );
@@ -594,6 +626,8 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     children: [
       _dateNavigation(),
       const SizedBox(height: 16),
+      _dayFocus(),
+      const SizedBox(height: 12),
       _agenda(_date),
       const SizedBox(height: 16),
       LuminaButton(
@@ -604,74 +638,62 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     ],
   );
 
-  Widget _dayCell(DateTime day, {bool week = false}) {
+  Widget _dayCell(DateTime day) {
     final events = _on(day);
-    final count = events.length + _dueOn(day).length;
+    final due = _dueOn(day);
     final selected = dateKey(day) == dateKey(_date);
-    final colors = LuminaTheme.of(context).colors;
-    final text = LuminaTheme.of(context).textTheme;
     final today = dateKey(day) == dateKey(DateTime.now());
-    final weekend = day.weekday >= DateTime.saturday;
+    final theme = LuminaTheme.of(context);
+    final colors = theme.colors;
     return Semantics(
       selected: selected,
-      label: '${dateKey(day)}，$count 项',
-      child: LuminaSurface(
-        key: ValueKey(
-          'calendar-date-${week ? 'week' : 'month'}-${dateKey(day)}',
-        ),
-        radius: 12,
-        glass: true,
-        diffuseGlass: true,
-        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-        color: selected
-            ? colors.accentSoft
-            : Color.lerp(colors.surface, colors.accent, weekend ? .07 : 0),
-        onTap: () {
-          setState(() => _date = day);
-          if (week) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              final target = _weekDayKeys[day.weekday - 1].currentContext;
-              if (!mounted || target == null) return;
-              Scrollable.ensureVisible(
-                target,
-                duration: MediaQuery.disableAnimationsOf(context)
-                    ? Duration.zero
-                    : LuminaMotion.standard,
-                curve: luminaEaseOut,
-              );
-            });
-          }
-        },
-        child: SizedBox(
-          height: MediaQuery.textScalerOf(context).scale(week ? 58 : 38),
-          width: double.infinity,
+      button: true,
+      label:
+          '${dateKey(day)}，${events.length} 条日程，${due.length} 项截止${today ? '，今天' : ''}',
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(end: selected ? 1 : 0),
+        duration: LuminaTheme.motionReducedOf(context)
+            ? Duration.zero
+            : LuminaMotion.fast,
+        curve: luminaEaseOut,
+        builder: (context, selection, _) => LuminaSurface(
+          key: ValueKey('calendar-date-month-${dateKey(day)}'),
+          onTap: () => setState(() => _date = day),
+          radius: 12,
+          glass: true,
+          diffuseGlass: true,
+          color: Color.lerp(
+            Color.lerp(
+              colors.surface,
+              colors.accent,
+              day.weekday > 5 ? .07 : 0,
+            ),
+            colors.accentSoft,
+            selection,
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 2),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              if (week)
-                Text(
-                  ['一', '二', '三', '四', '五', '六', '日'][day.weekday - 1],
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '${day.day}',
                   maxLines: 1,
-                  style: text.bodySmall,
-                ),
-              Expanded(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    '${day.day}',
-                    style: text.labelLarge.copyWith(
-                      color: selected || today
-                          ? colors.accent
-                          : weekend
-                          ? colors.accent.withValues(alpha: .8)
-                          : null,
-                      fontWeight: selected || today ? FontWeight.w700 : null,
+                  style: theme.textTheme.labelLarge.copyWith(
+                    fontWeight: FontWeight.lerp(
+                      today ? FontWeight.w700 : FontWeight.w500,
+                      FontWeight.w700,
+                      selection,
                     ),
-                    maxLines: 1,
+                    color: Color.lerp(
+                      today || day.weekday > 5 ? colors.accent : colors.ink,
+                      colors.accent,
+                      selection,
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 7),
               SizedBox(
                 height: 5,
                 child: Row(
@@ -686,20 +708,17 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                           shape: BoxShape.circle,
                         ),
                       ),
-                    if (events.isNotEmpty && _dueOn(day).isNotEmpty)
-                      const SizedBox(width: 3),
-                    if (_dueOn(day).isNotEmpty)
+                    if (events.isNotEmpty && due.isNotEmpty)
+                      const SizedBox(width: 4),
+                    if (due.isNotEmpty)
                       Transform.rotate(
                         angle: .785398,
                         child: Container(
                           width: 4,
                           height: 4,
-                          decoration: BoxDecoration(
-                            color: LuminaCardPalette.amber
-                                .colors(darkProgress: colors.darkProgress)
-                                .accent,
-                            borderRadius: BorderRadius.circular(1),
-                          ),
+                          color: LuminaCardPalette.amber
+                              .colors(darkProgress: colors.darkProgress)
+                              .accent,
                         ),
                       ),
                   ],
@@ -712,45 +731,157 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     );
   }
 
-  Widget _week(double topInset) {
-    final monday = DateTime(
-      _date.year,
-      _date.month,
-      _date.day - _date.weekday + 1,
-    );
-    return SingleChildScrollView(
-      padding: _scrollInsets(topInset),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+  Widget _weekTimeline() => CalendarWeekView(
+    date: _date,
+    eventsOn: _on,
+    tasksOn: _dueOn,
+    onSelect: (day) => setState(() => _date = day),
+    onEvent: _detail,
+    onCreate: (start) {
+      setState(() => _date = start);
+      _edit(null, start);
+    },
+    onAgenda: (day) {
+      setState(() => _date = day);
+      showLuminaSheet<void>(
+        context: context,
+        builder: (_) => StreamBuilder<List<Schedule>>(
+          stream: _schedules,
+          builder: (context, schedules) => StreamBuilder<List<Task>>(
+            stream: _tasks,
+            builder: (context, tasks) {
+              if (schedules.hasError || tasks.hasError) {
+                return const PageFailure();
+              }
+              if (!schedules.hasData || !tasks.hasData) {
+                return const LuminaProgress();
+              }
+              _indexDates(schedules.data!, tasks.data!);
+              return _agenda(day);
+            },
+          ),
+        ),
+      );
+    },
+  );
+
+  Widget _week(double topInset) => Padding(
+    padding: EdgeInsets.fromLTRB(
+      12,
+      topInset,
+      12,
+      12 +
+          LuminaNavigationInset.of(context) +
+          MediaQuery.paddingOf(context).bottom,
+    ),
+    child: Column(
+      children: [
+        _dateNavigation(),
+        const SizedBox(height: 12),
+        Expanded(child: _weekTimeline()),
+      ],
+    ),
+  );
+
+  Widget _dayFocus() {
+    final theme = LuminaTheme.of(context);
+    final today = dateKey(_date) == dateKey(DateTime.now());
+    return LuminaSurface(
+      key: const ValueKey('calendar-day-focus'),
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _dateNavigation(),
-          const SizedBox(height: 16),
-          LuminaSurface(
-            child: Row(
+          Text(
+            '${_date.day}'.padLeft(2, '0'),
+            style: theme.textTheme.titleLarge.copyWith(fontSize: 48, height: 1),
+          ),
+          const SizedBox(width: 20),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (var i = 0; i < 7; i++)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: _dayCell(
-                        monday.add(Duration(days: i)),
-                        week: true,
-                      ),
-                    ),
-                  ),
+                Text(
+                  '${today ? '今天 · ' : ''}星期${['一', '二', '三', '四', '五', '六', '日'][_date.weekday - 1]}',
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '${_on(_date).length} 条日程  ·  ${_dueOn(_date).length} 项截止',
+                  style: theme.textTheme.bodySmall,
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 18),
-          for (var i = 0; i < 7; i++) ...[
-            Builder(
-              builder: (context) {
-                final day = monday.add(Duration(days: i));
-                return KeyedSubtree(key: _weekDayKeys[i], child: _agenda(day));
-              },
+        ],
+      ),
+    );
+  }
+
+  Widget _monthAgenda() {
+    final schedules = _on(_date);
+    final due = _dueOn(_date);
+    return LuminaSurface(
+      key: const ValueKey('calendar-month-agenda'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '${_date.month}月${_date.day}日 · 日程',
+            style: LuminaTheme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 12),
+          if (schedules.isEmpty && due.isEmpty)
+            const QuietLabel('当天暂无安排，留一点时间给自己。'),
+          for (final event in schedules.take(3))
+            LuminaTap(
+              onTap: () => _detail(event),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 68,
+                      child: QuietLabel(
+                        event.allDay
+                            ? '全天'
+                            : timeLabel(
+                                DateTime.parse(event.startAt).toLocal(),
+                              ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        event.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            const SizedBox(height: 14),
-          ],
+          if (due.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Text(
+                '${due.length} 项截止 · ${due.take(2).map((t) => t.title).join('、')}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: LuminaTheme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          const SizedBox(height: 10),
+          LuminaButton(
+            primary: false,
+            onPressed: () => setState(() {
+              _direction = -1;
+              _view = 0;
+            }),
+            child: Text(
+              schedules.isEmpty && due.isEmpty ? '安排这一天' : '查看当天全部安排',
+            ),
+          ),
         ],
       ),
     );
@@ -808,12 +939,13 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                     ],
                   ),
                 ),
+              const SizedBox(height: 14),
               const QuietLabel('圆点 · 日程　菱形 · 截止事项'),
             ],
           ),
         ),
         const SizedBox(height: 18),
-        _agenda(_date),
+        _monthAgenda(),
       ],
     );
   }
@@ -835,6 +967,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         if (s.reminderMinutes != null)
           QuietLabel('提前 ${s.reminderMinutes} 分钟提醒'),
         if (s.important) const QuietLabel('重要日程'),
+        ScheduleTrackingButton(eventId: s.id),
         const LuminaEngravedDivider(),
         TaskChildrenPanel(scheduleId: s.id, parentTitle: s.title),
         LuminaButton(
@@ -882,8 +1015,14 @@ class _ScheduleDraft {
 }
 
 class _ScheduleEditor extends StatefulWidget {
-  const _ScheduleEditor({this.event, required this.date, required this.onSave});
+  const _ScheduleEditor({
+    this.event,
+    this.initialStart,
+    required this.date,
+    required this.onSave,
+  });
   final Schedule? event;
+  final DateTime? initialStart;
   final DateTime date;
   final Future<void> Function(_ScheduleDraft) onSave;
   @override
@@ -900,7 +1039,8 @@ class _ScheduleEditorState extends State<_ScheduleEditor> {
     text: widget.event?.reminderMinutes?.toString(),
   );
   late DateTime _start = widget.event == null
-      ? DateTime(widget.date.year, widget.date.month, widget.date.day, 9)
+      ? widget.initialStart ??
+            DateTime(widget.date.year, widget.date.month, widget.date.day, 9)
       : DateTime.parse(widget.event!.startAt).toLocal();
   late DateTime _end = widget.event == null
       ? _start.add(const Duration(hours: 1))

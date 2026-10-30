@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:lumina_ui/lumina_ui.dart';
 
 /// Keep the shortcut recognizer inside the tooltip so holding the button
@@ -19,7 +21,12 @@ class ChatShortcutButton extends StatelessWidget {
     child: Semantics(
       onLongPressHint: '与默认设备开始新对话',
       child: GestureDetector(
-        onLongPress: onDefaultChat,
+        onLongPress: onDefaultChat == null
+            ? null
+            : () {
+                unawaited(LuminaHaptics.longPress());
+                onDefaultChat!();
+              },
         child: LuminaFloatingActionButton(
           frosted: true,
           icon: const LuminaIcon(LuminaIcons.add),

@@ -6,9 +6,8 @@ String systemDate(DateTime date) =>
 /// Task deadlines are wall-clock dates, unlike ISO Schedule instants.
 DateTime? taskDeadline(Task task) {
   final date = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(task.due ?? '');
-  final time = RegExp(
-    r'^(\d{2}):(\d{2})(?::(\d{2}))?$',
-  ).firstMatch(task.dueTime ?? '');
+  final time = RegExp(r'^(\d{2}):(\d{2})(?::(\d{2}))?$')
+      .firstMatch(task.dueTime ?? '');
   if (date == null || time == null) return null;
   final year = int.parse(date[1]!);
   final month = int.parse(date[2]!);
@@ -44,6 +43,7 @@ Map<String, Object?> buildSystemSnapshot({
   final reminderCutoff = now.subtract(const Duration(hours: 24));
   final today = systemDate(now.toLocal());
   final reminders = <Map<String, Object?>>[];
+  final liveSchedules = <Map<String, Object?>>[];
   final lines = <({DateTime time, String key, String text})>[];
   for (final task in tasks) {
     if (task.deletedAt != null || task.completed) continue;
@@ -78,6 +78,17 @@ Map<String, Object?> buildSystemSnapshot({
     final start = DateTime.tryParse(event.startAt);
     if (start == null) continue;
     final local = start.toLocal();
+    final end = DateTime.tryParse(event.endAt);
+    if (end != null && !start.isAfter(now) && end.isAfter(now)) {
+      liveSchedules.add({
+        'id': event.id,
+        'title': event.title,
+        'startsAtMillis': start.millisecondsSinceEpoch,
+        'endsAtMillis': end.millisecondsSinceEpoch,
+        'route': scheduleSystemRoute(event.id, local),
+        'allDay': event.allDay,
+      });
+    }
     final minutes = event.reminderMinutes;
     if (minutes != null && minutes >= 0) {
       final fire = start.subtract(Duration(minutes: minutes));
@@ -90,9 +101,8 @@ Map<String, Object?> buildSystemSnapshot({
           'route': scheduleSystemRoute(event.id, local),
           'kind': 'schedule',
           'startsAtMillis': start.millisecondsSinceEpoch,
-          'endsAtMillis': DateTime.tryParse(
-            event.endAt,
-          )?.millisecondsSinceEpoch,
+          'endsAtMillis': DateTime.tryParse(event.endAt)
+              ?.millisecondsSinceEpoch,
           'important': event.important,
           'allDay': event.allDay,
         });
@@ -123,6 +133,7 @@ Map<String, Object?> buildSystemSnapshot({
     'scope': scope,
     'enabled': true,
     'reminders': reminders,
+    'liveSchedules': liveSchedules,
     'widget': {
       'date': today,
       'title': '今日安排',

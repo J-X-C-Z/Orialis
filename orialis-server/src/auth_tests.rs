@@ -321,12 +321,8 @@ async fn state_for_owner(pool: &SqlitePool, owner: Option<&str>, token: &str) ->
 async fn authentication_hash_overload_remains_a_busy_error() {
     let _auth_guard = AUTH_TEST_LOCK.lock().await;
     let _capacity = auth::AUTH_HASH_ADMISSION.acquire_many(4).await.unwrap();
-    assert!(
-        matches!(auth::password_hash_blocking("Password-123".into()).await,
-        Err(AppError::ServiceUnavailable(message)) if message == "authentication capacity is busy")
-    );
-    assert!(
-        matches!(auth::verify_password_blocking("Password-123".into(), "unused".into()).await,
-        Err(AppError::ServiceUnavailable(message)) if message == "authentication capacity is busy")
-    );
+    assert!(matches!(auth::password_hash_blocking("Password-123".into()).await,
+        Err(AppError::ServiceUnavailable(message)) if message == "authentication capacity is busy"));
+    assert!(matches!(auth::verify_password_blocking("Password-123".into(), "unused".into()).await,
+        Err(AppError::ServiceUnavailable(message)) if message == "authentication capacity is busy"));
 }

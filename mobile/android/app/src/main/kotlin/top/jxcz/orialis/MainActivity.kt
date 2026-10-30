@@ -14,6 +14,7 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     private var wearBridge: WearBridge? = null
     private var systemBridge: SystemBridge? = null
+    private var calendarSyncBridge: CalendarSyncBridge? = null
     private var memoryBridge: MemoryBridge? = null
     private var chatShareBridge: ChatShareBridge? = null
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -21,19 +22,40 @@ class MainActivity : FlutterActivity() {
         if (packageName != "top.jxcz.orialis.news") {
             wearBridge = WearBridge(flutterEngine.dartExecutor.binaryMessenger, XiaomiWearAdapter(applicationContext))
             systemBridge = SystemBridge(this, flutterEngine.dartExecutor.binaryMessenger)
+            calendarSyncBridge = CalendarSyncBridge(this, flutterEngine.dartExecutor.binaryMessenger)
             memoryBridge = MemoryBridge(this, flutterEngine.dartExecutor.binaryMessenger)
             chatShareBridge = ChatShareBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "top.jxcz.orialis/haptics")
             .setMethodCallHandler { call, result ->
-                if (call.method == "confirm") {
-                    window.decorView.performHapticFeedback(
+                val feedback = when (call.method) {
+                    "selection" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                        HapticFeedbackConstants.SEGMENT_TICK
+                    else HapticFeedbackConstants.CLOCK_TICK
+                    "tick" -> if (Build.VERSION.SDK_INT >= 34)
+                        HapticFeedbackConstants.SEGMENT_FREQUENT_TICK else HapticFeedbackConstants.CLOCK_TICK
+                    "longPress" -> HapticFeedbackConstants.LONG_PRESS
+                    "dragStart" -> if (Build.VERSION.SDK_INT >= 34)
+                        HapticFeedbackConstants.DRAG_START else HapticFeedbackConstants.LONG_PRESS
+                    "thresholdActivate" -> if (Build.VERSION.SDK_INT >= 34)
+                        HapticFeedbackConstants.GESTURE_THRESHOLD_ACTIVATE else HapticFeedbackConstants.CLOCK_TICK
+                    "thresholdDeactivate" -> if (Build.VERSION.SDK_INT >= 34)
+                        HapticFeedbackConstants.GESTURE_THRESHOLD_DEACTIVATE else HapticFeedbackConstants.CLOCK_TICK
+                    "toggleOn" -> if (Build.VERSION.SDK_INT >= 34)
+                        HapticFeedbackConstants.TOGGLE_ON else HapticFeedbackConstants.VIRTUAL_KEY
+                    "toggleOff" -> if (Build.VERSION.SDK_INT >= 34)
+                        HapticFeedbackConstants.TOGGLE_OFF else HapticFeedbackConstants.VIRTUAL_KEY
+                    "reject" -> if (Build.VERSION.SDK_INT >= 30)
+                        HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS
+                    "confirm" ->
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
                             HapticFeedbackConstants.CONFIRM
                         else HapticFeedbackConstants.VIRTUAL_KEY
-                    )
-                    result.success(null)
-                } else result.notImplemented()
+                    else -> { result.notImplemented(); return@setMethodCallHandler }
+                }
+                // Let the device's system select its tuned effect and honor user settings.
+                window.decorView.performHapticFeedback(feedback)
+                result.success(null)
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "top.jxcz.orialis/updates")
             .setMethodCallHandler { call, result ->
@@ -82,9 +104,12 @@ class MainActivity : FlutterActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         systemBridge?.onRequestPermissionsResult(requestCode)
+        calendarSyncBridge?.onRequestPermissionsResult(requestCode)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        calendarSyncBridge?.dispose()
+        calendarSyncBridge = null
         chatShareBridge?.dispose()
         chatShareBridge = null
         memoryBridge?.dispose()

@@ -32,6 +32,9 @@ internal class SystemBridge(private val activity: MainActivity, messenger: Binar
             try {
                 when (call.method) {
                     "status" -> readStatus(result)
+                    "startScheduleTracking" -> result.success(ScheduleLiveTracking.start(activity, call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()))
+                    "stopScheduleTracking" -> result.success(ScheduleLiveTracking.stop(activity, call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()))
+                    "trackedScheduleId" -> result.success(ScheduleLiveTracking.trackedId(activity, call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()))
                     "requestNotifications" -> requestNotifications(result)
                     "openNotificationSettings" -> {
                         val intent = if (Build.VERSION.SDK_INT >= 26) Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)

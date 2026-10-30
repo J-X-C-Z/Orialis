@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
@@ -34,7 +32,7 @@ ChatSymbolKind? chatSymbolForEmoji(String emoji) =>
       '✅' || '✔' || '☑' || '🎉' => ChatSymbolKind.success,
       '❌' || '✖' || '⛔' || '🚫' || '⚠' => ChatSymbolKind.error,
       '📎' || '🖇' || '📁' || '📄' || '🖼' => ChatSymbolKind.attachment,
-      '📝' || '📑' || '📜' || '🗒' => ChatSymbolKind.summary,
+      '📝' || '📑' || '📜' || '🗒' || '📚' || '📖' => ChatSymbolKind.summary,
       '📊' || '📈' || '📉' => ChatSymbolKind.chart,
       '💻' || '🧑‍💻' || '👨‍💻' || '👩‍💻' => ChatSymbolKind.code,
       '📤' || '📨' || '🚀' || '➡' || '➤' => ChatSymbolKind.send,
@@ -47,7 +45,7 @@ class ChatSymbol extends StatefulWidget {
   const ChatSymbol(
     this.kind, {
     this.size = 24,
-    this.animated = true,
+    this.animated = false,
     this.color,
     this.semanticLabel,
     super.key,
@@ -143,35 +141,7 @@ class _ChatSymbolState extends State<ChatSymbol>
     super.dispose();
   }
 
-  Color _symbolColor(LuminaColors colors) {
-    final pair = switch (widget.kind) {
-      ChatSymbolKind.thinking ||
-      ChatSymbolKind.search ||
-      ChatSymbolKind.send => (const Color(0xFF426BB5), const Color(0xFFAFC7FF)),
-      ChatSymbolKind.working ||
-      ChatSymbolKind.summary ||
-      ChatSymbolKind.code => (const Color(0xFF7863A7), const Color(0xFFC7B8F2)),
-      ChatSymbolKind.success => (
-        const Color(0xFF398A79),
-        const Color(0xFF83D6C0),
-      ),
-      ChatSymbolKind.error => (
-        const Color(0xFFC96C65),
-        const Color(0xFFFFA69C),
-      ),
-      ChatSymbolKind.attachment => (
-        const Color(0xFFB48242),
-        const Color(0xFFEBC17A),
-      ),
-      ChatSymbolKind.chart => (
-        const Color(0xFF398A79),
-        const Color(0xFF83D6C0),
-      ),
-      ChatSymbolKind.copy => (const Color(0xFF59718D), const Color(0xFFB2C6DC)),
-      ChatSymbolKind.info => (const Color(0xFF3985A0), const Color(0xFF8ED1E3)),
-    };
-    return colors.tone(pair.$1, pair.$2);
-  }
+  Color _symbolColor(LuminaColors colors) => colors.ink.withValues(alpha: .65);
 
   Widget _icon(Color color) => SvgPicture.asset(
     'assets/chat_symbols/${widget.kind.name}.svg',
@@ -190,29 +160,9 @@ class _ChatSymbolState extends State<ChatSymbol>
         animation: _phase,
         child: icon,
         builder: (context, child) {
-          final t = luminaEaseOut.transform(_phase.value);
-          return switch (widget.kind) {
-            ChatSymbolKind.thinking => Opacity(
-              opacity: .78 + .22 * t,
-              child: Transform.scale(scale: .985 + .015 * t, child: child),
-            ),
-            ChatSymbolKind.search => Transform.translate(
-              offset: Offset(0, math.sin(t * math.pi) * -.35),
-              child: child,
-            ),
-            ChatSymbolKind.working => Transform.rotate(
-              angle: (t - .5) * .08,
-              child: child,
-            ),
-            ChatSymbolKind.success => Opacity(
-              opacity: t,
-              child: Transform.translate(
-                offset: Offset(0, (1 - t) * 1.5),
-                child: child,
-              ),
-            ),
-            _ => child!,
-          };
+          // A single smooth opacity pulse keeps the glyph anchored and legible.
+          final t = Curves.easeInOut.transform(_phase.value);
+          return Opacity(opacity: .65 + .35 * t, child: child);
         },
       );
     }

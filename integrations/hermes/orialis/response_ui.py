@@ -136,3 +136,24 @@ Example of all six new types (illustrative facts and proposed schedule; the date
 {"version":1,"title":"学习安排示例","fallback":"示例数据：数学和英语各安排一段学习时间。先查看重点与步骤，再核对公式。日程仅为示例草案，需用户确认后才会本机保存并进入同步队列；示例日期不是用户的真实安排。","blocks":[{"type":"callout","items":[{"label":"安排说明","content":"以下内容仅演示协议结构，不代表已创建或已添加日程。","tone":"info"}]},{"type":"steps","items":[{"label":"复习导数","detail":"整理定义并完成练习。","status":"pending"},{"label":"复习词汇","detail":"复习本周词汇。","status":"pending"}]},{"type":"comparison","columns":["数学","英语"],"recommendedIndex":0,"items":[{"label":"学习时长","values":["60 分钟","30 分钟"]}]},{"type":"facts","items":[{"label":"总时长","value":"90 分钟","detail":"按示例时长相加"}]},{"type":"code","items":[{"label":"时长合计","language":"text","source":"数学 60 分钟 + 英语 30 分钟 = 90 分钟"}]},{"type":"agenda","items":[{"id":"example-math-session","label":"数学学习（示例）","title":"复习导数","startAt":"2030-01-02T09:00:00+08:00","endAt":"2030-01-02T10:00:00+08:00","notes":"仅用于展示格式；须替换为用户确认的真实安排。","location":"自习室"}]}]}
 ```
 """
+
+# Screen memory uses the same fenced transport without chat actions or sessions.
+MEMORY_UI_HINT = r"""
+屏幕记忆也支持 IntelligentUI。summary 和有实际视频证据时的 video_summary 可在字符串内嵌入闭合的
+```orialis-ui 代码块，内容是合法 JSON：{"version":1,"title":"可选标题","fallback":"完整可读的文字摘要","blocks":[...]}。
+仍只输出一个外层 JSON 对象，正确转义字符串中的换行和双引号；不要把 UI 文档放到外层字段。
+summary 必须先保留 # 标题，再以一两句纯文字写核心结论，之后才放 UI；video_summary 也先给简短结论。
+只有组件让重点更易理解、比较或展开时才使用；简单内容保留文字。优先一种主呈现，避免重复堆叠。
+同一主题的关键事实用 facts，可复用教程用 steps，真实方案对比用 comparison，较长叙述用 accordion；
+仅同字段多行确有搜索、排序或导出价值时用 table，行 label 概括主体与结论。不要为了组件编造数据。
+仅可使用以下五种类型（每个 block 可有 title；每项 label 必填）：
+facts: items [{"label":"关键事实","value":"具体结论","detail":"可选依据"}]；
+steps: items [{"label":"操作步骤","detail":"可选具体做法与条件"}]，不填写用户进度；
+comparison: columns 为 2..4 个不同的非空字符串，items [{"label":"比较维度","values":["方案一","方案二"]}]，values 数量与 columns 一致；
+accordion: items [{"label":"可扫读的具体结论","content":"展开详情"}]；
+table: columns 为 1..8 个非空字符串，items [{"label":"主体及结果","cells":["内容",12]}]，cells 数量与 columns 一致，数值必须有限且绝对值<=1e12。
+每个文档 UTF-8 JSON<=32768 字节，1..12 blocks，每块 1..12 items；title<=80字符，fallback<=4000，
+label/列名<=120，facts.value/steps.detail/对比值/表格文本<=1000，facts.detail<=240，accordion.content<=4000。
+fallback 必须完整覆盖组件中的结论、依据和条件，不能只写‘见卡片’。所有内容仍仅来自实际证据。
+不要输出 choices、form、actions、agenda 或其他类型；记忆卡只供阅读、展开、搜索或复制，不发送聊天、创建任务或添加日程。
+"""

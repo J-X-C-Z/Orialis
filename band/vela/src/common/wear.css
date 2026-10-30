@@ -176,3 +176,24 @@ div { flex-shrink: 0; }
 .emptyIcon { width: 44px; height: 44px; background-color: #20343a; border-radius: 22px; justify-content: center; align-items: center; }
 .taskMarker { width: 26px; height: 26px; border: 2px solid #8796a8; border-radius: 13px; margin-right: 12px; justify-content: center; align-items: center; }
 .taskMarkerDone { border-color: #79dcb7; background-color: #205446; }
+
+/* OLED friendly static depth: raised surfaces stay opaque; wells stay darker. */
+.screen { background-color: #070a0f; }
+.card, .row, .listRow, .glanceCard, .calendarRow, .statusCard { background-color: #171d25; border: 1px solid #2a3440; }
+.row, .listRow { border-radius: 18px; }
+.homeStatus, .calendarEmpty, .emptyCard { background-color: #0d131b; border: 1px solid #202b38; }
+.calendarDateButton, .secondaryButton, .smallButton, .disabled { background-color: #101720; border: 1px solid #263342; }
+.calendarTodayButton, .sendingButton { background-color: #172a38; border-color: #36536a; }
+.button { background-color: #244f82; border: 1px solid #5275a1; }
+.dangerButton { background-color: #382226; border: 1px solid #624047; }
+.selected { background-color: #1b2c3c; border-color: #49647f; }
+.toggle { background-color: #111923; border: 1px solid #354252; }
+.toggleOn { background-color: #254d79; border-color: #688bb6; }
+.toggleKnob { background-color: #dce7f4; }
+.glyphCircle { border: 1px solid #3c4755; }
+.calendarSource, .source, .sourceLine, .provenance { color: #d7b978; }
+.sectionTitle { color: #aebdd0; }
+.rowHint, .meta, .caption, .homeStatusText, .calendarSummary, .calendarFootnote { color: #abb7c5; }
+.chevron, .calendarChevron { color: #a9bbcf; }
+.calendarTodayBadge { color: #8bd7bd; }
+.appVersion { width: 100%; color: #8291a3; font-size: 16px; text-align: center; margin-top: 14px; padding-top: 10px; border-top: 1px solid #202b38; }

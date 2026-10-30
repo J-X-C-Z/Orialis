@@ -22,6 +22,16 @@ final wearConnectionProvider =
       final manager = WearConnectionManager(
         ref.watch(wearTransportProvider),
         snapshotLoader: producer.read,
+        snapshotChanges: database
+            .tableUpdates(
+              TableUpdateQuery.onAllTables([
+                database.tasks,
+                database.calendarEvents,
+                database.projects,
+                database.projectMilestones,
+              ]),
+            )
+            .map<void>((_) {}),
         taskCompletionHandler: (request) async {
           final token = await config.sessionToken();
           final server = await config.serverUrl();

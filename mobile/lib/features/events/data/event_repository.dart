@@ -245,6 +245,7 @@ class EventRepository {
   }
 
   Future<void> createCalendarEvent({
+    String? eventId,
     required String title,
     required DateTime startAt,
     required DateTime endAt,
@@ -256,7 +257,7 @@ class EventRepository {
   }) async {
     _validateSchedule(startAt, endAt, reminderMinutes);
     final timestamp = DateTime.now().toUtc().toIso8601String();
-    final id = const Uuid().v7();
+    final id = eventId ?? const Uuid().v7();
     await database.transaction(() async {
       await database
           .into(database.calendarEvents)

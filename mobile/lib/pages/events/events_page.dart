@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app.dart';
+import '../../app/design/mobile_motion.dart';
 
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
@@ -167,7 +168,10 @@ class _EventsPageState extends ConsumerState<EventsPage> {
         grouped[quadrantOf(task)]!.add(task);
       }
       if (!ref.watch(desktopModeProvider)) {
-        return _mobileTasks(topInset, snapshot.data!, tasks, grouped);
+        return OrialisContentTransition(
+          changeKey: _contentFilter,
+          child: _mobileTasks(topInset, snapshot.data!, tasks, grouped),
+        );
       }
       return ListView(
         padding: EdgeInsets.fromLTRB(

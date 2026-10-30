@@ -124,6 +124,7 @@ class _LuminaBranchTransitionState extends State<LuminaBranchTransition>
   );
   late final progress = controller.drive(CurveTween(curve: luminaEaseOut));
   Animation<Offset> position = const AlwaysStoppedAnimation(Offset.zero);
+  Animation<double> opacity = const AlwaysStoppedAnimation(1);
 
   @override
   void didUpdateWidget(LuminaBranchTransition oldWidget) {
@@ -131,6 +132,7 @@ class _LuminaBranchTransitionState extends State<LuminaBranchTransition>
     if (!widget.animate) {
       controller.stop();
       position = const AlwaysStoppedAnimation(Offset.zero);
+      opacity = const AlwaysStoppedAnimation(1);
       controller.value = 1;
       return;
     }
@@ -140,9 +142,11 @@ class _LuminaBranchTransitionState extends State<LuminaBranchTransition>
     final start = controller.isAnimating
         ? position.value
         : Offset(direction * .025, 0);
+    final opacityStart = controller.isAnimating ? opacity.value : .96;
     position = reduced
         ? const AlwaysStoppedAnimation(Offset.zero)
         : Tween<Offset>(begin: start, end: Offset.zero).animate(progress);
+    opacity = Tween<double>(begin: opacityStart, end: 1).animate(progress);
     controller.duration = Duration(milliseconds: reduced ? 140 : 220);
     controller.forward(from: 0);
   }
@@ -191,7 +195,7 @@ class _LuminaBranchTransitionState extends State<LuminaBranchTransition>
     if (!widget.animate) return branches;
     return FadeTransition(
       opacity: LuminaTheme.motionReducedOf(context)
-          ? Tween<double>(begin: .96, end: 1).animate(progress)
+          ? opacity
           : const AlwaysStoppedAnimation(1),
       child: SlideTransition(position: position, child: branches),
     );

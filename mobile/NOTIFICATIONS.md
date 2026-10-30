@@ -12,6 +12,16 @@ The existing Android system integration remains opt-in and account-scoped. Enabl
 - Disabling system reminders or switching accounts removes all Orialis reminder, chat and schedule-update notices. Delivery deduplication is account-scoped and is committed only after Android accepts the notification, so a permission failure can be retried.
 - Android creates `chat_messages`, `schedule_reminders`, and `schedule_updates` channels, plus reserved `project_updates` and `news_updates` channels. Earlier Android versions use normal notifications without channel controls.
 
+## Manually tracked ongoing schedules
+
+On Android, an ongoing schedule's detail sheet offers **跟踪此日程** and **停止跟踪此日程**. The existing system-integration opt-in and notification permission are required; the action does not silently enable other reminders. Tracking works even when that schedule has no advance reminder. Only one schedule is tracked at a time; stop the current one before starting another from the UI.
+
+The separate `schedule_tracking` channel shows the schedule title and a system countdown to its end. Android 16+ requests Live Updates; presentation and promotion remain subject to system support and user settings. Older versions show an ordinary ongoing notification. The compact status chip is system-controlled; the expanded card contains the title and countdown.
+
+Tracking ends on the scheduled end, explicit stop/dismissal, deletion, rescheduling outside the active interval, disabling system integration, or account invalidation. Android 8+ notification timeout removes the card without a running Flutter process; a native alarm also clears persisted tracking. Remote cancellation is applied when the existing sync pipeline delivers it locally. Chat, advance-reminder and schedule-update notices retain their previous behavior.
+
+Test start/stop, an event without a reminder, end-time expiry while the app is backgrounded, local deletion/edit, account switch, and dismissal followed by refresh on an Android device. Flutter tests and Kotlin compilation do not establish OEM island appearance.
+
 ## Test path
 
 1. Enable **开启提醒与桌面**, allow notification permission, then tap **发送测试聊天通知**. The preview selects the latest visible assistant reply from a confirmed device conversation and summarizes that actual reply; tapping opens its conversation at the latest content without highlighting a message. Create a device conversation and receive a reply first if none exists. To exercise any specific IDs, call `SystemIntegrationController.notifyChatMessage` with `{id, conversationId, role: 'assistant', content, replyToMessageId, createdAt}`; the method is account-scoped and idempotent. The optional reply anchor and timestamp select the matching question rather than a newer turn.

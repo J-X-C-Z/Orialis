@@ -1,6 +1,6 @@
 {
   "name": "orialis-vela-w0",
-  "version": "1.0.7",
+  "version": "1.3.0",
   "private": true,
   "description": "Orialis Vela glance UI and W0 interconnect diagnostics",
   "scripts": {

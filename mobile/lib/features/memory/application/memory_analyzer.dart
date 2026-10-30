@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+
 import '../../chat/data/agent_chat_service.dart';
 import '../data/memory_repository.dart';
 import '../domain/memory_record.dart';
@@ -23,6 +26,7 @@ class MemoryAnalyzer {
   Future<void> analyze(
     MemoryRecord record, {
     bool retry = false,
+    bool submitOnly = false,
     bool Function()? isCurrent,
   }) async {
     if (!_running.add(record.id)) return;
@@ -119,6 +123,10 @@ class MemoryAnalyzer {
           ),
         );
       }
+      if (analysis?['id'] != analysisId) {
+        throw const FormatException('后台任务标识不匹配');
+      }
+      if (submitOnly && analysis?['status'] == 'analyzing') return;
       while (true) {
         await check();
         if (analysis?['id'] != analysisId) {
@@ -158,15 +166,31 @@ class MemoryAnalyzer {
     } on _Cancelled {
       // A newer retry or account/generation owns the record and its in-flight work.
     } catch (error) {
+      // Log only error classes/status, never captured content or credentials.
+      debugPrint(
+        'Memory analysis failed: ${error.runtimeType}'
+        '${error is DioException ? " HTTP ${error.response?.statusCode}" : ""}'
+        '${error is FormatException ? " ${error.message}" : ""}',
+      );
       try {
         await check();
         if (identity == null || observedAnalysisId == null) return;
+        final deferred =
+            error is _Unavailable ||
+            error is TimeoutException ||
+            error is SocketException ||
+            error is DioException &&
+                (error.response == null ||
+                    error.response!.statusCode == 429 ||
+                    (error.response!.statusCode ?? 0) >= 500);
         await repository.update(record.id, {
-          'analysisStatus': 'failed',
+          'analysisStatus': deferred ? 'pending' : 'failed',
           'analysisError': error is _Unavailable
-              ? 'Azure Hermes 未连接，请稍后重试'
+              ? '后台暂未连接，记忆已保存，将自动重试'
               : error is TimeoutException
-              ? 'Azure Hermes 理解超时，截图和链接已保留，可稍后重试'
+              ? '后台处理较久，记忆已保存，将自动继续'
+              : deferred
+              ? '网络暂不可用，记忆已保存，将自动重试'
               : 'Azure Hermes 暂未完成理解，截图和链接已保留，可稍后重试',
         }, expectedAnalysisRequestId: ownedAnalysisId ?? observedAnalysisId);
       } catch (_) {

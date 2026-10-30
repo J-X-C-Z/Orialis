@@ -1,3 +1,5 @@
+import '../../features/calendar_sync/calendar_sync_settings.dart';
+
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -132,6 +134,7 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
             ContentStack(
               gap: 24,
               children: [
+                const CalendarSyncSettings(),
                 LuminaSection(
                   title: '系统展示',
                   child: ContentStack(
@@ -151,7 +154,7 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
                           !system!.identityCompatible)
                         const QuietLabel('请先登录。若已切换账户且本地数据归属尚未确认，系统展示会暂停。'),
                       const QuietLabel(
-                        '任务需要截止日期、具体时间和提醒设置。日程按所设提前时间提醒；不会自动写入系统日历。',
+                        '任务需要截止日期、具体时间和提醒设置。日程按所设提前时间提醒；系统日历同步可在上方单独启用。',
                       ),
                     ],
                   ),

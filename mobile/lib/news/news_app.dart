@@ -1,3 +1,5 @@
+import '../app/design/mobile_motion.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -9,7 +11,8 @@ import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show DesktopLayoutScope, OrialisPageScaffold;
 
 import '../core/config/app_config.dart';
-import '../core/network/orialis_api_client.dart';
+import '../core/network/unified_login.dart';
+import '../core/network/unified_login_fields.dart';
 import '../pages/shared/mobile_navigation.dart';
 import 'news_data.dart';
 import 'news_pages.dart';
@@ -109,7 +112,9 @@ class OrialisNewsApp extends ConsumerWidget {
                     child: Material(
                       animationDuration: Duration.zero,
                       color: LuminaTheme.of(context).colors.paper,
-                      child: child ?? const SizedBox.shrink(),
+                      child: OrialisMobileMotionScope(
+                        child: child ?? const SizedBox.shrink(),
+                      ),
                     ),
                   ),
                 ),
@@ -297,8 +302,8 @@ class NewsAccountPage extends ConsumerStatefulWidget {
 
 class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
   final _serverController = TextEditingController();
-  final _usernameController = TextEditingController();
-  final _passwordController = TextEditingController();
+  UnifiedLogin? _unifiedLogin;
+  bool _needsTotp = false;
   bool _ready = false;
   bool _busy = false;
   String? _error;
@@ -324,7 +329,8 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
     });
   }
 
-  Future<void> _login() async {
+  Future<void> _login(String username, String password, String? totp) async {
+    if (_busy) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -332,26 +338,37 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
     try {
       final config = ref.read(newsConfigProvider);
       final url = _validatedServerUrl(_serverController.text);
+      final login = UnifiedLogin(baseUrl: url);
+      _unifiedLogin = login;
+      final result = await login.login(
+        username: username,
+        password: password,
+        totp: totp,
+        onConsent: (details) =>
+            confirmUnifiedLoginConsent(context, details, login),
+      );
+      if (!mounted) return;
       await config.setServerUrl(url);
-      final client = OrialisApiClient(
-        baseUrl: url,
-        deviceId: await config.deviceId(),
-        config: config,
-      );
-      await client.login(
-        username: _usernameController.text.trim(),
-        password: _passwordController.text,
-      );
-      await config.setSessionUsername(_usernameController.text.trim());
+      await config.setSessionToken(result.session.accessToken);
+      await config.setSessionUsername(result.username);
       if (!mounted) return;
       setState(() {
-        _username = _usernameController.text.trim();
-        _passwordController.clear();
+        _username = result.username;
       });
       showLuminaMessage(context, '登录成功');
+    } on UnifiedLoginCancelled {
+      // Retain the previous session when login is cancelled.
+    } on UnifiedLoginTotpRequired catch (error) {
+      if (mounted) {
+        setState(() {
+          _needsTotp = true;
+          _error = error.message;
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _error = _authError(error));
     } finally {
+      _unifiedLogin = null;
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -391,8 +408,7 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
   @override
   void dispose() {
     _serverController.dispose();
-    _usernameController.dispose();
-    _passwordController.dispose();
+    _unifiedLogin?.cancel();
     super.dispose();
   }
 
@@ -495,21 +511,6 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
                   child: _username == null
                       ? Column(
                           children: [
-                            LuminaTextField(
-                              controller: _usernameController,
-                              textInputAction: TextInputAction.next,
-                              label: '用户名',
-                              enabled: !_busy,
-                            ),
-                            const SizedBox(height: 10),
-                            LuminaTextField(
-                              controller: _passwordController,
-                              obscureText: true,
-                              onSubmitted: (_) => _busy ? null : _login(),
-                              label: '密码',
-                              enabled: !_busy,
-                              textInputAction: TextInputAction.done,
-                            ),
                             if (_error != null)
                               Padding(
                                 padding: const EdgeInsets.only(top: 8),
@@ -522,20 +523,17 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
                                   ),
                                 ),
                               ),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: LuminaButton(
-                                onPressed: _busy ? null : _login,
-                                icon: _busy
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: LuminaProgress(),
-                                      )
-                                    : const Icon(Icons.login_rounded),
-                                child: const Text('登录'),
-                              ),
+                            UnifiedLoginFields(
+                              onSubmit: _login,
+                              busy: _busy,
+                              needsTotp: _needsTotp,
                             ),
+                            if (_busy)
+                              LuminaButton(
+                                primary: false,
+                                onPressed: () => _unifiedLogin?.cancel(),
+                                child: const Text('取消'),
+                              ),
                           ],
                         )
                       : Column(

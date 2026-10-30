@@ -6,8 +6,10 @@ import android.app.job.JobScheduler
 import android.app.job.JobService
 import android.content.ComponentName
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
@@ -19,19 +21,39 @@ class MemoryAnalysisJobService : JobService() {
     companion object {
         private const val JOB_ID = 0x4f524d
         private var active: MemoryAnalysisJobService? = null
-        fun schedule(context: Context) {
+        fun schedule(context: Context, id: String? = null) {
             val app = context.applicationContext
             Handler(Looper.getMainLooper()).post {
-                if (active != null || MemoryStore.scope(app) == null) return@post
+                if (MemoryStore.scope(app) == null) return@post
+                active?.let {
+                    it.store?.notifyChanged(id)
+                    return@post
+                }
                 try {
-                    (app.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler).schedule(
-                        JobInfo.Builder(JOB_ID, ComponentName(app, MemoryAnalysisJobService::class.java))
+                    val scheduler = app.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
+                    val component = ComponentName(app, MemoryAnalysisJobService::class.java)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        try {
+                            val expedited = JobInfo.Builder(JOB_ID, component)
+                                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                                .setExpedited(true)
+                                .build()
+                            if (scheduler.schedule(expedited) == JobScheduler.RESULT_SUCCESS) return@post
+                        } catch (_: RuntimeException) { /* Keep the ordinary job when expedited work is unavailable. */ }
+                    }
+                    val result = scheduler.schedule(
+                        JobInfo.Builder(JOB_ID, component)
                             .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                             .setMinimumLatency(1)
                             .setBackoffCriteria(30_000, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
                             .build(),
                     )
-                } catch (_: RuntimeException) { /* The saved inbox is still available on the next app launch. */ }
+                    if (result != JobScheduler.RESULT_SUCCESS) {
+                        Log.w("OrialisMemory", "Background memory job was not scheduled")
+                    }
+                } catch (error: RuntimeException) {
+                    Log.w("OrialisMemory", "Unable to schedule background memory job", error)
+                }
             }
         }
     }
@@ -77,8 +99,14 @@ class MemoryAnalysisJobService : JobService() {
     }
 
     private fun pending(): Boolean = try {
-        MemoryStore.list(this).any { it.optString("analysisStatus") in setOf("pending", "analyzing") ||
-            it.optString("analysisStatus") == "completed" && it.optString("category") !in setOf("ai", "other") }
+        MemoryStore.list(this).any {
+            if (!it.isNull("cloudDeletedAt") && it.optString("cloudDeletedAt").isNotBlank() &&
+                it.optString("cloudDeletedAt") != "pending") return@any false
+            it.optString("analysisStatus") in setOf("pending", "analyzing") ||
+            it.optString("analysisStatus") == "completed" && it.optString("category") !in setOf("ai", "other") ||
+            it.isNull("cloudVersion") || it.optString("cloudVersion").isBlank() ||
+            !it.isNull("cloudSyncError") && it.optString("cloudSyncError").isNotBlank() ||
+            it.optString("cloudDeletedAt") == "pending" }
     } catch (_: Exception) { false }
 
     private fun finish(retry: Boolean, completed: Boolean = false) {
@@ -125,9 +153,22 @@ private class MemoryBackgroundStoreBridge(context: Context, private val scope: S
                 try {
                     val response = synchronized(MemoryStore) {
                         check(MemoryStore.scope(app) == scope) { "账号已变更，请重试" }
+                        if (call.method in setOf("importCloud", "storeCloudImage")) {
+                            val expectedAccount = call.argument<String>("expectedScope")
+                            check(expectedAccount == null || MemoryStore.scope(app) == expectedAccount) { "账号已变更，请重试" }
+                        }
                         when (call.method) {
                             "status" -> mapOf("supported" to true)
                             "setScope" -> { check(call.argument<String>("scope") == scope) { "后台账号已失效" }; null }
+                            "importCloud" -> {
+                                require(call.hasArgument("expectedRecord")) { "需要本地记忆快照" }
+                                MemoryStore.asMap(MemoryStore.importCloud(app,
+                                    call.argument<Map<String, Any?>>("record") ?: error("缺少云端记忆"),
+                                    call.argument<Map<String, Any?>>("expectedRecord")))
+                            }
+                            "storeCloudImage" -> MemoryStore.storeCloudImage(app,
+                                call.argument<String>("id") ?: "", call.argument<Any>("bytes"),
+                                call.argument<String>("mimeType") ?: "", call.argument<String>("sha256") ?: "")
                             "list" -> MemoryStore.list(app).map(MemoryStore::asMap)
                             "read" -> MemoryStore.read(app, call.argument<String>("id") ?: "")?.let(MemoryStore::asMap)
                             "update" -> MemoryStore.asMap(MemoryStore.update(app, call.argument<String>("id") ?: "",
@@ -149,6 +190,14 @@ private class MemoryBackgroundStoreBridge(context: Context, private val scope: S
                 } catch (_: Exception) {
                     main.post { if (!disposed) result.error("memory_scope_changed", "后台记忆账号或记录已失效", null) }
                 }
+            }
+        }
+    }
+
+    fun notifyChanged(id: String?) {
+        main.post {
+            if (!disposed && MemoryStore.scope(app) == scope) {
+                channel.invokeMethod("memoryChanged", mapOf("id" to id))
             }
         }
     }

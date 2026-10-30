@@ -52,10 +52,11 @@ class OrialisGlassSegmented<T> extends StatelessWidget {
                           child: ConstrainedBox(
                             constraints: const BoxConstraints(minHeight: 44),
                             child: Center(
-                              child: Text(
-                                items[keys[i]]!,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              child: AnimatedDefaultTextStyle(
+                                duration: LuminaTheme.motionReducedOf(context)
+                                    ? Duration.zero
+                                    : LuminaMotion.fast,
+                                curve: luminaEaseOut,
                                 style: theme.textTheme.labelMedium.copyWith(
                                   color: i == selected
                                       ? theme.colors.accent
@@ -63,6 +64,11 @@ class OrialisGlassSegmented<T> extends StatelessWidget {
                                   fontWeight: i == selected
                                       ? FontWeight.w600
                                       : FontWeight.w500,
+                                ),
+                                child: Text(
+                                  items[keys[i]]!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ),

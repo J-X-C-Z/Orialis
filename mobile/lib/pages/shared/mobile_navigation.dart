@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart' show NavigationDestination;
@@ -22,6 +23,18 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
   final ValueChanged<int>? onDragEnd;
   final Widget child;
   final bool visible;
+
+  void _select(int index, {bool fromDrag = false}) {
+    if (index < 0 ||
+        index >= destinations.length ||
+        !destinations[index].enabled) {
+      return;
+    }
+    if (index != selectedIndex) unawaited(LuminaHaptics.selection());
+    (fromDrag ? onDragEnd ?? onDestinationSelected : onDestinationSelected)(
+      index,
+    );
+  }
 
   static double navigationInset(BuildContext context) {
     final label = LuminaTheme.of(context).textTheme.labelSmall;
@@ -48,70 +61,114 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
               enabled: destinations[i].enabled,
               label: destinations[i].label,
               child: LuminaSurface(
-                depth: neumorphic && !neumorphicGlass && selectedIndex == i
-                    ? LuminaSurfaceDepth.recessed
-                    : LuminaSurfaceDepth.normal,
                 radius: LuminaControlSize.capsuleRadius,
-                color: neumorphic && !neumorphicGlass && selectedIndex == i
-                    ? null
-                    : const Color(0x00000000),
-                padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 2),
-                onTap: destinations[i].enabled
-                    ? () => onDestinationSelected(i)
-                    : null,
-                child: _EtchedNavigationLabel(
-                  index: i,
-                  position: position,
-                  enabled: neumorphicGlass,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconTheme(
-                        data: IconThemeData(
-                          color: selectedIndex == i
-                              ? theme.colors.accent
-                              : theme.colors.muted,
-                        ),
-                        child: selectedIndex == i
-                            ? destinations[i].selectedIcon ??
-                                  destinations[i].icon
-                            : destinations[i].icon,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        destinations[i].label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall.copyWith(
-                          color: selectedIndex == i
-                              ? theme.colors.accent
-                              : theme.colors.muted,
-                          shadows:
-                              neumorphicGlass &&
-                                  !MediaQuery.highContrastOf(context)
-                              ? [
-                                  Shadow(
-                                    color: theme.colors.tone(
-                                      const Color(0xE6FFFFFF),
-                                      const Color(0x88596775),
-                                    ),
-                                    offset: const Offset(.65, 1),
-                                    blurRadius: .45,
-                                  ),
-                                  Shadow(
-                                    color: theme.colors.tone(
-                                      const Color(0x55536370),
-                                      const Color(0xCC070D15),
-                                    ),
-                                    offset: const Offset(-.4, -.55),
-                                    blurRadius: .35,
-                                  ),
-                                ]
-                              : null,
+                color: const Color(0x00000000),
+                padding: EdgeInsets.zero,
+                onTap: destinations[i].enabled ? () => _select(i) : null,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    if (neumorphic && !neumorphicGlass)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: AnimatedOpacity(
+                            key: ValueKey('nav-recessed-selection-$i'),
+                            opacity: selectedIndex == i ? 1 : 0,
+                            duration: LuminaTheme.motionReducedOf(context)
+                                ? Duration.zero
+                                : LuminaMotion.fast,
+                            curve: luminaEaseOut,
+                            child: LuminaSurface(
+                              depth: LuminaSurfaceDepth.recessed,
+                              color: theme.colors.accentSoft,
+                              radius: LuminaControlSize.capsuleRadius,
+                              padding: EdgeInsets.zero,
+                              child: const SizedBox.expand(),
+                            ),
+                          ),
                         ),
                       ),
-                    ],
-                  ),
+                    Padding(
+                      padding:
+                          const EdgeInsets.symmetric(
+                            vertical: 7,
+                            horizontal: 2,
+                          ) *
+                          theme.data.spacingScale,
+                      child: _EtchedNavigationLabel(
+                        index: i,
+                        position: position,
+                        enabled: neumorphicGlass,
+                        child: TweenAnimationBuilder<Color?>(
+                          tween: ColorTween(
+                            end: selectedIndex == i
+                                ? theme.colors.accent
+                                : theme.colors.muted,
+                          ),
+                          duration: LuminaTheme.motionReducedOf(context)
+                              ? Duration.zero
+                              : LuminaMotion.fast,
+                          curve: luminaEaseOut,
+                          builder: (context, color, _) => Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconTheme(
+                                data: IconThemeData(color: color),
+                                child: AnimatedSwitcher(
+                                  duration: LuminaTheme.motionReducedOf(context)
+                                      ? Duration.zero
+                                      : LuminaMotion.fast,
+                                  switchInCurve: luminaEaseOut,
+                                  switchOutCurve: luminaEaseOut,
+                                  child: KeyedSubtree(
+                                    key: ValueKey(
+                                      selectedIndex == i &&
+                                          destinations[i].selectedIcon != null,
+                                    ),
+                                    child: selectedIndex == i
+                                        ? destinations[i].selectedIcon ??
+                                              destinations[i].icon
+                                        : destinations[i].icon,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                destinations[i].label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelSmall.copyWith(
+                                  color: color,
+                                  shadows:
+                                      neumorphicGlass &&
+                                          !MediaQuery.highContrastOf(context)
+                                      ? [
+                                          Shadow(
+                                            color: theme.colors.tone(
+                                              const Color(0xE6FFFFFF),
+                                              const Color(0x88596775),
+                                            ),
+                                            offset: const Offset(.65, 1),
+                                            blurRadius: .45,
+                                          ),
+                                          Shadow(
+                                            color: theme.colors.tone(
+                                              const Color(0x55536370),
+                                              const Color(0xCC070D15),
+                                            ),
+                                            offset: const Offset(-.4, -.55),
+                                            blurRadius: .35,
+                                          ),
+                                        ]
+                                      : null,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -133,7 +190,7 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
                 for (final destination in destinations) destination.enabled,
               ],
               glass: neumorphicGlass,
-              onSelectionChanged: onDragEnd ?? onDestinationSelected,
+              onSelectionChanged: (index) => _select(index, fromDrag: true),
               builder: itemsAt,
             )
           : LuminaSlidingSelection(
@@ -141,7 +198,7 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
               count: destinations.length,
               longTravel: true,
               backdrop: false,
-              onDragEnd: onDragEnd ?? onDestinationSelected,
+              onDragEnd: (index) => _select(index, fromDrag: true),
               child: itemsAt(AlwaysStoppedAnimation(selectedIndex.toDouble())),
             ),
     );
@@ -249,6 +306,7 @@ class _OrialisNavigationSelectionState extends State<OrialisNavigationSelection>
     final width = _slotWidth;
     if (width <= 0) return;
     _dragging = true;
+    unawaited(LuminaHaptics.dragStart());
     _position.stop();
     _grabOffset = details.localPosition.dx - (_physicalPosition + .5) * width;
   }
@@ -274,15 +332,6 @@ class _OrialisNavigationSelectionState extends State<OrialisNavigationSelection>
   }
 
   void _settleTo(int index) {
-    if (!LuminaTheme.motionReducedOf(context) &&
-        LuminaTheme.of(context).highPerformanceMode) {
-      _position.animateTo(
-        index.toDouble(),
-        duration: const Duration(milliseconds: 180),
-        curve: luminaEaseOut,
-      );
-      return;
-    }
     _position.settleNavigation(
       index.toDouble(),
       reducedMotion: LuminaTheme.motionReducedOf(context),

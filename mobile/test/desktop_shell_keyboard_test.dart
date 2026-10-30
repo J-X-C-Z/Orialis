@@ -24,7 +24,10 @@ Future<GoRouter> _mountShell(WidgetTester tester, Size size) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = size;
   addTearDown(tester.view.reset);
-  final controllers = List.generate(10, (_) => TextEditingController());
+  final controllers = List.generate(
+    DesktopShell.labels.length,
+    (_) => TextEditingController(),
+  );
   final router = GoRouter(
     initialLocation: '/destination0',
     routes: [
@@ -35,7 +38,7 @@ Future<GoRouter> _mountShell(WidgetTester tester, Size size) async {
       StatefulShellRoute.indexedStack(
         builder: (_, _, shell) => DesktopShell(navigationShell: shell),
         branches: List.generate(
-          10,
+          DesktopShell.labels.length,
           (index) => StatefulShellBranch(
             routes: [
               GoRoute(

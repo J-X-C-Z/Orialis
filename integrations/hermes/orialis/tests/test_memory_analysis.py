@@ -1,14 +1,16 @@
 import asyncio
 import base64
+from contextvars import ContextVar
 import json
 import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from .. import protocol
 from ..memory_analysis import analyze_memory, _structured_result
 from ..memory_video import VideoEvidence
+from ..response_ui import MEMORY_UI_HINT
 
 
 class MemoryProtocolTests(unittest.TestCase):
@@ -45,6 +47,32 @@ class MemoryProtocolTests(unittest.TestCase):
 
 
 class MemoryCompletionTests(unittest.TestCase):
+    def test_memory_ui_survives_outer_json_and_background_result_transport(self):
+        document = {"version": 1, "title": "关键结论", "fallback": "高质量数据决定训练质量。",
+                    "blocks": [{"type": "facts", "items": [
+                        {"label": "训练数据", "value": "高质量数据决定训练质量。"}]}]}
+        fence = "```orialis-ui\n" + json.dumps(document, ensure_ascii=False) + "\n```"
+        summary = "# 训练要点\n\n优先检查数据质量。\n\n" + fence
+        video_summary = "视频强调训练数据质量。\n\n" + fence
+        source = "https://www.bilibili.com/video/BV1d8pU6xEZX"
+        for video in (VideoEvidence(), VideoEvidence(source_url=source, status="analyzed",
+                                                     captions="[3.0s] 高质量数据决定训练质量。")):
+            with self.subTest(video_status=video.status):
+                payload = json.dumps({"summary": summary, "category": "ai",
+                                      "video_summary": video_summary}, ensure_ascii=False)
+                completion = AsyncMock(return_value={"choices": [{"message": {
+                    "content": "```json\n" + payload + "\n```"}}]})
+                with patch("integrations.hermes.orialis.memory_analysis.collect_video", return_value=video), \
+                     patch.dict(sys.modules, {"agent.auxiliary_client": SimpleNamespace(async_call_llm=completion)}):
+                    result = asyncio.run(analyze_memory("字幕证据", source_urls=[source]))
+                self.assertEqual(result["content"], summary)
+                if video.status == "analyzed":
+                    self.assertEqual(result["video_summary"], video_summary)
+                else:
+                    self.assertNotIn("video_summary", result)
+                frame = {"version": 1, "type": "memory.result", "request_id": "memory-ui", **result}
+                self.assertEqual(protocol.parse_message(protocol.encode(frame)), frame)
+
     def test_fenced_structured_categories_are_parsed_and_invalid_classification_fails(self):
         self.assertEqual(_structured_result('```json\n{"summary":"# 标题\\n\\n正文","category":"ai"}\n```')["category"], "ai")
         for value in ({"summary": "# 标题\n\n正文", "category": "AI"},
@@ -77,6 +105,30 @@ class MemoryCompletionTests(unittest.TestCase):
         self.assertEqual(images, ["data:image/jpeg;base64,FRAME_JPEG", "data:image/jpeg;base64,SECOND_JPEG"])
         self.assertEqual(result["video_status"], "unavailable")
         self.assertNotIn("video_summary", result)
+
+    def test_joint_caption_and_full_frame_sequence_reach_model(self):
+        captions = "[0.0s] 开始演示\n[300.0s] 最终结论"
+        video = VideoEvidence(status="analyzed", captions=captions,
+                              frames=[(index * 13, f"JPEG_{index}") for index in range(24)])
+        completion = AsyncMock(return_value={"choices": [{"message": {"content": json.dumps({
+            "summary": "# 演示\n\n演示结论", "category": "ai", "video_summary": "[300s] 最终结论",
+        })}}]})
+        with patch("integrations.hermes.orialis.memory_analysis.collect_video", return_value=video), \
+             patch.dict(sys.modules, {"agent.auxiliary_client": SimpleNamespace(async_call_llm=completion)}):
+            result = asyncio.run(analyze_memory("BV1d8pU6xEZX"))
+        kwargs = completion.call_args.kwargs
+        evidence = kwargs["messages"][1]["content"]
+        context = json.loads(evidence[1]["text"].partition("：\n")[2])
+        self.assertEqual(context["captions"], captions)
+        images = [item["image_url"]["url"] for item in evidence if item["type"] == "image_url"]
+        self.assertEqual(images, [f"data:image/jpeg;base64,JPEG_{index}" for index in range(24)])
+        self.assertIn("[300s]", result["video_summary"])
+        prompt = kwargs["messages"][0]["content"]
+        self.assertIn("按时间顺序", prompt)
+        self.assertIn("区分作者陈述、可见事实", prompt)
+        self.assertIn("证据缺口会影响结论时", prompt)
+        self.assertIn("先写核心结论", prompt)
+        self.assertIn("按重要性", prompt)
 
     def test_no_media_evidence_cannot_be_promoted_to_analyzed_by_model(self):
         video = VideoEvidence(status="unavailable", error="平台未提供视频内容")
@@ -156,6 +208,13 @@ class MemoryCompletionTests(unittest.TestCase):
             self.assertEqual(asyncio.run(analyze_memory("屏幕证据", "JPEG")), {"content": "# 收藏\n\n内容摘要", "category": "ai", "video_status": "none"})
         kwargs = completion.call_args.kwargs
         self.assertEqual(kwargs["task"], "vision")
+        system = kwargs["messages"][0]["content"]
+        self.assertTrue(system.endswith(MEMORY_UI_HINT))
+        self.assertIn("仍只输出一个外层 JSON 对象", system)
+        self.assertIn("summary 必须先保留 # 标题", system)
+        for shape in ("facts:", "steps:", "comparison:", "accordion:", "table:"):
+            self.assertIn(shape, system)
+        self.assertIn("不要输出 choices、form、actions、agenda", system)
         self.assertNotIn("tools", kwargs)
         self.assertNotIn("session", kwargs)
         evidence = kwargs["messages"][1]["content"]
@@ -171,3 +230,107 @@ class MemoryCompletionTests(unittest.TestCase):
                 "agent.auxiliary_client": SimpleNamespace(async_call_llm=completion),
             }), self.assertRaises(ValueError):
                 asyncio.run(analyze_memory("证据"))
+
+
+class MemorySecretScopeTests(unittest.TestCase):
+    def scope_modules(self, current, owner):
+        def install(secrets, *, profile_home):
+            return current.set((secrets, profile_home))
+
+        api = SimpleNamespace(
+            is_multiplex_active=Mock(return_value=True),
+            current_secret_scope=current.get,
+            set_secret_scope=Mock(side_effect=install),
+            reset_secret_scope=Mock(side_effect=current.reset),
+        )
+        modules = {
+            "agent": SimpleNamespace(secret_scope=api),
+            "agent.secret_scope": api,
+            "hermes_constants": SimpleNamespace(get_hermes_home=lambda: "/tmp/memory-profile"),
+            "tui_gateway.launch_profile_policy": SimpleNamespace(owner_secret_scope=owner),
+        }
+        return api, modules
+
+    def test_background_scope_uses_profile_home_and_resets_after_success_or_failure(self):
+        for fail in (False, True):
+            with self.subTest(fail=fail):
+                current = ContextVar("memory_test_scope", default=None)
+                secrets = {"VISION_API_KEY": "test-only"}
+                owner = Mock(return_value=secrets)
+                api, modules = self.scope_modules(current, owner)
+
+                async def inner(content, image, urls):
+                    self.assertEqual(current.get(), (secrets, "/tmp/memory-profile"))
+                    self.assertEqual((content, image, urls), ("evidence", "JPEG", ["https://example.com"]))
+                    if fail:
+                        raise ValueError("provider-private-detail")
+                    return {"content": "# Result\n\nBody"}
+
+                async def run():
+                    if fail:
+                        with self.assertLogs("integrations.hermes.orialis.memory_analysis", level="WARNING") as logs:
+                            with self.assertRaises(ValueError):
+                                await analyze_memory("evidence", "JPEG", ["https://example.com"])
+                        self.assertNotIn("provider-private-detail", "\n".join(logs.output))
+                    else:
+                        self.assertEqual(await analyze_memory("evidence", "JPEG", ["https://example.com"]),
+                                         {"content": "# Result\n\nBody"})
+                    self.assertIsNone(current.get())
+
+                with patch.dict(sys.modules, modules), patch(
+                    "integrations.hermes.orialis.memory_analysis._analyze_memory", side_effect=inner,
+                ):
+                    asyncio.run(run())
+                self.assertEqual(str(owner.call_args.args[0]), "/tmp/memory-profile")
+                api.set_secret_scope.assert_called_once_with(secrets, profile_home="/tmp/memory-profile")
+                api.reset_secret_scope.assert_called_once()
+
+    def test_older_hermes_launch_secret_scope_helper_is_supported(self):
+        current = ContextVar("legacy_memory_scope", default=None)
+        secrets = {"VISION_API_KEY": "legacy-test-only"}
+        launch = Mock(return_value=secrets)
+        api, modules = self.scope_modules(current, launch)
+        modules["tui_gateway.launch_profile_policy"] = SimpleNamespace(launch_secret_scope=launch)
+
+        async def inner(*args):
+            self.assertEqual(current.get(), (secrets, "/tmp/memory-profile"))
+            return {"content": "# Legacy\n\nBody"}
+
+        async def run():
+            self.assertEqual(await analyze_memory("evidence"), {"content": "# Legacy\n\nBody"})
+            self.assertIsNone(current.get())
+
+        with patch.dict(sys.modules, modules), patch(
+            "integrations.hermes.orialis.memory_analysis._analyze_memory", side_effect=inner,
+        ):
+            asyncio.run(run())
+        launch.assert_called_once()
+        self.assertEqual(str(launch.call_args.args[0]), "/tmp/memory-profile")
+        api.set_secret_scope.assert_called_once_with(secrets, profile_home="/tmp/memory-profile")
+        api.reset_secret_scope.assert_called_once()
+
+    def test_existing_scope_is_preserved_and_owner_credentials_are_not_loaded(self):
+        current = ContextVar("existing_memory_scope", default=None)
+        owner = Mock(side_effect=AssertionError("must not load owner credentials"))
+        api, modules = self.scope_modules(current, owner)
+        existing = {"scope": "caller"}
+
+        async def inner(*args):
+            self.assertIs(current.get(), existing)
+            return {"content": "# Result\n\nBody"}
+
+        async def run():
+            token = current.set(existing)
+            try:
+                await analyze_memory("evidence")
+                self.assertIs(current.get(), existing)
+            finally:
+                current.reset(token)
+
+        with patch.dict(sys.modules, modules), patch(
+            "integrations.hermes.orialis.memory_analysis._analyze_memory", side_effect=inner,
+        ):
+            asyncio.run(run())
+        owner.assert_not_called()
+        api.set_secret_scope.assert_not_called()
+        api.reset_secret_scope.assert_not_called()

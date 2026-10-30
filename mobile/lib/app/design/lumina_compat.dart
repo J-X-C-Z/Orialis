@@ -2,7 +2,9 @@ import 'package:lumina_ui/lumina_ui.dart' as ui;
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'dart:async';
+
 export 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 /// Desktop chrome is opt-in at the shell; phone routes retain floating headers.
@@ -156,17 +158,11 @@ class LuminaCardMemory {
   }
 
   static Future<void> initialize() async {
-    LuminaHaptics.confirmHandler = () async {
-      try {
-        await const MethodChannel(
-          'top.jxcz.orialis/haptics',
-        ).invokeMethod<void>('confirm');
-      } on MissingPluginException {
-        await HapticFeedback.lightImpact();
-      } on PlatformException {
-        /* Unavailable haptics must not interrupt UI. */
-      }
-    };
+    LuminaHaptics.effectHandler = (effect) =>
+        const MethodChannel('top.jxcz.orialis/haptics')
+            .invokeMethod<void>(effect);
+    LuminaHaptics.selectionHandler = null;
+    LuminaHaptics.confirmHandler = null;
     try {
       _preferences = await SharedPreferences.getInstance();
       ui.LuminaCardMemory.store = _PreferencesCardStore(_preferences!);

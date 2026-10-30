@@ -42,3 +42,16 @@ The server validates syntax and persists worker metadata; the worker verifies
 provenance and media accessibility. Summary text allows 100000 UTF-8 bytes,
 video errors 4000 bytes. HTTP responses expose the same fields in camelCase.
 Migration 0020 adds these nullable columns without rewriting existing results.
+
+Screen-memory IntelligentUI uses the existing `content` and `video_summary`
+strings: an optional closed `orialis-ui` Markdown fence contains a v1 response
+UI document with a complete readable `fallback`. No new HTTP/gateway fields or
+migration are required. The worker keeps a `# Title` and concise plain-text
+conclusion in `content`, then chooses facts, steps, comparison, accordion or
+table only when useful. Video summaries follow the same presentation rule and
+still require actual media evidence. Clients render these fences in memory
+details, decode readable fallbacks for list previews and search, and retain old
+plain Markdown. Memory views supply neither chat callbacks nor action scopes;
+expanding/copying content creates no conversation, task or calendar event.
+Previously completed summaries remain as stored; this change does not rerun
+existing analyses automatically.

@@ -2,8 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
-import 'package:dio/dio.dart';
-import 'package:orialis_mobile/core/network/orialis_api_client.dart';
+import 'package:orialis_mobile/core/network/unified_login.dart';
 import 'package:orialis_mobile/core/database/legacy_database_reader.dart';
 import 'package:orialis_mobile/pages/profile/legacy_recovery.dart';
 
@@ -336,22 +335,21 @@ void main() {
         final anonymousCoordinator = ref.read(syncCoordinatorProvider);
         await suspendDesktopSync(ref);
         var loginFailed = false;
-        final api = OrialisApiClient(
-          baseUrl: config.baseUrl,
-          deviceId: await config.deviceId(),
-          config: config,
-        );
+        final login = UnifiedLogin(baseUrl: config.baseUrl);
         try {
-          await api.login(username: 'alice', password: 'synthetic-password');
-        } on DioException catch (error) {
-          expect(error.response?.statusCode, 503);
+          await login.login(
+            username: 'test',
+            password: 'test',
+            onConsent: (_) async => true,
+          );
+        } on FormatException {
           loginFailed = true;
         } finally {
           await reloadDesktopAccount(ref);
         }
         expect(loginFailed, true);
         expect(failedLogins, 1);
-        expect(loginPaths, ['/api/v1/auth/login']);
+        expect(loginPaths, ['/api/v1/auth/oidc/start']);
         expect(config.username, isNull);
         expect(ref.read(desktopDatabaseNameProvider), anonymousScope);
         db = ref.read(databaseProvider);

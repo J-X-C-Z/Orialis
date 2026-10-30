@@ -35,6 +35,7 @@ class _SwitchingSchedules extends EventRepository {
   _SwitchingSchedules({required super.database, required super.config});
   @override
   Future<void> createCalendarEvent({
+    String? eventId,
     required String title,
     required DateTime startAt,
     required DateTime endAt,
@@ -45,6 +46,7 @@ class _SwitchingSchedules extends EventRepository {
     int? reminderMinutes,
   }) async {
     await super.createCalendarEvent(
+      eventId: eventId,
       title: title,
       startAt: startAt,
       endAt: endAt,

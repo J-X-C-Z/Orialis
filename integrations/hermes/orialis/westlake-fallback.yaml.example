@@ -1,0 +1,7 @@
+# Merge into the Orialis Hermes profile's config.yaml (top level).
+# Keep the existing Westlake model and credentials unchanged.
+agent:
+  api_max_retries: 3 # Total attempts per API call, including the first attempt.
+fallback_providers:
+  - provider: openai-codex
+    model: gpt-6-luna

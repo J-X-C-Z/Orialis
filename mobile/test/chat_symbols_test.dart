@@ -104,14 +104,24 @@ void main() {
     (tester) async {
       final semantics = tester.ensureSemantics();
       await tester.pumpWidget(
-        _host(const ChatSymbol(ChatSymbolKind.thinking, semanticLabel: '正在思考')),
+        _host(
+          const ChatSymbol(
+            ChatSymbolKind.thinking,
+            animated: true,
+            semanticLabel: '正在思考',
+          ),
+        ),
       );
       await tester.pump(const Duration(milliseconds: 300));
       expect(tester.binding.transientCallbackCount, greaterThan(0));
 
       await tester.pumpWidget(
         _host(
-          const ChatSymbol(ChatSymbolKind.thinking, semanticLabel: '正在思考'),
+          const ChatSymbol(
+            ChatSymbolKind.thinking,
+            animated: true,
+            semanticLabel: '正在思考',
+          ),
           reduced: true,
         ),
       );

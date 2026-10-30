@@ -262,7 +262,7 @@ void main() {
       expect(device.label, '这台电脑');
       expect(device.online, true);
       await service.createConversation(device);
-      expect(createdTitle, '这台电脑');
+      expect(createdTitle, '新会话');
       expect(
         requests.last,
         'PUT /api/v1/conversations/conversation-mac/agent-device',
@@ -421,7 +421,7 @@ void main() {
       expect(device.label, '工作 Mac');
       expect(device.id, 'JXCZ_MBA_Hermes');
       await restarted.createConversation(device);
-      expect(createdTitle, '工作 Mac');
+      expect(createdTitle, '新会话');
       config.token = 'another-account';
       unavailable = true;
       expect((await restarted.devices()).first.label, 'Mac 电脑');

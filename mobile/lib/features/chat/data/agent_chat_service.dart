@@ -439,7 +439,7 @@ class AgentChatService {
     final api = await _clientFor(scope);
     await _loadDeviceNames(scope);
     final conversation = await api.createConversation(
-      title: targetLabel(device.id) ?? device.label,
+      title: '新会话',
     );
     try {
       await api.bindConversationAgentDevice(

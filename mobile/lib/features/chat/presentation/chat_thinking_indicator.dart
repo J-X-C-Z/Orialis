@@ -46,101 +46,23 @@ String? chatThinkingLabel(AgentEventStore store) {
       : null;
 }
 
-/// One ephemeral status line; only its text mask repaints on animation frames.
-class ChatThinkingIndicator extends StatefulWidget {
+/// A stationary label with one gently breathing status glyph.
+class ChatThinkingIndicator extends StatelessWidget {
   const ChatThinkingIndicator({required this.label, super.key});
   final String label;
-
-  @override
-  State<ChatThinkingIndicator> createState() => _ChatThinkingIndicatorState();
-}
-
-class _ChatThinkingIndicatorState extends State<ChatThinkingIndicator>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  late final _phase = AnimationController(
-    vsync: this,
-    duration: LuminaMotion.standard * 8,
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  void _updateAnimation() {
-    final lifecycle = WidgetsBinding.instance.lifecycleState;
-    final active = lifecycle == null || lifecycle == AppLifecycleState.resumed;
-    if (!active ||
-        !TickerMode.valuesOf(context).enabled ||
-        LuminaTheme.motionReducedOf(context)) {
-      _phase.stop();
-    } else if (!_phase.isAnimating) {
-      _phase.repeat();
-    }
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _updateAnimation();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) =>
-      _updateAnimation();
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _phase.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     final theme = LuminaTheme.of(context);
     final reduced = LuminaTheme.motionReducedOf(context);
-    final style = theme.textTheme.bodySmall.copyWith(color: theme.colors.ink);
-    final text = Text(widget.label, style: style);
-    final content = reduced
-        ? Text(
-            widget.label,
-            style: style.copyWith(
-              color: theme.colors.ink.withValues(alpha: .45),
-            ),
-          )
-        : AnimatedBuilder(
-            animation: _phase,
-            child: text,
-            builder: (context, child) => ShaderMask(
-              blendMode: BlendMode.srcIn,
-              shaderCallback: (bounds) =>
-                  LinearGradient(
-                    colors: [
-                      theme.colors.ink.withValues(alpha: .32),
-                      theme.colors.ink.withValues(alpha: .72),
-                      theme.colors.ink.withValues(alpha: .32),
-                    ],
-                  ).createShader(
-                    Rect.fromLTWH(
-                      bounds.left + bounds.width * (_phase.value * 3 - 1),
-                      bounds.top,
-                      bounds.width,
-                      bounds.height,
-                    ),
-                  ),
-              child: child,
-            ),
-          );
-    final kind = widget.label.contains('回复')
+    final kind = label.contains('回复')
         ? ChatSymbolKind.send
-        : widget.label.contains('等待')
+        : label.contains('等待')
         ? ChatSymbolKind.working
         : ChatSymbolKind.thinking;
     return Semantics(
       liveRegion: true,
-      label: widget.label,
+      label: label,
       excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -148,7 +70,14 @@ class _ChatThinkingIndicatorState extends State<ChatThinkingIndicator>
           children: [
             ChatSymbol(kind, size: 18, animated: !reduced),
             const SizedBox(width: 8),
-            Expanded(child: RepaintBoundary(child: content)),
+            Expanded(
+              child: Text(
+                label,
+                style: theme.textTheme.bodySmall.copyWith(
+                  color: theme.colors.ink.withValues(alpha: .65),
+                ),
+              ),
+            ),
           ],
         ),
       ),

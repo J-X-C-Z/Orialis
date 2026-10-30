@@ -30,9 +30,9 @@ function overlaps(s, d, offset) {
 }
 function normalize(raw) {
   const source = raw && raw.schemaVersion === 1 ? raw : {}
-  const o = { schemaVersion: 1, present: raw && raw.schemaVersion === 1, today: date(source.today), utcOffsetMinutes: typeof source.utcOffsetMinutes === 'number' ? source.utcOffsetMinutes : null, profile: source.profile || {}, sync: source.sync || {}, coverage: {}, truncated: !!(source.truncated || source.coverage && source.coverage.truncated) }
+  const o = { schemaVersion: 1, present: raw && raw.schemaVersion === 1, today: date(source.today), utcOffsetMinutes: typeof source.utcOffsetMinutes === 'number' ? source.utcOffsetMinutes : null, profile: source.profile || {}, sync: Object.assign({}, source.sync || {}, { status: ({ unknown: '同步状态未知', pending: '待同步', syncing: '正在同步', synced: '已同步', error: '同步失败' })[(source.sync || {}).status] || (source.sync || {}).status || '同步状态未知' }), coverage: {}, truncated: !!(source.truncated || source.coverage && source.coverage.truncated) }
   KINDS.forEach((kind) => {
-    o[kind] = (Array.isArray(source[kind]) ? source[kind] : []).filter((x) => x && typeof x.id === 'string' && typeof x[kind === 'projects' ? 'name' : 'title'] === 'string').map((x) => {
+    o[kind] = (Array.isArray(source[kind]) ? source[kind] : []).filter((x) => x && typeof x.id === 'string' && typeof x[kind === 'projects' ? 'name' : 'title'] === 'string').filter((x) => kind !== 'schedules' || isFinite(Date.parse(x.startAt)) && Date.parse(x.endAt) > Date.parse(x.startAt)).map((x) => {
       const a = Object.assign({}, x)
       a.id = str(x.id); a.title = str(x.title); a.name = str(x.name); a.notes = str(x.notes); a.description = str(x.description); a.goal = str(x.goal); a.location = str(x.location)
       a.due = date(x.due) || null; a.important = tri(x.important); a.urgent = tri(x.urgent); if (kind === 'tasks' || kind === 'milestones') a.completed = x.completed === true; else delete a.completed
@@ -71,9 +71,9 @@ function build(o, pageKind, selection, filter, calendarDate, calendarMode) {
   if (pageKind === 'home') {
     const focused = ordered(rootTasks.filter((t) => !t.completed && (t.important === true && t.urgent === true || t.due && t.due <= o.today)), 'manualPosition')
     model.rows = rows(o, 'tasks', focused)
-    model.deadlines = rows(o, 'tasks', ordered(rootTasks.filter((t) => !t.completed && t.due && t.due > o.today), 'manualPosition').sort((a, b) => a.due.localeCompare(b.due)))
-    const now = Date.now(); model.nowSchedule = rows(o, 'schedules', o.schedules.filter((s) => overlaps(s, o.today, o.utcOffsetMinutes) && Date.parse(s.endAt) > now).sort((a, b) => a.startAt.localeCompare(b.startAt)))[0] || null
-    model.later = rows(o, 'schedules', o.schedules.filter((s) => dayOf(s.startAt, o.utcOffsetMinutes) === o.today && Date.parse(s.startAt) > now && (!model.nowSchedule || s.id !== model.nowSchedule.id)).sort((a, b) => a.startAt.localeCompare(b.startAt)))
+    model.deadlines = rows(o, 'tasks', ordered(rootTasks.filter((t) => !t.completed && t.due && t.due > o.today), 'manualPosition'))
+    const now = Date.now(); model.nowSchedule = rows(o, 'schedules', o.schedules.filter((s) => overlaps(s, o.today, o.utcOffsetMinutes) && Date.parse(s.endAt) > now).sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt) || a.id.localeCompare(b.id)))[0] || null
+    model.later = rows(o, 'schedules', o.schedules.filter((s) => dayOf(s.startAt, o.utcOffsetMinutes) === o.today && Date.parse(s.startAt) > now && (!model.nowSchedule || s.id !== model.nowSchedule.id)).sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt) || a.id.localeCompare(b.id)))
     const next = model.nowSchedule ? [model.nowSchedule] : []
     const nextSchedule = model.nowSchedule && o.schedules.filter((s) => s.id === model.nowSchedule.id)[0]
     model.cards = [
@@ -93,7 +93,7 @@ function build(o, pageKind, selection, filter, calendarDate, calendarMode) {
     if (calendarMode === '月') { first = d.slice(0, 8) + '01'; count = new Date(js.getUTCFullYear(), js.getUTCMonth() + 1, 0).getDate() }
     if (calendarMode === '月') { const padding = (new Date(first + 'T12:00:00Z').getUTCDay() + 6) % 7; for (let n = 0; n < padding; n++) model.days.push({ date: '', label: '', count: 0, selected: false }) }
     for (let i = 0; i < count; i++) { const value = shift(first, i); const schedules = o.schedules.filter((s) => overlaps(s, value, o.utcOffsetMinutes)); const tasks = o.tasks.filter((t) => !t.completed && t.due === value); model.days.push({ date: value, label: value.slice(8), count: schedules.length + tasks.length, selected: value === d }) }
-    model.scheduleRows = rows(o, 'schedules', o.schedules.filter((s) => overlaps(s, d, o.utcOffsetMinutes)).sort((a, b) => a.startAt.localeCompare(b.startAt)))
+    model.scheduleRows = rows(o, 'schedules', o.schedules.filter((s) => overlaps(s, d, o.utcOffsetMinutes)).sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt) || a.id.localeCompare(b.id)))
     model.rows = rows(o, 'tasks', o.tasks.filter((t) => !t.completed && t.due === d))
   }
   if (selection) {
@@ -102,7 +102,7 @@ function build(o, pageKind, selection, filter, calendarDate, calendarMode) {
       const detail = Object.assign({}, item, { kind: selection.kind, displayTitle: selection.kind === 'projects' ? item.name : item.title, statusLabel: selection.kind === 'tasks' ? taskLabel(item) : selection.kind === 'projects' ? ({ active: '进行中', completed: '已完成', archived: '已归档' }[item.status] || item.status || '未知') : selection.kind === 'schedules' ? (item.allDay ? '全天日程' : '日程') : item.completed ? '已完成' : '待完成' })
       model.detail = detail
       if (selection.kind === 'tasks') { model.related = rows(o, 'tasks', o.tasks.filter((t) => t.parentTaskId === item.id)); detail.canAddChild = !item.parentTaskId && !item.scheduleId }
-      if (selection.kind === 'schedules') { model.related = rows(o, 'tasks', o.tasks.filter((t) => t.scheduleId === item.id)); detail.when = dayOf(item.startAt, o.utcOffsetMinutes) + ' ' + timeOf(item.startAt, o.utcOffsetMinutes) + ' 至 ' + dayOf(item.endAt, o.utcOffsetMinutes) + ' ' + timeOf(item.endAt, o.utcOffsetMinutes) }
+      if (selection.kind === 'schedules') { model.related = rows(o, 'tasks', o.tasks.filter((t) => t.scheduleId === item.id)); detail.when = item.allDay ? dayOf(item.startAt, o.utcOffsetMinutes) + ' 至 ' + dayOf(new Date(Date.parse(item.endAt) - 1).toISOString(), o.utcOffsetMinutes) + ' · 全天' : dayOf(item.startAt, o.utcOffsetMinutes) + ' ' + timeOf(item.startAt, o.utcOffsetMinutes) + ' 至 ' + dayOf(item.endAt, o.utcOffsetMinutes) + ' ' + timeOf(item.endAt, o.utcOffsetMinutes) }
       if (selection.kind === 'projects') { model.related = rows(o, 'tasks', ordered(o.tasks.filter((t) => t.projectId === item.id && !t.parentTaskId), 'manualPosition')); model.milestones = rows(o, 'milestones', ordered(o.milestones.filter((m) => m.projectId === item.id), 'position')); detail.progress = model.milestones.filter((m) => m.completed).length + '/' + model.milestones.length; const next = o.tasks.filter((t) => t.id === item.nextActionTaskId && !t.completed)[0] || o.tasks.filter((t) => t.projectId === item.id && !t.completed).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999') || a.id.localeCompare(b.id))[0]; detail.next = next ? next.title : '暂无下一步任务' }
     }
   }

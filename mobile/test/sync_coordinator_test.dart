@@ -11,6 +11,83 @@ import 'package:orialis_mobile/features/chat/data/chat_repository.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('missed hints retry automatically and stop outside foreground', (
+    tester,
+  ) async {
+    final realtime = _TestRealtime();
+    var runs = 0;
+    final coordinator = SyncCoordinator(
+      sync: () async {
+        runs++;
+        return runs == 1 ? SyncState.offline : SyncState.idle;
+      },
+      realtime: realtime,
+    );
+    await coordinator.start();
+    expect(runs, 1);
+    await tester.pump(const Duration(seconds: 30));
+    expect(runs, 2);
+    coordinator.setForeground(false);
+    await tester.pump(const Duration(minutes: 2));
+    expect(runs, 2);
+    coordinator.setForeground(true);
+    await tester.pump(const Duration(seconds: 30));
+    expect(runs, 3);
+    await tester.runAsync(coordinator.dispose);
+    await tester.pump(const Duration(minutes: 1));
+    expect(runs, 3);
+    await realtime.frames.close();
+  });
+
+  testWidgets(
+    'polling skips busy syncs and hints pull again after completion',
+    (tester) async {
+      final realtime = _TestRealtime();
+      final gate = Completer<SyncState>();
+      var runs = 0;
+      final coordinator = SyncCoordinator(
+        sync: () {
+          runs++;
+          return runs == 1 ? gate.future : Future.value(SyncState.idle);
+        },
+        realtime: realtime,
+      );
+      final startup = coordinator.start();
+      await tester.pump(const Duration(minutes: 2));
+      expect(runs, 1);
+      gate.complete(SyncState.idle);
+      await startup;
+      await tester.pump();
+      expect(runs, 1, reason: 'Polls must not build a retry backlog');
+      realtime.frames.add(
+        const MobileEnvelope(type: 'sync.change_hint', payload: {'cursor': 1}),
+      );
+      await tester.pump();
+      expect(runs, 2);
+      await tester.runAsync(coordinator.dispose);
+      await realtime.frames.close();
+    },
+  );
+
+  testWidgets('unexpected failure does not stop subsequent automatic pulls', (
+    tester,
+  ) async {
+    final realtime = _TestRealtime();
+    var runs = 0;
+    final coordinator = SyncCoordinator(
+      sync: () async {
+        if (++runs == 1) throw StateError('temporary failure');
+        return SyncState.idle;
+      },
+      realtime: realtime,
+    );
+    await coordinator.start();
+    await tester.pump(const Duration(seconds: 30));
+    expect(runs, 2);
+    await tester.runAsync(coordinator.dispose);
+    await realtime.frames.close();
+  });
+
   for (final state in [
     SyncState.idle,
     SyncState.offline,

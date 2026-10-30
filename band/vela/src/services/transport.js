@@ -47,9 +47,9 @@ const transport = {
     }
     try {
       this.conn = interconnect.instance()
-      this.conn.onopen = (event) => { this.connectionStatus = event && event.isReconnected ? '已重连' : '连接已打开'; this.detail = ''; store.setPhoneState('online') }
-      this.conn.onclose = (event) => { this.connectionStatus = '连接已断开'; this.detail = event && event.data ? String(event.data) : ''; store.setPhoneState('offline') }
-      this.conn.onerror = (event) => { this.connectionStatus = '互联错误'; this.detail = event && event.data ? String(event.data) : ''; store.setPhoneState('offline') }
+      this.conn.onopen = (event) => { this.diagnosisId = (this.diagnosisId || 0) + 1; this.connectionStatus = event && event.isReconnected ? '已重连' : '连接已打开'; this.detail = ''; store.setPhoneState('online') }
+      this.conn.onclose = (event) => { this.diagnosisId = (this.diagnosisId || 0) + 1; this.connectionStatus = '连接已断开'; this.detail = event && event.data ? String(event.data) : ''; store.setPhoneState('offline') }
+      this.conn.onerror = (event) => { this.diagnosisId = (this.diagnosisId || 0) + 1; this.connectionStatus = '互联错误'; this.detail = event && event.data ? String(event.data) : ''; store.setPhoneState('offline') }
       this.conn.onmessage = (event) => this.receive(event && event.data)
       this.diagnose()
     } catch (error) {
@@ -58,20 +58,25 @@ const transport = {
     }
   },
   diagnose() {
+    if (this.destroyed) return
     if (!this.conn || typeof this.conn.diagnosis !== 'function') {
       this.connectionStatus = '不支持：diagnosis() 不可用'
       return
     }
+    const diagnosisId = this.diagnosisId = (this.diagnosisId || 0) + 1
+    // Connection events are newer evidence than a pending diagnosis result.
+    const active = () => !this.destroyed && diagnosisId === this.diagnosisId
     this.connectionStatus = '正在诊断连接'
     this.conn.diagnosis({
       timeout: 10000,
       success: (data) => {
+        if (!active()) return
         const status = data && data.status
         store.setPhoneState(status === 0 ? 'online' : 'offline')
         this.connectionStatus = status === 0 ? (this.storageSupported ? '已连接' : '已连接；快照存储不支持') : status === 204 ? '连接超时' : status === 1001 ? '手机端应用未安装' : '连接不可用 (' + status + ')'
         this.detail = status === 0 ? (this.storageSupported ? '可发送 W0 Ping。' : 'Ping 可用；快照不会确认持久化或发送 ACK。') : '检查手机应用安装、证书配对与 Mi Fitness 状态。'
       },
-      fail: (data, code) => { this.connectionStatus = '连接诊断失败'; this.detail = 'code=' + code + ' ' + stringifyError(data) }
+      fail: (data, code) => { if (!active()) return; store.setPhoneState('offline'); this.connectionStatus = '连接诊断失败'; this.detail = 'code=' + code + ' ' + stringifyError(data) }
     })
   },
   ping() {
@@ -267,6 +272,7 @@ const transport = {
   },
   onDestroy() {
     this.destroyed = true
+    this.diagnosisId = (this.diagnosisId || 0) + 1
     this.restoringCache = false
     this.cacheReady = false
     this.started = false

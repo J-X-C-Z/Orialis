@@ -1,6 +1,7 @@
 import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart' show NavigationDestination;
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lumina_ui/lumina_ui.dart';
 import 'package:orialis_mobile/pages/shared/mobile_navigation.dart';
@@ -19,6 +20,9 @@ Future<({int Function() selected, ValueChanged<bool> setKeyboard})> _mount(
   double width = 400,
   double textScale = 2,
   double bottomInset = 0,
+  bool neumorphic = true,
+  bool glass = true,
+  ValueChanged<int>? onDragEnd,
 }) async {
   tester.view.physicalSize = Size(width, 880);
   tester.view.devicePixelRatio = 1;
@@ -46,9 +50,9 @@ Future<({int Function() selected, ValueChanged<bool> setKeyboard})> _mount(
               child: LuminaTheme(
                 highPerformanceMode: highPerformance,
                 reduceTransparency: reduceTransparency,
-                data: const LuminaThemeData(
-                  neumorphic: true,
-                  neumorphicGlass: true,
+                data: LuminaThemeData(
+                  neumorphic: neumorphic,
+                  neumorphicGlass: glass,
                 ),
                 child: DefaultTextStyle(
                   style: const TextStyle(fontSize: 15),
@@ -64,6 +68,12 @@ Future<({int Function() selected, ValueChanged<bool> setKeyboard})> _mount(
                     ],
                     onDestinationSelected: (value) =>
                         setState(() => selected = value),
+                    onDragEnd: onDragEnd == null
+                        ? null
+                        : (value) {
+                            onDragEnd(value);
+                            setState(() => selected = value);
+                          },
                     child: const SizedBox.expand(),
                   ),
                 ),
@@ -85,6 +95,112 @@ Transform _engraving(WidgetTester tester, int index) =>
     tester.widget<Transform>(find.byKey(ValueKey('nav-engraving-$index')));
 
 void main() {
+  for (final style in ['glass', 'recessed', 'classic']) {
+    testWidgets('$style navigation ticks once per tap or drag selection', (
+      tester,
+    ) async {
+      var ticks = 0;
+      var dragCommits = 0;
+      final previousHandler = LuminaHaptics.effectHandler;
+      LuminaHaptics.effectHandler = (effect) async {
+        if (effect == 'selection') ticks++;
+      };
+      addTearDown(() => LuminaHaptics.effectHandler = previousHandler);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'HapticFeedback.vibrate' &&
+              call.arguments == 'HapticFeedbackType.selectionClick') {
+            ticks++;
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      final nav = await _mount(
+        tester,
+        disabledIndex: 4,
+        neumorphic: style != 'classic',
+        glass: style == 'glass',
+        onDragEnd: (_) => dragCommits++,
+      );
+      expect(ticks, 0);
+      await tester.tap(find.text('Today'));
+      await tester.tap(find.text('Me'));
+      await tester.pumpAndSettle();
+      expect(ticks, 0);
+      await tester.tap(find.text('Tasks'));
+      await tester.pumpAndSettle();
+      expect(nav.selected(), 1);
+      expect(ticks, 1);
+      await tester.tap(find.text('Tasks'));
+      await tester.pumpAndSettle();
+      expect(ticks, 1);
+
+      Future<void> drag({bool cancel = false, String target = 'Chat'}) async {
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.text('Tasks')),
+        );
+        await tester.pump(const Duration(milliseconds: 600));
+        await gesture.moveTo(tester.getCenter(find.text(target)));
+        await tester.pump();
+        expect(ticks, 1);
+        if (cancel) {
+          await gesture.cancel();
+        } else {
+          await gesture.up();
+        }
+        await tester.pumpAndSettle();
+      }
+
+      await drag(cancel: true);
+      await drag(target: 'Tasks');
+      expect(nav.selected(), 1);
+      expect(ticks, 1);
+      if (style != 'classic') {
+        await drag(target: 'Me');
+        expect(nav.selected(), 1);
+        expect(ticks, 1);
+      }
+      dragCommits = 0;
+      await drag();
+      expect(nav.selected(), 2);
+      expect(dragCommits, 1);
+      expect(ticks, 2);
+      await tester.pumpAndSettle();
+      expect(ticks, 2);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('unavailable haptics do not prevent navigation', (tester) async {
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'HapticFeedback.vibrate') {
+          throw PlatformException(code: 'unavailable');
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    final nav = await _mount(tester);
+    await tester.tap(find.text('Chat'));
+    await tester.pumpAndSettle();
+    expect(nav.selected(), 2);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('performance navigation paints frost without sampling the page', (
     tester,
   ) async {

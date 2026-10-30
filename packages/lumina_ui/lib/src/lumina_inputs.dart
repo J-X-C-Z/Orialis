@@ -248,7 +248,13 @@ class _LuminaSwitchState extends State<LuminaSwitch> {
   @override
   Widget build(BuildContext context) {
     final enabled = widget.onChanged != null;
-    final activate = enabled ? () => widget.onChanged!(!widget.value) : null;
+    void change(bool value) {
+      if (value == widget.value) return;
+      unawaited(LuminaHaptics.toggle(value));
+      widget.onChanged!(value);
+    }
+
+    final activate = enabled ? () => change(!widget.value) : null;
     return MergeSemantics(
       child: Semantics(
         toggled: widget.value,
@@ -301,7 +307,7 @@ class _LuminaSwitchState extends State<LuminaSwitch> {
                         count: 2,
                         confirmed: widget.value,
                         onDragEnd: enabled
-                            ? (index) => widget.onChanged!(index == 1)
+                            ? (index) => change(index == 1)
                             : null,
                         child: const SizedBox.expand(),
                       ),
@@ -356,6 +362,7 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
   bool _dragging = false;
   double _grabOffset = 0;
   bool _atEdge = false;
+  int? _dragTick;
 
   void _startDrag(LongPressStartDetails details) {
     final width = (context.size?.width ?? 0) / widget.count;
@@ -365,9 +372,10 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
     final slot = details.localPosition.dx / width;
     if ((slot - selected - .5).abs() > .5) return;
     _dragging = true;
+    _dragTick = widget.index;
     position.stop();
     _grabOffset = details.localPosition.dx - (selected + .5) * width;
-    unawaited(LuminaHaptics.confirm());
+    unawaited(LuminaHaptics.dragStart());
   }
 
   void _moveDrag(Offset local) {
@@ -377,7 +385,7 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
     final raw = (local.dx - _grabOffset) / width - .5;
     final last = (widget.count - 1).toDouble();
     final edge = raw < 0 || raw > last;
-    if (edge && !_atEdge) unawaited(LuminaHaptics.confirm());
+    if (edge != _atEdge) unawaited(LuminaHaptics.threshold(edge));
     _atEdge = edge;
     final damped = raw < 0
         ? (raw * .22).clamp(-.18, 0.0)
@@ -386,6 +394,11 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
         : raw;
     final rtl = Directionality.of(context) == TextDirection.rtl;
     position.value = rtl ? last - damped : damped;
+    final tick = position.value.round().clamp(0, widget.count - 1);
+    if (tick != _dragTick) {
+      _dragTick = tick;
+      unawaited(LuminaHaptics.tick());
+    }
   }
 
   void _endDrag(Offset local) {
@@ -463,7 +476,17 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+    tween: Tween(end: widget.confirmed ? 1 : 0),
+    duration: LuminaTheme.motionReducedOf(context)
+        ? Duration.zero
+        : LuminaMotion.fast,
+    curve: luminaEaseOut,
+    builder: (context, confirmation, _) =>
+        _buildSelection(context, confirmation),
+  );
+
+  Widget _buildSelection(BuildContext context, double confirmation) {
     final content = widget.onDragEnd == null
         ? widget.child
         : GestureDetector(
@@ -499,20 +522,24 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
                         child: cover
                             ? const LuminaGlassCoat()
                             : LuminaGlassWell(
-                                tint: widget.confirmed
-                                    ? LuminaTheme.of(context).colors.accentSoft
-                                    : null,
-                                child: widget.confirmed
-                                    ? Center(
-                                        child: LuminaIcon(
-                                          LuminaIcons.check,
-                                          size: 16,
-                                          color: LuminaTheme.of(context)
-                                              .colors
-                                              .ink,
-                                        ),
-                                      )
-                                    : const SizedBox.expand(),
+                                tint: Color.lerp(
+                                  LuminaTheme.of(context).colors.surface,
+                                  LuminaTheme.of(context).colors.accentSoft,
+                                  confirmation,
+                                ),
+                                child: Opacity(
+                                  key: const ValueKey(
+                                    'lumina-selection-confirmation',
+                                  ),
+                                  opacity: confirmation,
+                                  child: Center(
+                                    child: LuminaIcon(
+                                      LuminaIcons.check,
+                                      size: 16,
+                                      color: LuminaTheme.of(context).colors.ink,
+                                    ),
+                                  ),
+                                ),
                               ),
                       ),
                     ),
@@ -559,18 +586,24 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
                     neumorphic: LuminaTheme.of(context).data.neumorphic,
                     colors: LuminaTheme.of(context).colors,
                     tint: LuminaTheme.of(context).data.neumorphic
-                        ? (widget.confirmed
-                              ? LuminaTheme.of(context).colors.accentSoft
-                              : LuminaTheme.of(context).colors.surface)
+                        ? Color.lerp(
+                            LuminaTheme.of(context).colors.surface,
+                            LuminaTheme.of(context).colors.accentSoft,
+                            confirmation,
+                          )!
                         : LuminaCardScope.of(context)
-                        ? (widget.confirmed
-                              ? LuminaTheme.of(context).colors.accent
-                              : LuminaTheme.of(context).colors.accentSoft)
-                        : widget.confirmed
-                        ? LuminaTheme.of(context).colors.accent
-                              .withValues(alpha: .62)
-                        : LuminaTheme.of(context).colors.accentSoft
-                              .withValues(alpha: .14),
+                        ? Color.lerp(
+                            LuminaTheme.of(context).colors.accentSoft,
+                            LuminaTheme.of(context).colors.accent,
+                            confirmation,
+                          )!
+                        : Color.lerp(
+                            LuminaTheme.of(context).colors.accentSoft
+                                .withValues(alpha: .14),
+                            LuminaTheme.of(context).colors.accent
+                                .withValues(alpha: .62),
+                            confirmation,
+                          )!,
                     radius: LuminaControlSize.capsuleRadius,
                     depth: LuminaSurfaceDepth.raised,
                     shoulder: false,
@@ -587,20 +620,22 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
                         LuminaTheme.of(context).data.liquidGlass,
                     cheapShadow: true,
                   ),
-                  child: widget.confirmed
-                      ? Center(
-                          child: LuminaIcon(
-                            LuminaIcons.check,
-                            size: 16,
-                            color:
-                                LuminaTheme.of(context).data.neumorphic ||
-                                    MediaQuery.highContrastOf(context) ||
-                                    LuminaTheme.of(context).reduceTransparency
-                                ? LuminaTheme.of(context).colors.ink
-                                : LuminaTheme.of(context).colors.surface,
-                          ),
-                        )
-                      : const SizedBox.expand(),
+                  child: Opacity(
+                    key: const ValueKey('lumina-selection-confirmation'),
+                    opacity: confirmation,
+                    child: Center(
+                      child: LuminaIcon(
+                        LuminaIcons.check,
+                        size: 16,
+                        color:
+                            LuminaTheme.of(context).data.neumorphic ||
+                                MediaQuery.highContrastOf(context) ||
+                                LuminaTheme.of(context).reduceTransparency
+                            ? LuminaTheme.of(context).colors.ink
+                            : LuminaTheme.of(context).colors.surface,
+                      ),
+                    ),
+                  ),
                 ),
               ),
               builder: (context, child) {

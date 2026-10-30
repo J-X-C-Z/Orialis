@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orialis_mobile/core/config/app_config.dart';
@@ -59,6 +61,7 @@ class _Api extends OrialisApiClient {
   int replyAfterPoll = 2;
   bool reply = true, failSubmitOnce = false, hideMismatchedJob = false;
   String replyContent = '# 科学视频\n\n视频讲解科学现象。';
+  String replyVideoSummary = '字幕与画面中的科学知识。';
   void Function()? onSubmit, onPoll;
   Completer<void>? submitGate;
 
@@ -77,7 +80,7 @@ class _Api extends OrialisApiClient {
         'category': 'ai',
         'sourceUrl': 'https://b23.tv/Original',
         'videoStatus': 'analyzed',
-        'videoSummary': '字幕与画面中的科学知识。',
+        'videoSummary': replyVideoSummary,
       };
     }
     return hideMismatchedJob && job?['id'] != id ? null : job;
@@ -217,6 +220,62 @@ void main() {
   });
   Future<MemoryRecord> record() => repository.read('capture-1');
 
+  test('background writeback preserves UI fences in both summaries', () async {
+    final fence =
+        '```orialis-ui\n${jsonEncode({
+          'version': 1,
+          'fallback': '数据质量决定训练效果。',
+          'blocks': [
+            {
+              'type': 'facts',
+              'items': [
+                {'label': '数据质量', 'value': '决定训练效果'},
+              ],
+            },
+          ],
+        })}\n```';
+    api.replyContent = '# 科学视频\n\n数据质量决定训练效果。\n\n$fence';
+    api.replyVideoSummary = '先检查数据。\n\n$fence';
+    await analyzer.analyze(await record());
+    final saved = MemoryRecord.fromMap((await record()).toMap());
+    expect(saved.summary, api.replyContent);
+    expect(saved.videoSummary, api.replyVideoSummary);
+    expect(saved.analysisStatus, 'completed');
+    expect(saved.notes, 'PRIVATE_USER_NOTES');
+  });
+
+  test(
+    'submission returns before model completion and resumes without reupload',
+    () async {
+      api.reply = false;
+      await analyzer.analyze(await record(), submitOnly: true);
+      expect(api.submitted, hasLength(1));
+      expect(repository.record['analysisStatus'], 'analyzing');
+      expect(repository.record['summary'], isNull);
+      api.reply = true;
+      await analyzer.analyze(await record());
+      expect(api.submitted, hasLength(1));
+      expect(repository.record['analysisStatus'], 'completed');
+    },
+  );
+
+  test(
+    'temporary HTTP failure keeps the stable job for automatic recovery',
+    () async {
+      api.onPoll = () => throw DioException(
+        requestOptions: RequestOptions(path: '/memory'),
+        type: DioExceptionType.connectionError,
+      );
+      await analyzer.analyze(await record());
+      expect(repository.record['analysisStatus'], 'pending');
+      expect(repository.record['analysisError'], contains('自动重试'));
+      api.onPoll = null;
+      await analyzer.analyze(await record());
+      expect(repository.record['analysisStatus'], 'completed');
+      expect(api.submitted, hasLength(1));
+    },
+  );
+
   test(
     'submits screenshot in background and saves summary without chat activity',
     () async {
@@ -327,8 +386,8 @@ void main() {
     agents.azureOnline = false;
     await analyzer.analyze(await record());
     expect(api.submitted, isEmpty);
-    expect(repository.record['analysisStatus'], 'failed');
-    expect(repository.record['analysisError'], contains('Azure Hermes'));
+    expect(repository.record['analysisStatus'], 'pending');
+    expect(repository.record['analysisError'], contains('自动重试'));
   });
 
   test(
@@ -383,8 +442,8 @@ void main() {
         pollInterval: const Duration(milliseconds: 2),
       );
       await analyzer.analyze(await record());
-      expect(repository.record['analysisStatus'], 'failed');
-      expect(repository.record['analysisError'], contains('超时'));
+      expect(repository.record['analysisStatus'], 'pending');
+      expect(repository.record['analysisError'], contains('自动继续'));
       expect(repository.record['notes'], 'PRIVATE_USER_NOTES');
       expect(repository.record['imagePath'], '/private/capture-1.png');
       api.reply = true;

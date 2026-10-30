@@ -1,0 +1,25 @@
+[Unit]
+Description=Orialis MCP server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orialis
+Group=orialis
+WorkingDirectory=/opt/orialis-mcp
+EnvironmentFile=/etc/orialis-mcp.env
+StateDirectory=orialis-mcp
+StateDirectoryMode=0700
+ExecStart=/opt/orialis-mcp/.venv/bin/orialis-mcp --transport http
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/orialis-mcp
+
+[Install]
+WantedBy=multi-user.target

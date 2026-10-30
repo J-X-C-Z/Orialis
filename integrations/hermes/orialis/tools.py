@@ -13,6 +13,7 @@ from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 from .response_ui import RESPONSE_UI
+from .schedule_policy import EVENT_GRANULARITY_RULES, validate_event_description
 
 logger = logging.getLogger(__name__)
 CAPABILITIES_PATH = "/api/v1/capabilities"
@@ -56,7 +57,20 @@ MILESTONE_FIELDS = {"title":"string","due":"string","completed":"boolean","posit
 
 CREATE_TASK_SCHEMA = _schema("create_task", "Create a task in Orialis.", _props(TASK_FIELDS, nullable=("notes","important","urgent","completedAt","due","dueTime","reminderMinutes","projectId","parentTaskId","scheduleId","recurrence")), ("title",))
 CREATE_PROJECT_SCHEMA = _schema("create_project", "Create a project in Orialis.", _props(PROJECT_FIELDS, nullable=("goal","description","color","status","startDate","due","nextActionTaskId")), ("name",))
-CREATE_SCHEDULE_SCHEMA = _schema("create_schedule", "Create a Schedule in the user's Orialis calendar.", _props(SCHEDULE_FIELDS, nullable=("description","location","reminderMinutes")), ("title","startAt","endAt"))
+SCHEDULE_PROPERTY_DESCRIPTIONS = {
+    "title": "One activity in one date/time slot; never a whole trip or daily agenda.",
+    "description": "Notes for this activity only. Multiple dated or timed agenda entries are rejected with split_required.",
+    "startAt": "Start of this activity with timezone; never the start of the whole itinerary.",
+    "endAt": "End of this activity with timezone; never the final return of the whole itinerary.",
+}
+
+def _schedule_props():
+    properties = _props(SCHEDULE_FIELDS, nullable=("description", "location", "reminderMinutes"))
+    for field, description in SCHEDULE_PROPERTY_DESCRIPTIONS.items():
+        properties[field]["description"] = description
+    return properties
+
+CREATE_SCHEDULE_SCHEMA = _schema("create_schedule", "Create a Schedule in the user's Orialis calendar. " + EVENT_GRANULARITY_RULES, _schedule_props(), ("title","startAt","endAt"))
 CREATE_MILESTONE_SCHEMA = _schema("create_milestone", "Create a project milestone.", {**_props(MILESTONE_FIELDS, nullable=("due","completed","position")), "projectId":ID}, ("projectId","title"))
 CREATE_CONVERSATION_SCHEMA = _schema("create_conversation", "Create a conversation.", {"title":TEXT,"id":ID,"pinned":{"type":"boolean"},"manualPosition":{"type":"integer"}}, ("title",))
 CREATE_MESSAGE_SCHEMA = _schema("create_message", "Create a user message in a conversation.", {"conversationId":ID,"content":{"type":"string"},"id":ID,"replyToMessageId":ID,"attachments":{"type":"array"}}, ("conversationId","content"))
@@ -110,6 +124,7 @@ def _validate_args(args: Any, allowed: set[str], required=()) -> dict[str, Any]:
 
 def _validate_schedule_args(args: Dict[str, Any]) -> Dict[str, Any]:
     out=_validate_args(args,set(SCHEDULE_FIELDS)|{"id"},{"title","startAt","endAt"})
+    validate_event_description(out.get("description"))
     out["title"]=out["title"].strip(); _timestamp(out["startAt"],"startAt"); _timestamp(out["endAt"],"endAt")
     if datetime.fromisoformat(out["startAt"].replace("Z","+00:00")) >= datetime.fromisoformat(out["endAt"].replace("Z","+00:00")): raise ValueError("startAt must be earlier than endAt")
     for f in ("allDay","important"):
@@ -232,6 +247,8 @@ def _validate_payload(kind: str, args: Any, *, patch=False, delete=False, projec
     for f in ("startAt","endAt"):
         if f in out: _timestamp(out[f],f)
     if "startAt" in out and "endAt" in out and datetime.fromisoformat(out["startAt"].replace("Z","+00:00"))>=datetime.fromisoformat(out["endAt"].replace("Z","+00:00")): raise ValueError("startAt must be earlier than endAt")
+    if kind == "schedule" and not delete:
+        validate_event_description(out.get("description"))
     return out
 
 def _request(server_url: str, token: str, method: str, path: str, *, payload=None, query=None) -> dict[str,Any]:
@@ -326,7 +343,7 @@ for prefix in ("schedule","calendar_event"):
     root="/api/v1/schedules" if prefix=="schedule" else "/api/v1/calendar-events"; label="schedule" if prefix=="schedule" else "calendar event"
     _add("create_"+prefix,CREATE_SCHEDULE_SCHEMA,"POST",root,"schedule")
     _add("get_"+prefix,_schema("get_"+prefix,"Read a "+label+".",{"id":ID},("id",)),"GET",root+"/{id}","schedule")
-    _add("update_"+prefix,_schema("update_"+prefix,"Update a "+label+".",{**_props(SCHEDULE_FIELDS),"id":ID,"baseVersion":BASE},("id","baseVersion")),"PATCH",root+"/{id}","schedule")
+    _add("update_"+prefix,_schema("update_"+prefix,"Update a "+label+". " + EVENT_GRANULARITY_RULES,{**_schedule_props(),"id":ID,"baseVersion":BASE},("id","baseVersion")),"PATCH",root+"/{id}","schedule")
     _add("delete_"+prefix,_schema("delete_"+prefix,"Delete a "+label+".",{"id":ID,"baseVersion":BASE},("id","baseVersion")),"DELETE",root+"/{id}","schedule")
 _add("create_conversation",CREATE_CONVERSATION_SCHEMA,"POST","/api/v1/conversations"); _add("update_conversation",_schema("update_conversation","Rename/update a conversation.",{"id":ID,"title":TEXT,"pinned":{"type":"boolean"},"manualPosition":{"type":"integer"},"baseVersion":BASE},("id","title","baseVersion")),"PATCH","/api/v1/conversations/{id}","conversation"); _add("delete_conversation",_schema("delete_conversation","Delete a conversation.",{"id":ID,"baseVersion":BASE},("id","baseVersion")),"DELETE","/api/v1/conversations/{id}","conversation")
 _add("list_messages",_schema("list_messages","List messages in a conversation.",{"conversationId":ID,**PAGE},("conversationId",)),"GET","/api/v1/conversations/{conversationId}/messages"); _add("create_message",CREATE_MESSAGE_SCHEMA,"POST","/api/v1/conversations/{conversationId}/messages","message")
@@ -454,7 +471,7 @@ for _plural, _single, _kind in (
     if _kind != "milestone":
         _item_schema["properties"]["id"] = ID
     _batch_schema = _schema(_batch_name,
-        "Create 1-200 Orialis resources sequentially. Validate all items first; returns per-item results. Not atomic. Never retry the entire batch; check outcomeUnknown writes before retrying.",
+        "Create 1-200 Orialis resources sequentially. Validate all items first; returns per-item results. Not atomic. Never retry the entire batch; check outcomeUnknown writes before retrying." + (" " + EVENT_GRANULARITY_RULES if _kind == "schedule" else ""),
         {"items":{"type":"array","minItems":1,"maxItems":MAX_BATCH_ITEMS,"items":_item_schema}}, ("items",))
     TOOL_NAMES.append(_batch_name)
     HANDLERS[_batch_name] = (_batch_schema, _batch_creator(_single_name, _kind))

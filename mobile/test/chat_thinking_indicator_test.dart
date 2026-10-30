@@ -28,7 +28,7 @@ void _event(AgentEventStore store, String kind, Map<String, dynamic> data) =>
     );
 
 void main() {
-  testWidgets('one shimmer line updates and disappears at terminal status', (
+  testWidgets('one stationary line updates and disappears at terminal status', (
     tester,
   ) async {
     final store = AgentEventStore();
@@ -37,12 +37,10 @@ void main() {
     await tester.pumpWidget(_host(store));
     expect(find.text('正在思考'), findsOneWidget);
     expect(find.byType(ChatThinkingIndicator), findsOneWidget);
-    final mask = tester.widget<ShaderMask>(find.byType(ShaderMask));
+    final labelPosition = tester.getTopLeft(find.text('正在思考'));
     await tester.pump(const Duration(milliseconds: 400));
-    expect(
-      tester.widget<ShaderMask>(find.byType(ShaderMask)),
-      isNot(same(mask)),
-    );
+    expect(find.byType(ShaderMask), findsNothing);
+    expect(tester.getTopLeft(find.text('正在思考')), labelPosition);
 
     for (final minutes in [1, 2, 3]) {
       _event(store, 'agent.status', {
@@ -79,7 +77,7 @@ void main() {
       expect(find.byType(ShaderMask), findsNothing);
       expect(
         tester.widget<Text>(find.text('正在思考')).style!.color!.a,
-        closeTo(.45, .01),
+        closeTo(.65, .01),
       );
 
       _event(store, 'stream.delta', {

@@ -122,16 +122,6 @@ class OrialisApiClient {
     return Uint8List.fromList(response.data ?? const []);
   }
 
-  Future<SessionResponse> register({
-    required String username,
-    required String password,
-  }) => _authenticate('/api/v1/auth/register', username, password);
-
-  Future<SessionResponse> login({
-    required String username,
-    required String password,
-  }) => _authenticate('/api/v1/auth/login', username, password);
-
   Future<Map<String, dynamic>> session() async {
     final response = await _dio.get<Map<String, dynamic>>(
       '/api/v1/auth/session',
@@ -145,20 +135,6 @@ class OrialisApiClient {
     } finally {
       await _config.clearSessionToken();
     }
-  }
-
-  Future<SessionResponse> _authenticate(
-    String path,
-    String username,
-    String password,
-  ) async {
-    final response = await _dio.post<Map<String, dynamic>>(
-      path,
-      data: {'username': username, 'password': password},
-    );
-    final result = SessionResponse.fromJson(response.data ?? const {});
-    await _config.setSessionToken(result.accessToken);
-    return result;
   }
 
   Future<Map<String, dynamic>> health() async {
@@ -594,6 +570,79 @@ class OrialisApiClient {
       cursor = page.nextCursor;
     }
     return items;
+  }
+
+  Future<Map<String, dynamic>> memoryRecords({
+    int offset = 0,
+    int limit = 100,
+    String? query,
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/memory/records',
+      queryParameters: {'offset': offset, 'limit': limit, 'query': ?query},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> putMemoryRecord(
+    String id,
+    Map<String, Object?> record,
+    int version,
+  ) async {
+    final response = await _dio.put<Map<String, dynamic>>(
+      '/api/v1/memory/records/${Uri.encodeComponent(id)}',
+      data: {'record': record, 'expectedVersion': version},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> deleteMemoryRecord(
+    String id,
+    int version,
+  ) async {
+    final response = await _dio.delete<Map<String, dynamic>>(
+      '/api/v1/memory/records/${Uri.encodeComponent(id)}',
+      queryParameters: {'expectedVersion': version},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<void> uploadMemoryImage(
+    String hash,
+    Uint8List bytes,
+    String mimeType,
+  ) async {
+    if (bytes.isEmpty || bytes.length > 32 * 1024 * 1024) {
+      throw const FormatException('原图超过 32 MiB');
+    }
+    await _dio.put<Object?>(
+      '/api/v1/memory/images/$hash',
+      data: bytes,
+      options: Options(
+        contentType: mimeType,
+        sendTimeout: const Duration(seconds: 90),
+        receiveTimeout: const Duration(seconds: 30),
+      ),
+    );
+  }
+
+  Future<Uint8List> downloadMemoryImage(String hash) async {
+    final cancel = CancelToken();
+    final response = await _dio.get<List<int>>(
+      '/api/v1/memory/images/$hash',
+      options: Options(
+        responseType: ResponseType.bytes,
+        followRedirects: false,
+        receiveTimeout: const Duration(seconds: 90),
+      ),
+      cancelToken: cancel,
+      onReceiveProgress: (received, total) {
+        if (received > 32 * 1024 * 1024 || total > 32 * 1024 * 1024) {
+          cancel.cancel('原图超过 32 MiB');
+        }
+      },
+    );
+    return Uint8List.fromList(response.data ?? const []);
   }
 
   Future<Map<String, dynamic>?> memoryAnalysis(String id) async {

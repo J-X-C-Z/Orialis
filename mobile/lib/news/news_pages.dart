@@ -7,17 +7,18 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show DesktopLayoutScope, LuminaCardMemory;
+
 import '../features/chat/presentation/safe_markdown.dart';
 import '../core/config/app_config.dart';
+import '../app/design/mobile_motion.dart';
 import 'news_data.dart';
 import 'news_motion.dart';
 
-typedef _NewsBuilder =
-    Widget Function(
-      BuildContext,
-      List<NewsLoadResult>,
-      Future<void> Function(),
-    );
+typedef _NewsBuilder = Widget Function(
+  BuildContext,
+  List<NewsLoadResult>,
+  Future<void> Function(),
+);
 
 class _NewsRequest extends ConsumerStatefulWidget {
   const _NewsRequest({
@@ -234,15 +235,26 @@ class _NewsRequestState extends ConsumerState<_NewsRequest>
 
   @override
   Widget build(BuildContext context) {
-    if (_results != null) return widget.builder(context, _results!, _refresh);
-    if (_error != null) {
-      return _StateCard(
+    final Widget content;
+    if (_results != null) {
+      content = widget.builder(context, _results!, _refresh);
+    } else if (_error != null) {
+      content = _StateCard(
         kind: NewsLoadKind.error,
         message: _error.toString(),
         onRetry: _refresh,
       );
+    } else {
+      content = const _LoadingState();
     }
-    return const _LoadingState();
+    return OrialisContentTransition(
+      changeKey: (
+        widget.paths.join('|'),
+        _results?.map((result) => result.kind).join('|'),
+        _error != null,
+      ),
+      child: content,
+    );
   }
 }
 
@@ -563,9 +575,8 @@ class _BriefPoints extends StatelessWidget {
       children: [
         Text(
           label,
-          style: LuminaTheme.of(context).textTheme.labelMedium.copyWith(
-            color: LuminaTheme.of(context).colors.muted,
-          ),
+          style: LuminaTheme.of(context).textTheme.labelMedium
+              .copyWith(color: LuminaTheme.of(context).colors.muted),
         ),
         for (final value in values)
           Padding(
@@ -787,9 +798,8 @@ class _LoadingState extends StatelessWidget {
   const _LoadingState();
   @override
   Widget build(BuildContext context) {
-    final placeholder = LuminaTheme.of(
-      context,
-    ).colors.muted.withValues(alpha: 0.14);
+    final placeholder = LuminaTheme.of(context).colors.muted
+        .withValues(alpha: 0.14);
     return ListView(
       padding: EdgeInsets.only(
         top: LuminaPageHeaderInset.of(context) + 12,
@@ -1090,9 +1100,8 @@ class _RepoCard extends StatelessWidget {
               children: [
                 Text(
                   '#$ranking  ',
-                  style: LuminaTheme.of(context).textTheme.labelMedium.copyWith(
-                    color: LuminaTheme.of(context).colors.accent,
-                  ),
+                  style: LuminaTheme.of(context).textTheme.labelMedium
+                      .copyWith(color: LuminaTheme.of(context).colors.accent),
                 ),
                 Expanded(
                   child: Text(
@@ -2093,12 +2102,19 @@ class _RawReportsDisclosureState extends State<_RawReportsDisclosure> {
           ),
         ),
       ),
-      if (_expanded)
-        for (final report in widget.reports)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: SelectableText(_displayValue(report)),
-          ),
+      LuminaReveal(
+        visible: _expanded,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final report in widget.reports)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: SelectableText(_displayValue(report)),
+              ),
+          ],
+        ),
+      ),
     ],
   );
 }

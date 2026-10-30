@@ -19,6 +19,7 @@ import {
   occursOn,
 } from "./calendar";
 import { renderWorkspace } from "./workspace";
+import { AutoSync } from "./auto-sync";
 
 const app = document.querySelector<HTMLElement>("#app")!;
 let schedules: Schedule[] = [];
@@ -28,6 +29,8 @@ let page = "calendar";
 let taskProjectId = "";
 let query = "";
 let renderVersion = 0;
+let refreshCurrentPage: (() => Promise<void>) | undefined;
+let autoSync: AutoSync | undefined;
 const fmt = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" });
 const time = new Intl.DateTimeFormat("zh-CN", {
   hour: "2-digit",
@@ -43,29 +46,22 @@ function eventTime(event: Schedule) {
         time.format(new Date(event.endAt));
 }
 function auth() {
-  app.innerHTML = `<main class="login"><section class="login-intro"><div class="brand-mark">O</div><h1>Orialis</h1><p class="lead">给每一天，留出从容。</p><p>在任务、项目与日程之间，找到自己的节奏。</p><div class="login-preview"><span>计划清晰，行动专注</span><i></i><i></i><i></i></div></section><form class="login-form"><h2>欢迎回来</h2><p class="muted">登录现有账号，继续你的安排。</p><label>用户名<input name="username" autocomplete="username" required minlength="3" maxlength="32"></label><label>密码<input name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128"></label><p role="alert" class="error"></p><button class="primary" type="submit">登录</button><button class="secondary" type="button" id="register">创建账号</button><p class="muted small">登录状态仅保存在当前浏览器会话中。</p></form></main>`;
-  const form = app.querySelector<HTMLFormElement>("form")!;
-  async function login(register = false) {
-    if (!form.reportValidity()) return;
-    await submitting(form, async () => {
-      const values = Object.fromEntries(new FormData(form));
-      const session = await request<{ accessToken: string }>(
-        "/auth/" + (register ? "register" : "login"),
-        "POST",
-        values,
-      );
-      setToken(session.accessToken);
-      await shell();
-    });
-  }
-  form.onsubmit = (event) => {
-    event.preventDefault();
-    void login();
-  };
-  app.querySelector<HTMLButtonElement>("#register")!.onclick = () =>
-    void login(true);
+  autoSync?.dispose();
+  autoSync = undefined;
+  refreshCurrentPage = undefined;
+  renderVersion++;
+  app.innerHTML = `<main class="login"><section class="login-intro"><div class="brand-mark">O</div><h1>Orialis</h1><p class="lead">给每一天，留出从容。</p><p>在任务、项目与日程之间，找到自己的节奏。</p><div class="login-preview"><span>计划清晰，行动专注</span><i></i><i></i><i></i></div></section><section class="login-form"><h2>使用统一账号</h2><p class="muted">使用统一账号登录，继续你的安排。</p><button class="primary" type="button" id="oidc-login">使用统一账号登录</button><p class="muted small">登录失败时，请重试统一账号登录。</p><p class="muted small">登录状态仅保存在当前浏览器会话中。</p></section></main>`;
+  app.querySelector<HTMLButtonElement>("#oidc-login")!.onclick = () => void startOidc(false);
 }
 async function shell() {
+  autoSync?.dispose();
+  autoSync = new AutoSync(
+    async () => { await refreshCurrentPage?.(); },
+    () => hasSession() && !document.hidden && navigator.onLine &&
+      !document.querySelector("dialog[open]") &&
+      !document.activeElement?.matches("input, textarea, select, [contenteditable]"),
+  );
+  autoSync.start();
   app.innerHTML = `<div class="app-shell"><aside class="sidebar"><a class="brand" href="#calendar"><span class="brand-mark">O</span>Orialis</a><p class="sidebar-caption">你的生活，有条不紊</p><nav aria-label="主导航">${[
     ["today", "◉", "今天"],
     ["calendar", "▦", "日程"],
@@ -79,7 +75,7 @@ async function shell() {
     )
     .join(
       "",
-    )}</nav><div class="sidebar-bottom"><div class="timezone">本地时区<br><strong>${e(Intl.DateTimeFormat().resolvedOptions().timeZone)}</strong></div><button id="logout">退出登录</button></div></aside><main class="main"><header class="topbar"><div><p class="eyebrow">让时间回到自己手里</p><h1 id="page-title">日程</h1></div><span class="today-label">${e(new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date()))}</span></header><section id="content" aria-live="polite"></section></main></div>`;
+    )}</nav><div class="sidebar-bottom"><div class="timezone">本地时区<br><strong>${e(Intl.DateTimeFormat().resolvedOptions().timeZone)}</strong></div><button id="oidc-bind">绑定统一账号</button><button id="logout">退出登录</button></div></aside><main class="main"><header class="topbar"><div><p class="eyebrow">让时间回到自己手里</p><h1 id="page-title">日程</h1></div><span class="today-label">${e(new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date()))}</span></header><section id="content" aria-live="polite"></section></main></div>`;
   app.querySelectorAll<HTMLButtonElement>("[data-page]").forEach(
     (button) =>
       (button.onclick = () => {
@@ -89,6 +85,7 @@ async function shell() {
         void render();
       }),
   );
+  app.querySelector<HTMLButtonElement>("#oidc-bind")!.onclick = () => void startOidc(true);
   app.querySelector<HTMLButtonElement>("#logout")!.onclick = async () => {
     try {
       await request("/auth/logout", "POST");
@@ -104,6 +101,7 @@ async function shell() {
   await render();
 }
 async function render() {
+  refreshCurrentPage = undefined;
   const version = ++renderVersion;
   const root = app.querySelector<HTMLElement>("#content");
   if (!root) return;
@@ -127,6 +125,7 @@ async function render() {
       const items = await list<Schedule>("/schedules");
       if (version !== renderVersion) return;
       schedules = items;
+      refreshCurrentPage = render;
       if (page === "today") {
         await today(root);
         return;
@@ -136,6 +135,9 @@ async function render() {
       const isolated = document.createElement("div");
       root.replaceChildren(isolated);
       await renderWorkspace(isolated, page as "tasks" | "projects" | "chat", {
+        onRefresh: (refresh) => {
+          if (version === renderVersion) refreshCurrentPage = refresh;
+        },
         projectId: taskProjectId,
         openProjectTasks: (projectId) => {
           taskProjectId = projectId;
@@ -146,6 +148,7 @@ async function render() {
     }
   } catch (error) {
     if (version !== renderVersion) return;
+    refreshCurrentPage = render;
     root.innerHTML = `<div class="empty"><p role="alert">${e(errorText(error))}</p><button id="retry">重试</button><button id="relogin">重新登录</button></div>`;
     root.querySelector<HTMLButtonElement>("#retry")!.onclick = () =>
       void render();
@@ -479,7 +482,26 @@ function editor(existing?: Schedule, day?: string, copy = false) {
       editor(existing, undefined, true);
     });
 }
-if (hasSession()) {
+async function startOidc(bind: boolean) {
+  try {
+    const result = await request<{ url: string }>("/auth/oidc/start", "POST", { bind });
+    location.assign(result.url);
+  } catch (error) { notify(errorText(error)); }
+}
+const oidcResult = location.hash;
+if (oidcResult === "#oidc-complete" || oidcResult === "#oidc-error") {
+  history.replaceState(null, "", location.pathname);
+  if (oidcResult === "#oidc-error") {
+    if (hasSession()) {
+      request("/auth/session").then(shell).catch(() => { setToken(""); auth(); });
+    } else auth();
+    notify("统一账号登录或绑定失败，请确认账号已绑定且未与其他账号冲突。");
+  } else {
+    request<{ accessToken: string }>("/auth/oidc/exchange", "POST", {})
+      .then((session) => { setToken(session.accessToken); return shell(); })
+      .catch((error) => { auth(); notify(errorText(error)); });
+  }
+} else if (hasSession()) {
   request("/auth/session")
     .then(shell)
     .catch((error) => {

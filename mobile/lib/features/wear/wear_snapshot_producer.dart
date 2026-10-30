@@ -7,6 +7,7 @@ import '../../core/config/app_config.dart';
 import '../../core/database/app_database.dart';
 import 'wear_protocol.dart';
 import 'wear_account_snapshot_source.dart';
+import 'wear_snapshot_ordering.dart';
 
 /// Read-only projection; authenticated server snapshots prove account scope,
 /// while shared mobile database previews do not. Neither proves a companion
@@ -189,6 +190,8 @@ class WearSnapshotProducer {
             .toList();
       });
     }
+
+    WearSnapshotOrdering.sort(candidates, now);
 
     final included = {for (final key in total.keys) key: 0};
     final collections = {

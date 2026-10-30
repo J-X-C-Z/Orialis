@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/services.dart';
 
 import 'lumina_services.dart';
@@ -129,6 +130,25 @@ class _LuminaSurfaceState extends State<LuminaSurface>
   LuminaSpring get spring => _spring ??= LuminaSpring(vsync: this);
 
   Offset contact = Offset.zero;
+  late bool _interactiveShell = widget.onTap != null;
+  int? _pressPointer;
+  Offset? _pressOrigin;
+
+  void _setPressed(bool value) {
+    if (pressed == value) return;
+    setState(() => pressed = value);
+    spring.settle(
+      value ? 1 : 0,
+      reducedMotion: LuminaTheme.motionReducedOf(context),
+    );
+  }
+
+  void _releasePress() {
+    _pressPointer = null;
+    _pressOrigin = null;
+    _setPressed(false);
+  }
+
   @override
   void dispose() {
     _spring?.dispose();
@@ -149,6 +169,13 @@ class _LuminaSurfaceState extends State<LuminaSurface>
   @override
   void didUpdateWidget(LuminaSurface oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.onTap != null) _interactiveShell = true;
+    if (oldWidget.onTap != null && widget.onTap == null) {
+      _pressPointer = null;
+      _pressOrigin = null;
+      pressed = false;
+      _spring?.settle(0, reducedMotion: LuminaTheme.motionReducedOf(context));
+    }
     if (oldWidget.backdrop != widget.backdrop) {
       if (widget.backdrop) {
         LuminaBlurPolicy.instance.chromeListenable.addListener(_blurChanged);
@@ -164,7 +191,13 @@ class _LuminaSurfaceState extends State<LuminaSurface>
 
   bool pressed = false, hover = false, focused = false;
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _spring ?? kAlwaysDismissedAnimation,
+    child: widget.child,
+    builder: (context, label) => _buildSurface(context, label!),
+  );
+
+  Widget _buildSurface(BuildContext context, Widget label) {
     if (widget.depth == LuminaSurfaceDepth.recessed &&
         !LuminaTheme.of(context).data.neumorphic &&
         !LuminaCardHost.of(context)) {
@@ -221,9 +254,10 @@ class _LuminaSurfaceState extends State<LuminaSurface>
     final backdrop = widget.backdrop && glass && !opaque && blur.enabled;
     final blurFilter = backdrop ? LuminaBlurFilters.forConfig(blur) : null;
     final compensation = glass && !opaque ? blur.compensation : 0.0;
-    final useSprings =
-        widget.onTap != null && !reduced && !theme.highPerformanceMode;
-    Widget label = widget.child;
+    // Performance mode caches the paint; it must not remove the transition.
+    final pressure = reduced
+        ? (pressed ? 1.0 : 0.0)
+        : (_spring?.value ?? 0).clamp(0.0, 1.0);
     Widget content = Padding(
       padding: widget.padding * theme.data.spacingScale,
       child: label,
@@ -235,6 +269,7 @@ class _LuminaSurfaceState extends State<LuminaSurface>
         tint: widget.color,
         focused: focused,
         pressed: pressed,
+        pressProgress: pressure,
         child: label,
       );
       // No backdrop is sampled in performance mode, so the static well/coat
@@ -292,6 +327,7 @@ class _LuminaSurfaceState extends State<LuminaSurface>
                 contrast: contrast || (liquidGlass && opaque),
                 focused: focused,
                 pressed: pressed,
+                pressProgress: pressure,
                 cheapShadow: theme.highPerformanceMode,
                 blurCompensation: compensation,
               ),
@@ -327,10 +363,30 @@ class _LuminaSurfaceState extends State<LuminaSurface>
         ],
       );
     }
-    if (widget.onTap == null) return content;
+    if (_interactiveShell) {
+      final displacement = reduced
+          ? 0.0
+          : (_spring?.value ?? 0) * theme.data.motionScale;
+      final deformation = glass && !reduced
+          ? pressure * theme.data.motionScale
+          : 0.0;
+      // Keep the same transform nodes at rest, during a press and on release.
+      // Inserting one only while pressed remounts stateful labels/controls.
+      content = Transform.translate(
+        offset: Offset(0, displacement),
+        child: Transform.scale(
+          scaleX: 1 + deformation * .035,
+          scaleY: 1 - deformation * .065,
+          child: content,
+        ),
+      );
+    }
+    if (!_interactiveShell) return content;
     return Semantics(
       button: true,
+      enabled: widget.onTap == null ? false : null,
       child: FocusableActionDetector(
+        enabled: widget.onTap != null,
         onShowFocusHighlight: (v) => setState(() => focused = v),
         onShowHoverHighlight: (v) => setState(() => hover = v),
         shortcuts: const {
@@ -340,7 +396,7 @@ class _LuminaSurfaceState extends State<LuminaSurface>
         actions: {
           ActivateIntent: CallbackAction<ActivateIntent>(
             onInvoke: (_) {
-              widget.onTap!();
+              widget.onTap?.call();
               return null;
             },
           ),
@@ -350,55 +406,33 @@ class _LuminaSurfaceState extends State<LuminaSurface>
             contact = event.localPosition;
           },
           onExit: (_) {},
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: widget.onTap,
-            onTapDown: (d) {
-              contact = d.localPosition;
-              setState(() => pressed = true);
-              if (!useSprings) return;
-              spring.settle(1, reducedMotion: reduced);
+          child: Listener(
+            onPointerDown: (event) {
+              if (_pressPointer != null || widget.onTap == null) return;
+              _pressPointer = event.pointer;
+              _pressOrigin = event.position;
+              contact = event.localPosition;
+              _setPressed(true);
             },
-            onTapUp: (_) {
-              setState(() => pressed = false);
-              if (!useSprings) return;
-              spring.settle(0, reducedMotion: reduced);
+            onPointerMove: (event) {
+              if (_pressPointer == event.pointer &&
+                  _pressOrigin != null &&
+                  (event.position - _pressOrigin!).distance > kTouchSlop) {
+                _releasePress();
+              }
             },
-            onTapCancel: () {
-              setState(() => pressed = false);
-              if (!useSprings) return;
-              spring.settle(0, reducedMotion: reduced);
+            onPointerUp: (event) {
+              if (_pressPointer == event.pointer) _releasePress();
             },
-            child: useSprings
-                ? AnimatedBuilder(
-                    animation: _spring ?? kAlwaysDismissedAnimation,
-                    child: content,
-                    builder: (context, child) {
-                      final offset = reduced
-                          ? Offset.zero
-                          : Offset(
-                              0,
-                              (_spring?.value ?? 0) * theme.data.motionScale,
-                            );
-                      final pressure = glass
-                          ? (_spring?.value ?? 0).clamp(-.15, 1.0) *
-                                theme.data.motionScale
-                          : 0.0;
-                      Widget body = child!;
-                      if (pressure != 0) {
-                        body = Transform.scale(
-                          scaleX: 1 + pressure * .035,
-                          scaleY: 1 - pressure * .065,
-                          child: body,
-                        );
-                      }
-                      if (offset != Offset.zero) {
-                        body = Transform.translate(offset: offset, child: body);
-                      }
-                      return body;
-                    },
-                  )
-                : content,
+            onPointerCancel: (event) {
+              if (_pressPointer == event.pointer) _releasePress();
+            },
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onTap,
+              onTapCancel: widget.onTap == null ? null : _releasePress,
+              child: content,
+            ),
           ),
         ),
       ),
@@ -421,8 +455,12 @@ class LuminaButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Semantics(
     enabled: onPressed != null,
-    child: Opacity(
+    child: AnimatedOpacity(
       opacity: onPressed == null ? 0.45 : 1,
+      duration: LuminaTheme.motionReducedOf(context)
+          ? Duration.zero
+          : LuminaMotion.fast,
+      curve: luminaEaseOut,
       child: LuminaSurface(
         glass: true,
         radius: LuminaControlSize.capsuleRadius,
@@ -466,8 +504,12 @@ class LuminaIconButton extends StatelessWidget {
       label: tooltip,
       button: true,
       enabled: onPressed != null,
-      child: Opacity(
+      child: AnimatedOpacity(
         opacity: onPressed == null ? 0.45 : 1,
+        duration: LuminaTheme.motionReducedOf(context)
+            ? Duration.zero
+            : LuminaMotion.fast,
+        curve: luminaEaseOut,
         child: LuminaSurface(
           onTap: onPressed,
           glass: true,

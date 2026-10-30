@@ -59,13 +59,26 @@ internal class MemoryBridge(private val activity: MainActivity, messenger: Binar
                         activity.startActivity(Intent(activity, MemoryCaptureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         result.success(null)
                     }
-                    "list", "read", "update", "delete", "prepareUpload" -> {
+                    "list", "read", "update", "delete", "prepareUpload", "importCloud", "storeCloudImage" -> {
                         val expectedScope = MemoryStore.scope(activity)
                         worker.execute {
                             try {
                                 val response = synchronized(MemoryStore) {
                                     check(MemoryStore.scope(activity) == expectedScope) { "账号已变更，请重试" }
+                                    if (call.method in setOf("importCloud", "storeCloudImage")) {
+                                        val expectedAccount = call.argument<String>("expectedScope")
+                                        check(expectedAccount == null || MemoryStore.scope(activity) == expectedAccount) { "账号已变更，请重试" }
+                                    }
                                     when (call.method) {
+                                        "importCloud" -> {
+                                            require(call.hasArgument("expectedRecord")) { "需要本地记忆快照" }
+                                            MemoryStore.asMap(MemoryStore.importCloud(activity,
+                                                call.argument<Map<String, Any?>>("record") ?: error("缺少云端记忆"),
+                                                call.argument<Map<String, Any?>>("expectedRecord")))
+                                        }
+                                        "storeCloudImage" -> MemoryStore.storeCloudImage(activity,
+                                            call.argument<String>("id") ?: "", call.argument<Any>("bytes"),
+                                            call.argument<String>("mimeType") ?: "", call.argument<String>("sha256") ?: "")
                                         "list" -> MemoryStore.list(activity).map(MemoryStore::asMap)
                                         "read" -> MemoryStore.read(activity, call.argument<String>("id") ?: "")?.let(MemoryStore::asMap)
                                         "update" -> MemoryStore.asMap(MemoryStore.update(activity, call.argument<String>("id") ?: "",

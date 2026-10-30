@@ -42,6 +42,7 @@ class _LuminaLongPressOrderableState<T>
   bool get wantKeepAlive => _dragging;
 
   void _onDragStarted() {
+    unawaited(LuminaHaptics.dragStart());
     _dragging = true;
     updateKeepAlive();
   }
@@ -73,6 +74,7 @@ class _LuminaLongPressOrderableState<T>
             : const Duration(milliseconds: 130),
         child: LongPressDraggable<LuminaOrderDrag<T>>(
           data: LuminaOrderDrag(item: widget.item, group: widget.group),
+          hapticFeedbackOnStart: false,
           onDragStarted: _onDragStarted,
           onDragEnd: _onDragEnd,
           onDragUpdate: (details) {

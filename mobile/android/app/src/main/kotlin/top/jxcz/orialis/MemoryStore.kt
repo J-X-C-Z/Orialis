@@ -12,6 +12,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.security.MessageDigest
+import android.util.Base64
 import java.util.UUID
 
 /** Account-isolated inbox for screens explicitly captured or shared by the user. */
@@ -27,7 +29,7 @@ internal object MemoryStore {
         return File(context.filesDir, "screen_memory_v1/$scope").apply { check(isDirectory || mkdirs()) }
     }
     private fun recordFile(context: Context, scope: String, id: String): File {
-        require(id.matches(Regex("[0-9a-f-]{36}"))) { "Invalid memory id" }
+        require(id.matches(Regex("[0-9a-fA-F-]{36}"))) { "Invalid memory id" }
         return File(directory(context, scope), "$id.json")
     }
     private fun write(file: File, record: JSONObject) {
@@ -41,6 +43,44 @@ internal object MemoryStore {
         recordFile(context, scope, id)
         return File(directory(context, scope), "$id.png")
     }
+    private fun compressedImageFile(context: Context, scope: String, id: String): File {
+        recordFile(context, scope, id)
+        return File(directory(context, scope), "$id.jpg")
+    }
+    private fun validImagePath(context: Context, scope: String, id: String, path: String): Boolean =
+        path == imageFile(context, scope, id).absolutePath ||
+            path == compressedImageFile(context, scope, id).absolutePath
+
+    /** New captures retain their dimensions; keep PNG when JPEG would cost more. */
+    private fun compactImage(context: Context, scope: String, id: String, source: File): File {
+        val target = AtomicFile(compressedImageFile(context, scope, id))
+        var bitmap: Bitmap? = null
+        try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(source.path, bounds)
+            // Oversized shared images keep their original, avoiding a second huge decode.
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0 ||
+                bounds.outWidth.toLong() * bounds.outHeight > 20_000_000) return source
+            val decoded = BitmapFactory.decodeFile(source.path) ?: return source
+            bitmap = decoded
+            val output = target.startWrite()
+            try {
+                check(decoded.compress(Bitmap.CompressFormat.JPEG, 88, output))
+                target.finishWrite(output)
+            } catch (error: Exception) { target.failWrite(output); throw error }
+            val checkBounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(target.baseFile.path, checkBounds)
+            if (target.baseFile.length() <= 0 || target.baseFile.length() >= source.length() ||
+                checkBounds.outWidth != bounds.outWidth || checkBounds.outHeight != bounds.outHeight) {
+                target.delete()
+                return source
+            }
+            return target.baseFile
+        } catch (_: Exception) {
+            target.delete()
+            return source
+        } finally { bitmap?.recycle() }
+    }
     @Synchronized fun save(context: Context, scope: String, id: String, sourcePackage: String,
         sourceLabel: String, visibleText: String, sharedText: String? = null, imagePath: String? = null): JSONObject {
         check(scope(context) == scope) { "账号已变更，请重新记录" }
@@ -52,9 +92,20 @@ internal object MemoryStore {
             .put("title", text.lineSequence().firstOrNull { it.isNotBlank() }?.take(120) ?: "屏幕记忆")
             .put("analysisStatus", "pending")
         sharedText?.let { record.put("sharedText", it.take(64000)) }
-        imagePath?.let { require(it == imageFile(context, scope, id).absolutePath); record.put("imagePath", it) }
-        write(recordFile(context, scope, id), record)
-        MemoryAnalysisJobService.schedule(context)
+        val original = imagePath?.let {
+            require(it == imageFile(context, scope, id).absolutePath)
+            File(it)
+        }
+        val stored = original?.let { compactImage(context, scope, id, it) }
+        stored?.let { record.put("imagePath", it.absolutePath) }
+        try { write(recordFile(context, scope, id), record) }
+        catch (error: Exception) {
+            if (stored != original) stored?.let { AtomicFile(it).delete() }
+            throw error
+        }
+        // Only discard the transient capture after the record points to a verified copy.
+        if (stored != original) original?.delete()
+        MemoryAnalysisJobService.schedule(context, id)
         return record
     }
     @Synchronized fun read(context: Context, id: String): JSONObject? {
@@ -63,7 +114,7 @@ internal object MemoryStore {
         if (!file.exists() && !File(file.path + ".bak").exists()) return null
         return JSONObject(AtomicFile(file).openRead().bufferedReader().use { it.readText() }).also {
             require(it.optString("id") == id)
-            if (it.has("imagePath")) require(it.getString("imagePath") == imageFile(context, scope, id).absolutePath)
+            if (it.has("imagePath")) require(validImagePath(context, scope, id, it.getString("imagePath")))
         }
     }
     @Synchronized fun list(context: Context): List<JSONObject> {
@@ -76,13 +127,19 @@ internal object MemoryStore {
         val record = read(context, id) ?: error("记忆不存在")
         val currentAnalysisId = if (record.isNull("analysisRequestId")) "" else record.optString("analysisRequestId")
         check(expectedAnalysisRequestId == null || currentAnalysisId == expectedAnalysisRequestId) { "已有更新的记忆理解任务" }
-        val allowed = setOf("title", "summary", "analysisStatus", "analysisConversationId", "analysisMessageId", "analysisError", "analysisRequestId", "category", "sourceUrl", "videoStatus", "videoSummary", "videoError", "note", "notes")
+        val allowed = setOf("title", "summary", "analysisStatus", "analysisConversationId", "analysisMessageId", "analysisError", "analysisRequestId", "category", "sourceUrl", "videoStatus", "videoSummary", "videoError", "note", "notes", "cloudVersion", "cloudRecordHash", "cloudImageSha256", "cloudDeletedAt", "cloudSyncError")
         for ((key, value) in fields) {
             require(key is String && key in allowed) { "Unsupported memory field" }
             require(value == null || value is String && value.length <= 64000)
             record.put(key, value ?: JSONObject.NULL)
         }
+        val dirty = fields.keys.any { it is String && !it.startsWith("cloud") } || fields["cloudDeletedAt"] == "pending"
+        if (dirty) record.put("cloudSyncError", "pending")
         write(recordFile(context, scope, id), record)
+        if (dirty) MemoryAnalysisJobService.schedule(context, id)
+        if (record.optString("analysisStatus") in setOf("completed", "failed")) {
+            AtomicFile(uploadFile(context, scope, id)).delete()
+        }
         return record
     }
     @Synchronized fun delete(context: Context, id: String): Boolean {
@@ -103,7 +160,7 @@ internal object MemoryStore {
         val scope = scope(context) ?: error("请先登录并打开记忆页面")
         val record = read(context, id) ?: error("记忆不存在")
         val source = record.optString("imagePath").takeIf { it.isNotBlank() } ?: error("这条记忆没有图片")
-        require(source == imageFile(context, scope, id).absolutePath) { "记忆图片路径无效" }
+        require(validImagePath(context, scope, id, source)) { "记忆图片路径无效" }
         val target = AtomicFile(uploadFile(context, scope, id))
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(source, bounds)
@@ -133,6 +190,71 @@ internal object MemoryStore {
             return target.baseFile.absolutePath
         } catch (error: Exception) { target.delete(); throw error }
         finally { if (scaled !== bitmap) scaled?.recycle(); bitmap.recycle() }
+    }
+    private fun canonical(value: Any?): String = when (value) {
+        null, JSONObject.NULL -> "null"
+        is JSONObject -> value.keys().asSequence().sorted().joinToString(prefix = "{", postfix = "}") {
+            JSONObject.quote(it) + ":" + canonical(value.get(it))
+        }
+        is JSONArray -> (0 until value.length()).joinToString(prefix = "[", postfix = "]") { canonical(value.get(it)) }
+        is String -> JSONObject.quote(value)
+        else -> value.toString()
+    }
+    @Synchronized fun importCloud(context: Context, incoming: Map<*, *>, expected: Map<*, *>?): JSONObject {
+        val scope = scope(context) ?: error("请先登录")
+        val id = incoming["id"] as? String ?: error("缺少记忆编号")
+        val current = read(context, id)
+        check(if (expected == null) current == null else current != null &&
+            expected.all { (key, value) ->
+                fun normalized(v: Any?): String {
+                    if (v == null || v == JSONObject.NULL || v == "") return "null"
+                    val item = if (key == "createdAt" && v is String) v.replace(Regex("(\\.\\d*?[1-9])0+Z$"), "$1Z").replace(Regex("\\.0+Z$"), "Z") else v
+                    return canonical(item)
+                }
+                normalized(current.opt(key as String)) == normalized(JSONObject.wrap(value))
+            }) { "本地记忆已更新，请刷新后重试" }
+        require(!incoming.containsKey("imagePath")) { "云端不能指定本地图片路径" }
+        val allowed = setOf("id", "createdAt", "updatedAt", "version", "deletedAt", "imageSha256",
+            "sourcePackage", "sourceLabel", "visibleText", "sharedText", "urls", "title", "summary",
+            "note", "notes", "analysisStatus", "analysisError", "analysisRequestId", "analysisConversationId",
+            "analysisMessageId", "category", "sourceUrl", "videoStatus", "videoSummary", "videoError",
+            "cloudVersion", "cloudRecordHash", "cloudImageSha256", "cloudDeletedAt", "cloudSyncError")
+        require(incoming.keys.all { it is String && it in allowed }) { "云端记忆字段无效" }
+        val record = if (current != null) JSONObject(current.toString()) else JSONObject()
+        incoming.forEach { (key, value) -> record.put(key as String, value ?: JSONObject.NULL) }
+        require(record.toString().toByteArray().size <= 512 * 1024) { "云端记忆过大" }
+        current?.optString("imagePath")?.takeIf { it.isNotBlank() }?.let { record.put("imagePath", it) }
+        write(recordFile(context, scope, id), record)
+        return record
+    }
+    @Synchronized fun storeCloudImage(context: Context, id: String, value: Any?, mime: String, sha: String): String {
+        val scope = scope(context) ?: error("请先登录")
+        val record = read(context, id) ?: error("记忆不存在")
+        require(mime in setOf("image/png", "image/jpeg") && sha.matches(Regex("[a-fA-F0-9]{64}")))
+        val expectedHash = record.optString("cloudImageSha256").takeIf { !record.isNull("cloudImageSha256") && it.isNotBlank() }
+        check(expectedHash == null || expectedHash.equals(sha, ignoreCase = true)) { "云端图片版本已更新，请重试" }
+        val bytes = when (value) {
+            is ByteArray -> value
+            is String -> { require(value.length <= 44 * 1024 * 1024); Base64.decode(value, Base64.DEFAULT) }
+            else -> error("图片数据无效")
+        }
+        require(bytes.isNotEmpty() && bytes.size <= 32 * 1024 * 1024)
+        val actual = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        require(actual.equals(sha, ignoreCase = true)) { "图片校验失败" }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0)
+        val existing = record.optString("imagePath").takeIf { it.isNotBlank() }
+        // Cloud images are compressed upload copies; a local original is intentionally different.
+        if (existing != null && File(existing).exists()) return existing
+        val target = if (mime == "image/png") imageFile(context, scope, id) else compressedImageFile(context, scope, id)
+        val atomic = AtomicFile(target)
+        val stream = atomic.startWrite()
+        try { stream.write(bytes); atomic.finishWrite(stream) }
+        catch (error: Exception) { atomic.failWrite(stream); throw error }
+        record.put("imagePath", target.absolutePath).put("cloudImageSha256", actual)
+        write(recordFile(context, scope, id), record)
+        return target.absolutePath
     }
     fun asMap(record: JSONObject): Map<String, Any?> = record.keys().asSequence().associateWith { key ->
         when (val value = record.get(key)) {

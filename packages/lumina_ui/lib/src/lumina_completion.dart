@@ -2,17 +2,55 @@ part of 'design_components.dart';
 
 /// Native semantic feedback: never bypass the user's haptics preference.
 class LuminaHaptics {
-  /// Optional host-specific native feedback. Defaults to Flutter's platform API.
+  static Future<void> Function()? selectionHandler;
   static Future<void> Function()? confirmHandler;
-  static Future<void> confirm() async {
+  static Future<void> Function(String effect)? effectHandler;
+
+  static Future<void> _perform(
+    String effect,
+    Future<void> Function() fallback, [
+    Future<void> Function()? handler,
+  ]) async {
     try {
-      await (confirmHandler?.call() ?? HapticFeedback.lightImpact());
+      if (handler != null) {
+        await handler();
+      } else if (effectHandler != null) {
+        await effectHandler!(effect);
+      } else {
+        await fallback();
+      }
     } on MissingPluginException {
-      await HapticFeedback.lightImpact();
+      try {
+        await fallback();
+      } on MissingPluginException {
+        // Platforms without a motor have no feedback.
+      } on PlatformException {
+        // Feedback never interrupts an interaction.
+      }
     } on PlatformException {
-      // Unsupported hardware must not fail a successful data operation.
+      // A system-suppressed effect must not be replaced by another vibration.
     }
   }
+
+  static Future<void> selection() =>
+      _perform('selection', HapticFeedback.selectionClick, selectionHandler);
+  static Future<void> tick() => _perform('tick', HapticFeedback.selectionClick);
+  static Future<void> longPress() =>
+      _perform('longPress', HapticFeedback.mediumImpact);
+  static Future<void> dragStart() =>
+      _perform('dragStart', HapticFeedback.mediumImpact);
+  static Future<void> threshold(bool reached) => _perform(
+    reached ? 'thresholdActivate' : 'thresholdDeactivate',
+    HapticFeedback.selectionClick,
+  );
+  static Future<void> toggle(bool enabled) => _perform(
+    enabled ? 'toggleOn' : 'toggleOff',
+    HapticFeedback.selectionClick,
+  );
+  static Future<void> confirm() =>
+      _perform('confirm', HapticFeedback.lightImpact, confirmHandler);
+  static Future<void> reject() =>
+      _perform('reject', HapticFeedback.heavyImpact);
 }
 
 class _CompletionScope extends InheritedWidget {
@@ -473,6 +511,7 @@ class _CompletionEntryState extends State<_CompletionEntry>
     } on TickerCanceled {
       // Navigating away does not cancel the already-started save.
     } catch (_) {
+      unawaited(LuminaHaptics.reject());
       busy = false;
       updateKeepAlive();
       if (!mounted) return;
@@ -565,12 +604,10 @@ class _CompletionEntryState extends State<_CompletionEntry>
                                         flare -
                                         aperture * .06,
                               scaleY: reduced ? 1 : 1 - recoil + flare * .5,
-                              child: aperture > 0
-                                  ? FractionalTranslation(
-                                      translation: Offset(0, -aperture * .5),
-                                      child: child,
-                                    )
-                                  : child,
+                              child: FractionalTranslation(
+                                translation: Offset(0, -aperture * .5),
+                                child: child,
+                              ),
                             ),
                           ),
                         ),

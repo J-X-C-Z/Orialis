@@ -40,6 +40,7 @@ from .conversation import chat_id_for_conversation, conversation_id_for_chat_id
 from . import protocol
 from .response_ui import PLATFORM_HINT
 from .initial_response import generate_initial_response
+from .conversation_title import name_conversation
 from .turn_updates import TurnUpdates
 from .progress_response import generate_progress_response
 
@@ -255,6 +256,7 @@ class OrialisAdapter(BasePlatformAdapter):
         self._replay_receipts: Dict[str, bool] = {}
         self._stream_context: Dict[str, Any] = {}
         self._scheduled_wire_tasks: set[asyncio.Task] = set()
+        self._naming_conversations: set[str] = set()
         self._dispatch_tasks: set[asyncio.Task] = set()
         self._attachment_cache = AttachmentCache(
             self._orialis.server_url, self._orialis.device_id, self._orialis.device_token
@@ -759,6 +761,18 @@ class OrialisAdapter(BasePlatformAdapter):
             self._inbound_turn_sources.popitem(last=False)
         try:
             await self._handle_native_input(event)
+            if (getattr(event, "_gateway_accepted", False) and not event.is_command()
+                    and conversation_id not in self._naming_conversations):
+                self._naming_conversations.add(conversation_id)
+                async def name_chat():
+                    try:
+                        await name_conversation(self._orialis, conversation_id, event.text or "")
+                    finally:
+                        self._naming_conversations.discard(conversation_id)
+                naming = asyncio.create_task(name_chat())
+                self._scheduled_wire_tasks.add(naming)
+                naming.add_done_callback(self._scheduled_wire_tasks.discard)
+
             # BasePlatformAdapter.handle_message returns immediately after it
             # claims the event. Pin files during the background turn; unpin
             # without deleting when no handler accepted it.

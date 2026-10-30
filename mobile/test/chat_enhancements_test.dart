@@ -205,6 +205,31 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('当前会话已更新思考强度'), findsOneWidget);
+    await tester.tap(find.text('关闭思考'));
+    await tester.pump();
+    expect(h.realtime.sent.last['command'], '/reasoning none');
+    expect(find.text('当前会话已设为关闭思考'), findsNothing);
+    final offId = h.realtime.sent.last['requestId'] as String;
+    h.realtime.ingestForTest(
+      jsonEncode({
+        'type': 'event',
+        'payload': {
+          'kind': 'hermes.command.result',
+          'id': offId,
+          'command': '/reasoning none',
+          'status': 'completed',
+          'content': 'Reasoning effort set to `none` (session only)',
+        },
+      }),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('当前会话已设为关闭思考'), findsOneWidget);
+    expect(
+      tester
+          .widget<LuminaButton>(find.widgetWithText(LuminaButton, '关闭思考'))
+          .primary,
+      isTrue,
+    );
     final models = await tester.runAsync(() => RecentHermesModels().load());
     expect(models, contains('openai/gpt-4.1'));
     await tester.pumpWidget(const SizedBox.shrink());

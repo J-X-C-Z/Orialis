@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "orialis-mcp"
+version = "0.2.0"
+description = "Standard MCP access to Orialis tasks, projects, and calendar"
+requires-python = ">=3.11"
+dependencies = ["mcp==1.30.0", "httpx>=0.28,<0.29"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "pytest-asyncio>=1,<2"]
+
+[project.scripts]
+orialis-mcp = "orialis_mcp.server:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

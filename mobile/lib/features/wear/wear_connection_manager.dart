@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
@@ -53,15 +54,23 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
     this.responseTimeout = const Duration(seconds: 10),
     this.snapshotLoader,
     this.taskCompletionHandler,
+    Stream<void>? snapshotChanges,
+    this.autoSyncDelay = const Duration(milliseconds: 750),
+    this.autoSyncInterval = const Duration(seconds: 30),
   }) : super(const WearConnectionState()) {
     _messages = transport.messages.listen(_receive, onError: _streamError);
     _diagnostics = transport.diagnostics.listen(
       _observe,
       onError: _streamError,
     );
+    _snapshotChanges = snapshotChanges?.listen((_) => requestAutoSync());
   }
   final WearTransport transport;
-  final Duration responseTimeout;
+  final Duration responseTimeout, autoSyncDelay, autoSyncInterval;
+  StreamSubscription<void>? _snapshotChanges;
+  Timer? _autoSyncTimer, _autoSyncPoll;
+  bool _syncRequested = false, _autoSyncRunning = false;
+  String? _lastSyncedContent;
   final Future<WearSnapshotPreview> Function()? snapshotLoader;
   final Future<Map<String, Object?>> Function(Map<String, dynamic>)?
   taskCompletionHandler;
@@ -71,6 +80,7 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
   int _generation = 0;
   int _operationSerial = 0;
   bool _acceptEvents = true;
+  String? _reconnectNode;
   final _taskMutations = <String, Future<Map<String, Object?>>>{};
   final _taskMutationsInFlight = <String>{};
   final _taskMutationRequests = <String, String>{};
@@ -96,6 +106,85 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
       error: error,
       snapshot: clearSnapshot ? null : snapshot ?? state.snapshot,
     );
+    if (!state.busy &&
+        _syncRequested &&
+        !_autoSyncRunning &&
+        _autoSyncTimer == null) {
+      requestAutoSync();
+    }
+  }
+
+  static String _snapshotContent(Map<String, Object?> snapshot) {
+    final view = Map<String, Object?>.from(snapshot['view'] as Map);
+    view.remove('updatedAt');
+    return jsonEncode(view);
+  }
+
+  void _stopAutoSync() {
+    _autoSyncTimer?.cancel();
+    _autoSyncPoll?.cancel();
+    _autoSyncTimer = null;
+    _autoSyncPoll = null;
+    _syncRequested = false;
+    _lastSyncedContent = null;
+  }
+
+  /// Coalesce edits and always read a fresh, account-verified projection.
+  void requestAutoSync() {
+    if (!mounted ||
+        !_acceptEvents ||
+        snapshotLoader == null ||
+        !state.diagnostics.canMessageFor(state.selectedNode)) {
+      return;
+    }
+    _syncRequested = true;
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = Timer(autoSyncDelay, () {
+      _autoSyncTimer = null;
+      unawaited(_autoSync());
+    });
+  }
+
+  Future<void> _autoSync() async {
+    if (!mounted ||
+        !_acceptEvents ||
+        !_syncRequested ||
+        _autoSyncRunning ||
+        state.busy ||
+        !state.diagnostics.canMessageFor(state.selectedNode)) {
+      return;
+    }
+    _autoSyncRunning = true;
+    _syncRequested = false;
+    final generation = _generation;
+    final serial = ++_operationSerial;
+    _set(busy: true);
+    try {
+      final preview = await snapshotLoader!().timeout(
+        const Duration(seconds: 30),
+      );
+      if (!mounted || generation != _generation || !_acceptEvents) return;
+      if (!preview.accountScopeVerified) {
+        _set(error: 'account_scope_unverified');
+        return;
+      }
+      _set(snapshot: preview);
+      if (_snapshotContent(preview.snapshot) != _lastSyncedContent) {
+        _set(busy: false);
+        await _send('snapshot.ack', preview.snapshot);
+      }
+    } catch (_) {
+      if (mounted && generation == _generation) {
+        _set(error: 'snapshot_read_failed');
+      }
+    } finally {
+      _autoSyncRunning = false;
+      if (mounted && serial == _operationSerial) {
+        _set(busy: false, error: state.error);
+      } else if (mounted && _syncRequested) {
+        requestAutoSync();
+      }
+    }
   }
 
   void _streamError(Object error) {
@@ -106,15 +195,23 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
 
   void _observe(WearDiagnostics diagnostics) {
     if (!mounted || !_acceptEvents) return;
+    final wasReady = state.diagnostics.canMessageFor(state.selectedNode);
     final changed =
         diagnostics.session != state.diagnostics.session ||
         (state.selectedNode != null &&
             !diagnostics.nodeIds.contains(state.selectedNode)) ||
         (state.diagnostics.canMessageFor(state.selectedNode) &&
             !diagnostics.canMessageFor(state.selectedNode));
+    final recoveredNode =
+        state.selectedNode == null &&
+            _reconnectNode != null &&
+            diagnostics.canMessageFor(_reconnectNode)
+        ? _reconnectNode
+        : null;
     final cancelledSend = changed && _pending != null;
     if (changed) {
       _generation++;
+      _lastSyncedContent = null;
       _pending?.complete('session_changed');
       _pending = null;
     }
@@ -122,12 +219,26 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
       diagnostics: diagnostics,
       clearSnapshot: changed,
       busy: cancelledSend ? false : null,
-      clearNode: !diagnostics.nodeIds.contains(state.selectedNode),
+      selectedNode: recoveredNode,
+      clearNode:
+          recoveredNode == null &&
+          !diagnostics.nodeIds.contains(state.selectedNode),
       phone: changed ? WearPresence.unknown : null,
       delivery: cancelledSend ? '会话已变更；未确认送达' : null,
       error:
           diagnostics.lastError ?? (cancelledSend ? 'session_changed' : null),
     );
+    if (state.diagnostics.canMessageFor(state.selectedNode) &&
+        snapshotLoader != null) {
+      final initialSync = _autoSyncPoll == null;
+      _autoSyncPoll ??= Timer.periodic(
+        autoSyncInterval,
+        (_) => requestAutoSync(),
+      );
+      if (initialSync || !wasReady || changed) requestAutoSync();
+    } else {
+      _stopAutoSync();
+    }
   }
 
   Future<void> _operation(
@@ -168,6 +279,8 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
     ++_generation;
     ++_operationSerial;
     _acceptEvents = false;
+    _reconnectNode = null;
+    _stopAutoSync();
     _pending?.complete('session_revoked');
     _pending = null;
     if (mounted) {
@@ -189,6 +302,8 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
   Future<void> selectNode(String node) async {
     if (!state.diagnostics.nodeIds.contains(node) || state.busy) return;
     ++_generation;
+    _reconnectNode = node;
+    _stopAutoSync();
     _pending?.complete('target_changed');
     _pending = null;
     _set(
@@ -204,13 +319,14 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
     if (state.busy || state.selectedNode == null) return;
     _set(busy: true);
     final generation = _generation;
+    final serial = ++_operationSerial;
     try {
       await transport.openApp().timeout(responseTimeout);
       if (mounted && generation == _generation) _set(delivery: '已请求打开手环应用');
     } catch (_) {
       if (mounted && generation == _generation) _set(error: 'launch_failed');
     } finally {
-      if (mounted && generation == _generation) {
+      if (mounted && serial == _operationSerial) {
         _set(busy: false, error: state.error);
       }
     }
@@ -218,7 +334,7 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
 
   Future<void> ping() => _send('pong', null);
 
-  /// Produces only on a user action. Identity/target/session invalidation wins
+  /// Refreshes a manual preview. Identity/target/session invalidation wins
   /// over every asynchronous read; stale results never reappear in the page.
   Future<void> refreshSnapshot() async {
     final loader = snapshotLoader;
@@ -340,6 +456,9 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
       final response = await pending.response.future;
       if (generation != _generation || !mounted) return;
       if (response == 'ok') {
+        if (kind == 'snapshot.ack' && snapshot?['view'] is Map) {
+          _lastSyncedContent = _snapshotContent(snapshot!);
+        }
         _set(
           phone: kind == 'pong' ? WearPresence.online : null,
           delivery: kind == 'pong' ? '已收到关联 Pong' : '同步完成 · 手环已保存',
@@ -519,6 +638,8 @@ class WearConnectionManager extends StateNotifier<WearConnectionState> {
   @override
   void dispose() {
     _acceptEvents = false;
+    _stopAutoSync();
+    unawaited(_snapshotChanges?.cancel());
     ++_generation;
     _pending?.complete('disposed');
     _pending = null;

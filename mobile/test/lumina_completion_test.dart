@@ -1,10 +1,12 @@
 import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show LuminaCardMemory;
+
 import 'lumina_components_test.dart' show harness;
 
 void main() {
@@ -13,6 +15,80 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await LuminaCardMemory.initialize();
   });
+  test(
+    'semantic effects use distinct native methods and failures are nonblocking',
+    () async {
+      final calls = <String>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call.method);
+        if (call.method == 'reject')
+          throw PlatformException(code: 'unavailable');
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      await LuminaHaptics.tick();
+      await LuminaHaptics.longPress();
+      await LuminaHaptics.dragStart();
+      await LuminaHaptics.threshold(true);
+      await LuminaHaptics.threshold(false);
+      await LuminaHaptics.toggle(true);
+      await LuminaHaptics.toggle(false);
+      await LuminaHaptics.confirm();
+      await LuminaHaptics.reject();
+      expect(calls, [
+        'tick',
+        'longPress',
+        'dragStart',
+        'thresholdActivate',
+        'thresholdDeactivate',
+        'toggleOn',
+        'toggleOff',
+        'confirm',
+        'reject',
+      ]);
+    },
+  );
+
+  test('selection uses the host native feedback channel', () async {
+    final calls = <String>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await LuminaHaptics.selection();
+    expect(calls, ['selection']);
+  });
+
+  test(
+    'missing host selection falls back to Flutter without duplicate feedback',
+    () async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        channel,
+        (_) async => throw MissingPluginException(),
+      );
+      var ticks = 0;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'HapticFeedback.vibrate' &&
+            call.arguments == 'HapticFeedbackType.selectionClick') {
+          ticks++;
+        }
+        return null;
+      });
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(channel, null);
+        messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+      });
+      await LuminaHaptics.selection();
+      expect(ticks, 1);
+    },
+  );
   testWidgets('undo from completed uses the shared exit animation', (
     tester,
   ) async {
@@ -391,11 +467,11 @@ void main() {
   testWidgets('failed save preserves row without success haptic', (
     tester,
   ) async {
-    var haptics = 0;
+    final effects = <String>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
-      _,
+      call,
     ) async {
-      haptics++;
+      effects.add(call.method);
       return null;
     });
     addTearDown(
@@ -428,7 +504,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('task'), findsOneWidget);
     expect(find.text('未能保存完成状态，请重试。'), findsOneWidget);
-    expect(haptics, 0);
+    expect(effects, ['reject']);
     expect(tester.takeException(), isNull);
   });
 

@@ -1,3 +1,4 @@
+import 'package:orialis_mobile/features/memory/presentation/memory_page.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -125,6 +126,11 @@ void main() {
         expect(chat.repository, same(repository));
         expect(chat.key, const ValueKey(('desktop-alice', 'desktop-existing')));
         expect(find.byType(DesktopInsightsPanel), findsNothing);
+        expect(find.byKey(const ValueKey('desktop-sidebar')), findsOneWidget);
+        router.go('/memory');
+        await tester.pumpAndSettle();
+        final memory = tester.widget<MemoryPage>(find.byType(MemoryPage));
+        expect(memory.desktop, isTrue);
         expect(find.byKey(const ValueKey('desktop-sidebar')), findsOneWidget);
         expect(tester.takeException(), isNull);
       } finally {

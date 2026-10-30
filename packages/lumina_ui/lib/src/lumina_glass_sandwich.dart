@@ -88,10 +88,12 @@ class LuminaGlassCoat extends StatelessWidget {
   const LuminaGlassCoat({
     this.radius = LuminaControlSize.capsuleRadius,
     this.pressed = false,
+    this.pressProgress,
     super.key,
   });
   final double radius;
   final bool pressed;
+  final double? pressProgress;
 
   @override
   Widget build(BuildContext context) {
@@ -112,6 +114,7 @@ class LuminaGlassCoat extends StatelessWidget {
             contrast: false,
             focused: false,
             pressed: pressed,
+            pressProgress: pressProgress,
             liquidGlass: true,
             embeddedGlass: true,
             cheapShadow: theme.highPerformanceMode,
@@ -132,6 +135,7 @@ class LuminaGlassSandwich extends StatelessWidget {
     this.tint,
     this.focused = false,
     this.pressed = false,
+    this.pressProgress,
     super.key,
   });
   final Widget child;
@@ -139,6 +143,7 @@ class LuminaGlassSandwich extends StatelessWidget {
   final double radius;
   final Color? tint;
   final bool focused, pressed;
+  final double? pressProgress;
 
   @override
   Widget build(BuildContext context) => Stack(
@@ -151,7 +156,11 @@ class LuminaGlassSandwich extends StatelessWidget {
         child: Padding(padding: padding, child: child),
       ),
       Positioned.fill(
-        child: LuminaGlassCoat(radius: radius, pressed: pressed),
+        child: LuminaGlassCoat(
+          radius: radius,
+          pressed: pressed,
+          pressProgress: pressProgress,
+        ),
       ),
     ],
   );

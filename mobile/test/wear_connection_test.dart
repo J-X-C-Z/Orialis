@@ -10,7 +10,11 @@ import 'package:orialis_mobile/features/wear/wear_transport.dart';
 
 class TestTransport implements WearTransport {
   @override
-  Future<void> openApp() async {}
+  Future<void> openApp() async {
+    await opening?.future;
+  }
+
+  Completer<void>? opening;
   final input = StreamController<WearMessage>.broadcast(sync: true);
   final observations = StreamController<WearDiagnostics>.broadcast(sync: true);
   WearDiagnostics value = const WearDiagnostics(
@@ -102,28 +106,25 @@ void main() {
     expect(manager.state.diagnostics.session, isNull);
     expect(manager.state.phone, WearPresence.offline);
   });
-  test(
-    'transport delivery and mismatched sessions do not imply Pong or target online',
-    () async {
-      await ready();
-      final sending = manager.ping();
-      await Future<void>.delayed(Duration.zero);
-      final ping = WearProtocol.decode(
-        transport.sent.single,
-      )['payload']['pingId'];
-      expect(manager.state.delivery, contains('等待 Pong'));
-      expect(manager.state.phone, WearPresence.unknown);
-      final pong = WearProtocol.encode('pong', {'pingId': ping});
-      transport.reply(pong, session: 'old-account-session');
-      transport.reply(WearProtocol.encode('pong', {'pingId': 'unsolicited'}));
-      expect(manager.state.busy, isTrue);
-      transport.reply(pong);
-      await sending;
-      expect(manager.state.phone, WearPresence.online);
-      expect(manager.state.orialis, WearPresence.unknown);
-      expect(manager.state.target, WearPresence.unknown);
-    },
-  );
+  test('transport delivery and mismatched sessions do not imply Pong or target online', () async {
+    await ready();
+    final sending = manager.ping();
+    await Future<void>.delayed(Duration.zero);
+    final ping = WearProtocol.decode(
+      transport.sent.single,
+    )['payload']['pingId'];
+    expect(manager.state.delivery, contains('等待 Pong'));
+    expect(manager.state.phone, WearPresence.unknown);
+    final pong = WearProtocol.encode('pong', {'pingId': ping});
+    transport.reply(pong, session: 'old-account-session');
+    transport.reply(WearProtocol.encode('pong', {'pingId': 'unsolicited'}));
+    expect(manager.state.busy, isTrue);
+    transport.reply(pong);
+    await sending;
+    expect(manager.state.phone, WearPresence.online);
+    expect(manager.state.orialis, WearPresence.unknown);
+    expect(manager.state.target, WearPresence.unknown);
+  });
   test('late Pong cannot replace timeout', () async {
     await ready();
     await manager.ping();
@@ -133,67 +134,58 @@ void main() {
     expect(manager.state.phone, WearPresence.unknown);
     expect(manager.state.error, 'response_timeout');
   });
-  test(
-    'snapshot waits for exact transfer and revision ACK without new persisted field',
-    () async {
-      await ready();
-      final sending = manager.sendSnapshot({
-        'transferId': 't',
-        'revision': 3,
-        'title': '中文🙂' * 600,
-      });
-      await Future<void>.delayed(Duration.zero);
-      expect(transport.sent.length, greaterThan(1));
-      transport.reply(
-        WearProtocol.encode('snapshot.ack', {'transferId': 't', 'revision': 2}),
-      );
-      expect(manager.state.busy, isTrue);
-      transport.reply(
-        WearProtocol.encode('snapshot.ack', {'transferId': 't', 'revision': 3}),
-      );
-      await sending;
-      expect(manager.state.delivery, contains('同步完成 · 手环已保存'));
-      expect(manager.state.target, WearPresence.unknown);
-    },
-  );
-  test(
-    'account/server identity mutation revokes in-flight messages with no replay',
-    () async {
-      SharedPreferences.setMockInitialValues({});
-      final config = AppConfig();
-      config.addIdentityListener(manager.revokeSession);
-      await ready();
-      final sending = manager.ping();
-      await config.setServerUrl('https://new.example');
-      await sending;
-      expect(manager.state.selectedNode, isNull);
-      expect(manager.state.diagnostics.session, isNull);
-      expect(manager.state.phone, WearPresence.offline);
-      expect(transport.disconnects, 1);
-      await manager.connect();
-      expect(transport.sent.length, 1);
-      config.removeIdentityListener(manager.revokeSession);
-    },
-  );
-  test(
-    'installation and permission observations for another wearable do not authorize send',
-    () async {
-      transport.value = const WearDiagnostics(
-        availability: WearAvailability.available,
-        serviceConnection: WearPresence.online,
-        nodeCount: 2,
-        nodeIds: ['band', 'another'],
-        wearAppInstalled: true,
-        permissionsGranted: true,
-        session: 'native-session',
-        observedNodeId: 'another',
-      );
-      await ready();
-      await manager.ping();
-      expect(transport.sent, isEmpty);
-      expect(manager.state.error, 'connection_not_ready');
-    },
-  );
+  test('snapshot waits for exact transfer and revision ACK without new persisted field', () async {
+    await ready();
+    final sending = manager.sendSnapshot({
+      'transferId': 't',
+      'revision': 3,
+      'title': '中文🙂' * 600,
+    });
+    await Future<void>.delayed(Duration.zero);
+    expect(transport.sent.length, greaterThan(1));
+    transport.reply(
+      WearProtocol.encode('snapshot.ack', {'transferId': 't', 'revision': 2}),
+    );
+    expect(manager.state.busy, isTrue);
+    transport.reply(
+      WearProtocol.encode('snapshot.ack', {'transferId': 't', 'revision': 3}),
+    );
+    await sending;
+    expect(manager.state.delivery, contains('同步完成 · 手环已保存'));
+    expect(manager.state.target, WearPresence.unknown);
+  });
+  test('account/server identity mutation revokes in-flight messages with no replay', () async {
+    SharedPreferences.setMockInitialValues({});
+    final config = AppConfig();
+    config.addIdentityListener(manager.revokeSession);
+    await ready();
+    final sending = manager.ping();
+    await config.setServerUrl('https://new.example');
+    await sending;
+    expect(manager.state.selectedNode, isNull);
+    expect(manager.state.diagnostics.session, isNull);
+    expect(manager.state.phone, WearPresence.offline);
+    expect(transport.disconnects, 1);
+    await manager.connect();
+    expect(transport.sent.length, 1);
+    config.removeIdentityListener(manager.revokeSession);
+  });
+  test('installation and permission observations for another wearable do not authorize send', () async {
+    transport.value = const WearDiagnostics(
+      availability: WearAvailability.available,
+      serviceConnection: WearPresence.online,
+      nodeCount: 2,
+      nodeIds: ['band', 'another'],
+      wearAppInstalled: true,
+      permissionsGranted: true,
+      session: 'native-session',
+      observedNodeId: 'another',
+    );
+    await ready();
+    await manager.ping();
+    expect(transport.sent, isEmpty);
+    expect(manager.state.error, 'connection_not_ready');
+  });
   test('service loss cancels ACK wait and releases busy state', () async {
     await ready();
     final sending = manager.ping();
@@ -211,6 +203,93 @@ void main() {
     expect(manager.state.phone, WearPresence.unknown);
     expect(manager.state.diagnostics.session, isNull);
   });
+  test(
+    'reconnect restores only the explicitly selected band without replay',
+    () async {
+      await ready();
+      final sending = manager.ping();
+      await Future<void>.delayed(Duration.zero);
+      transport.observations.add(
+        const WearDiagnostics(
+          availability: WearAvailability.available,
+          serviceConnection: WearPresence.offline,
+        ),
+      );
+      await sending;
+      expect(manager.state.selectedNode, isNull);
+      transport.observations.add(
+        const WearDiagnostics(
+          availability: WearAvailability.available,
+          serviceConnection: WearPresence.online,
+          nodeIds: ['another'],
+          permissionsGranted: true,
+          session: 'another-session',
+          observedNodeId: 'another',
+        ),
+      );
+      expect(manager.state.selectedNode, isNull);
+      transport.observations.add(
+        const WearDiagnostics(
+          availability: WearAvailability.available,
+          serviceConnection: WearPresence.online,
+          nodeIds: ['band'],
+          permissionsGranted: true,
+          session: 'restored-session',
+          observedNodeId: 'band',
+        ),
+      );
+      expect(manager.state.selectedNode, 'band');
+      expect(manager.state.phone, WearPresence.unknown);
+      expect(transport.sent.length, 1);
+      transport.reply(
+        WearProtocol.encode('pong', {
+          'pingId': WearProtocol.decode(
+            transport.sent.single,
+          )['payload']['pingId'],
+        }),
+      );
+      expect(manager.state.phone, WearPresence.unknown);
+      final nextPing = manager.ping();
+      await Future<void>.delayed(Duration.zero);
+      final pingId = WearProtocol.decode(
+        transport.sent.last,
+      )['payload']['pingId'];
+      transport.reply(
+        WearProtocol.encode('pong', {'pingId': pingId}),
+        session: 'restored-session',
+      );
+      await nextPing;
+      expect(manager.state.phone, WearPresence.online);
+    },
+  );
+
+  test('disconnect during app launch releases busy after recovery', () async {
+    await ready();
+    transport.opening = Completer<void>();
+    final opening = manager.openApp();
+    transport.observations.add(
+      const WearDiagnostics(
+        availability: WearAvailability.available,
+        serviceConnection: WearPresence.offline,
+      ),
+    );
+    transport.observations.add(transport.value);
+    transport.opening!.complete();
+    await opening;
+    expect(manager.state.selectedNode, 'band');
+    expect(manager.state.busy, isFalse);
+  });
+
+  test('explicit revocation forgets the reconnect target', () async {
+    await ready();
+    await manager.revokeSession();
+    transport.observations.add(transport.value);
+    expect(manager.state.selectedNode, isNull);
+    await manager.connect();
+    expect(manager.state.selectedNode, isNull);
+    expect(transport.sent, isEmpty);
+  });
+
   test(
     'incoming band Ping replies with same id but does not assert execution',
     () async {

@@ -428,6 +428,64 @@ class SystemIntegrationController {
         false;
   }
 
+  Future<String?> _trackingScope() async {
+    if (_disposed || !supported || !enabled || _identityChanging) return null;
+    final generation = _generation;
+    final scope = await _scope();
+    if (scope == null || scope != await _marker()) return null;
+    if (_disposed ||
+        _identityChanging ||
+        generation != _generation ||
+        !enabled) {
+      return null;
+    }
+    return scope;
+  }
+
+  Future<String?> trackedScheduleId() async {
+    final scope = await _trackingScope();
+    if (scope == null) return null;
+    return _invoke<String>('trackedScheduleId', {'scope': scope});
+  }
+
+  Future<bool> startScheduleTracking(String eventId) async {
+    final generation = _generation;
+    await refresh();
+    final scope = await _trackingScope();
+    if (scope == null || generation != _generation) return false;
+    final event =
+        await (database.select(database.calendarEvents)
+              ..where((row) => row.id.equals(eventId) & row.deletedAt.isNull()))
+            .getSingleOrNull();
+    final start = DateTime.tryParse(event?.startAt ?? '');
+    final end = DateTime.tryParse(event?.endAt ?? '');
+    final now = DateTime.now();
+    if (start == null ||
+        end == null ||
+        start.isAfter(now) ||
+        !end.isAfter(now)) {
+      return false;
+    }
+    if (await _trackingScope() != scope || generation != _generation) {
+      return false;
+    }
+    return await _invoke<bool>('startScheduleTracking', {
+          'scope': scope,
+          'eventId': eventId,
+        }) ??
+        false;
+  }
+
+  Future<bool> stopScheduleTracking(String eventId) async {
+    final scope = await _trackingScope();
+    if (scope == null) return false;
+    return await _invoke<bool>('stopScheduleTracking', {
+          'scope': scope,
+          'eventId': eventId,
+        }) ??
+        false;
+  }
+
   Future<void> openExactAlarmSettings() =>
       _invoke<void>('openExactAlarmSettings');
 

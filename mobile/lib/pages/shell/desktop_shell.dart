@@ -21,6 +21,7 @@ class DesktopShell extends StatefulWidget {
     'Project',
     'Web 服务',
     'Chat',
+    '记忆',
   ];
   static const icons = [
     LuminaIcons.today,
@@ -33,6 +34,7 @@ class DesktopShell extends StatefulWidget {
     LuminaIcons.folder,
     LuminaIcons.devices,
     LuminaIcons.chat,
+    LuminaIcons.folder,
   ];
 
   @override
@@ -158,10 +160,11 @@ class _DesktopShellState extends State<DesktopShell> {
                             ),
                           ),
                         ),
-                        Text(
-                          '${defaultTargetPlatform == TargetPlatform.macOS ? '⌘' : 'Ctrl+'}$digit',
-                          style: theme.textTheme.bodySmall,
-                        ),
+                        if (index < 10)
+                          Text(
+                            '${defaultTargetPlatform == TargetPlatform.macOS ? '⌘' : 'Ctrl+'}$digit',
+                            style: theme.textTheme.bodySmall,
+                          ),
                       ],
                     ),
             ),

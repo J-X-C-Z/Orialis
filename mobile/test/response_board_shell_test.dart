@@ -241,6 +241,30 @@ void main() {
     );
   });
 
+  testWidgets(
+    'schedule shortcut starts a query without filling ordinary drafts',
+    (tester) async {
+      final selected = <String>[];
+      var calls = 0;
+      await tester.pumpWidget(
+        _host(
+          ChatEmptySuggestions(
+            onSelect: selected.add,
+            onSchedule: () => calls++,
+          ),
+          width: 240,
+          scale: 2,
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('chat-suggestion-日程')));
+      expect(calls, 1);
+      expect(selected, isEmpty);
+      expect(chatSchedulePrompt, contains('消息中枢'));
+      expect(chatSchedulePrompt, contains('不创建、修改日程'));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('empty suggestions only emit the four editable draft prompts', (
     tester,
   ) async {

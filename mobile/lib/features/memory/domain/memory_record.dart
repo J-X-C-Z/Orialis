@@ -21,6 +21,11 @@ class MemoryRecord {
     this.videoStatus,
     this.videoSummary,
     this.videoError,
+    this.cloudVersion,
+    this.cloudRecordHash,
+    this.cloudImageSha256,
+    this.cloudDeletedAt,
+    this.cloudSyncError,
   });
 
   final String id, sourcePackage, sourceLabel, visibleText, title, notes;
@@ -29,6 +34,11 @@ class MemoryRecord {
   final String? imagePath, sharedText, summary, analysisStatus, analysisError;
   final String? analysisConversationId, analysisMessageId, analysisRequestId;
   final String? category, sourceUrl, videoStatus, videoSummary, videoError;
+  final String? cloudVersion,
+      cloudRecordHash,
+      cloudImageSha256,
+      cloudDeletedAt,
+      cloudSyncError;
 
   static bool isVideoUrl(String value) {
     final uri = Uri.tryParse(value);
@@ -90,6 +100,11 @@ class MemoryRecord {
       videoStatus: optional('videoStatus'),
       videoSummary: optional('videoSummary'),
       videoError: optional('videoError'),
+      cloudVersion: optional('cloudVersion'),
+      cloudRecordHash: optional('cloudRecordHash'),
+      cloudImageSha256: optional('cloudImageSha256'),
+      cloudDeletedAt: optional('cloudDeletedAt'),
+      cloudSyncError: optional('cloudSyncError'),
     );
   }
 
@@ -117,6 +132,28 @@ class MemoryRecord {
     ].any((value) => value.toLowerCase().contains(needle));
   }
 
+  Map<String, Object?> toCloudMap({String? imageSha256}) => {
+    'id': id,
+    'createdAt': createdAt.toUtc().toIso8601String(),
+    'sourcePackage': sourcePackage,
+    'sourceLabel': sourceLabel,
+    'visibleText': visibleText,
+    'sharedText': sharedText,
+    'urls': urls,
+    'title': title,
+    'summary': summary,
+    'notes': notes,
+    'analysisStatus': analysisStatus,
+    'analysisError': analysisError,
+    'analysisRequestId': analysisRequestId,
+    'category': category,
+    'sourceUrl': sourceUrl,
+    'videoStatus': videoStatus,
+    'videoSummary': videoSummary,
+    'videoError': videoError,
+    'imageSha256': imageSha256 ?? cloudImageSha256,
+  };
+
   Map<String, Object?> toMap() => {
     'id': id,
     'createdAt': createdAt.toUtc().toIso8601String(),
@@ -139,5 +176,10 @@ class MemoryRecord {
     'videoStatus': videoStatus,
     'videoSummary': videoSummary,
     'videoError': videoError,
+    'cloudVersion': cloudVersion,
+    'cloudRecordHash': cloudRecordHash,
+    'cloudImageSha256': cloudImageSha256,
+    'cloudDeletedAt': cloudDeletedAt,
+    'cloudSyncError': cloudSyncError,
   };
 }

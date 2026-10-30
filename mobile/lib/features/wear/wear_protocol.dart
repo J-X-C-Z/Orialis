@@ -4,10 +4,9 @@ import 'dart:convert';
 class WearProtocol {
   static const namespace = 'orialis.wear.v1';
   // Conservative Fangcun transport budget, including the JSON envelope.
-  // shortcut: snapshots cap at 384 KiB, paginate if real accounts exceed this.
   static const maxFrameBytes = 2200,
-      maxSnapshotBytes = 393216,
-      maxParts = 220,
+      maxSnapshotBytes = 16384,
+      maxParts = 32,
       maxChunkBytes = 4096;
   static String encode(String type, Map<String, Object?> payload) {
     final data = jsonEncode({

@@ -4,10 +4,13 @@ mod auth;
 mod calendar;
 mod config;
 mod health;
-mod memory_analysis;
 mod mobile_realtime;
+mod memory_analysis;
+mod memory_records;
+mod screen_memories;
 mod news;
 mod node_control;
+mod oidc;
 mod projects;
 mod sync;
 mod tasks;
@@ -425,10 +428,34 @@ async fn main() {
             "/api/v1/schedules/{id}",
             patch(update_event).delete(delete_event),
         )
+        .route("/api/v1/memories", get(screen_memories::list_records))
+        .route(
+            "/api/v1/memories/{id}",
+            get(screen_memories::get_record)
+                .put(screen_memories::put_record)
+                .patch(screen_memories::patch_record),
+        )
+        .route(
+            "/api/v1/memories/{id}/history",
+            get(screen_memories::history),
+        )
+        .route("/api/v1/memory/records", get(memory_records::list_records))
+        .route(
+            "/api/v1/memory/records/{id}",
+            get(memory_records::get_record)
+                .put(memory_records::put_record)
+                .delete(memory_records::delete_record)
+                .layer(DefaultBodyLimit::max(1_100_000)),
+        )
+        .route(
+            "/api/v1/memory/images/{sha256}",
+            get(memory_records::get_image)
+                .put(memory_records::put_image)
+                .layer(DefaultBodyLimit::max(memory_records::MAX_IMAGE_BYTES)),
+        )
         .route(
             "/api/v1/memory/analyses/{id}",
-            get(memory_analysis::get_analysis)
-                .post(memory_analysis::start_analysis)
+            get(memory_analysis::get_analysis).post(memory_analysis::start_analysis)
                 .layer(DefaultBodyLimit::max(2_000_000)),
         )
         .route(
@@ -488,6 +515,9 @@ fn auth_router() -> Router<Arc<AppState>> {
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/auth/session", get(current_session))
+        .route("/api/v1/auth/oidc/start", post(oidc::start))
+        .route("/api/v1/auth/oidc/callback", get(oidc::callback))
+        .route("/api/v1/auth/oidc/exchange", post(oidc::exchange))
 }
 
 fn now() -> String {
