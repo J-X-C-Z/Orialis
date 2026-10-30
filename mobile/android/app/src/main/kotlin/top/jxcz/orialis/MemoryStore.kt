@@ -51,36 +51,6 @@ internal object MemoryStore {
         path == imageFile(context, scope, id).absolutePath ||
             path == compressedImageFile(context, scope, id).absolutePath
 
-    /** New captures retain their dimensions; keep PNG when JPEG would cost more. */
-    private fun compactImage(context: Context, scope: String, id: String, source: File): File {
-        val target = AtomicFile(compressedImageFile(context, scope, id))
-        var bitmap: Bitmap? = null
-        try {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(source.path, bounds)
-            // Oversized shared images keep their original, avoiding a second huge decode.
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0 ||
-                bounds.outWidth.toLong() * bounds.outHeight > 20_000_000) return source
-            val decoded = BitmapFactory.decodeFile(source.path) ?: return source
-            bitmap = decoded
-            val output = target.startWrite()
-            try {
-                check(decoded.compress(Bitmap.CompressFormat.JPEG, 88, output))
-                target.finishWrite(output)
-            } catch (error: Exception) { target.failWrite(output); throw error }
-            val checkBounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(target.baseFile.path, checkBounds)
-            if (target.baseFile.length() <= 0 || target.baseFile.length() >= source.length() ||
-                checkBounds.outWidth != bounds.outWidth || checkBounds.outHeight != bounds.outHeight) {
-                target.delete()
-                return source
-            }
-            return target.baseFile
-        } catch (_: Exception) {
-            target.delete()
-            return source
-        } finally { bitmap?.recycle() }
-    }
     @Synchronized fun save(context: Context, scope: String, id: String, sourcePackage: String,
         sourceLabel: String, visibleText: String, sharedText: String? = null, imagePath: String? = null): JSONObject {
         check(scope(context) == scope) { "账号已变更，请重新记录" }
@@ -92,19 +62,11 @@ internal object MemoryStore {
             .put("title", text.lineSequence().firstOrNull { it.isNotBlank() }?.take(120) ?: "屏幕记忆")
             .put("analysisStatus", "pending")
         sharedText?.let { record.put("sharedText", it.take(64000)) }
-        val original = imagePath?.let {
+        imagePath?.let {
             require(it == imageFile(context, scope, id).absolutePath)
-            File(it)
+            record.put("imagePath", it)
         }
-        val stored = original?.let { compactImage(context, scope, id, it) }
-        stored?.let { record.put("imagePath", it.absolutePath) }
-        try { write(recordFile(context, scope, id), record) }
-        catch (error: Exception) {
-            if (stored != original) stored?.let { AtomicFile(it).delete() }
-            throw error
-        }
-        // Only discard the transient capture after the record points to a verified copy.
-        if (stored != original) original?.delete()
+        write(recordFile(context, scope, id), record)
         MemoryAnalysisJobService.schedule(context, id)
         return record
     }

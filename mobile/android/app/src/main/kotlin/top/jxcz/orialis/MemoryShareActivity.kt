@@ -2,7 +2,6 @@ package top.jxcz.orialis
 
 import android.app.Activity
 import android.content.Intent
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
@@ -81,14 +80,10 @@ class MemoryShareActivity : Activity() {
                         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                         BitmapFactory.decodeFile(staged.path, bounds)
                         require(bounds.outWidth > 0 && bounds.outHeight > 0) { "无法读取分享图片" }
-                        var sample = 1
-                        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 2560) sample *= 2
-                        val bitmap = BitmapFactory.decodeFile(staged.path, BitmapFactory.Options().apply { inSampleSize = sample })
-                            ?: error("无法读取分享图片")
                         val image = MemoryStore.imageFile(this, scope, id)
                         unownedImage = image
-                        try { image.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) } }
-                        finally { bitmap.recycle() }
+                        // Retain the shared file byte-for-byte; compression is only for upload.
+                        staged.copyTo(image, overwrite = false)
                     } finally { staged.delete() }
                 }
                 val source = MemoryUrls.sourceLabel(payload.text) ?: "系统分享"
