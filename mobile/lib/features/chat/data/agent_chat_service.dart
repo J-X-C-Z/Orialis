@@ -147,6 +147,49 @@ class AgentChatService {
         deviceId,
       ])))}';
 
+  String _defaultDeviceKey((String, String) scope, String? username) =>
+      'orialis.chatDefaultDevice.${sha256.convert(utf8.encode(jsonEncode([
+        scope.$1,
+        username == null ? ['session', scope.$2] : ['account', username],
+      ])))}';
+
+  Future<String> defaultDeviceId() async {
+    final scope = await identity();
+    final username = await config.sessionUsername();
+    final preferences = await SharedPreferences.getInstance();
+    if (await identity() != scope ||
+        await config.sessionUsername() != username) {
+      throw StateError('登录或服务地址已改变，请重试');
+    }
+    final id = preferences.getString(_defaultDeviceKey(scope, username));
+    return isAllowedTarget(id) ? id! : azureDeviceId;
+  }
+
+  Future<void> setDefaultDevice(String deviceId) async {
+    if (!isAllowedTarget(deviceId)) throw StateError('不支持此聊天设备');
+    final scope = await identity();
+    final username = await config.sessionUsername();
+    final preferences = await SharedPreferences.getInstance();
+    if (await identity() != scope ||
+        await config.sessionUsername() != username) {
+      throw StateError('登录或服务地址已改变，请重试');
+    }
+    await preferences.setString(_defaultDeviceKey(scope, username), deviceId);
+  }
+
+  Future<ChatAgentDevice> defaultDevice() async {
+    final scope = await identity();
+    final id = await defaultDeviceId();
+    final device = (await devices()).where((device) => device.id == id);
+    if (await identity() != scope) {
+      throw StateError('登录或服务地址已改变，请重试');
+    }
+    if (device.isEmpty || !device.first.online) {
+      throw StateError('默认聊天设备 ${targetLabel(id)} 当前离线或不可用');
+    }
+    return device.first;
+  }
+
   Future<void> _loadDeviceNames((String, String) scope) async {
     final username = await config.sessionUsername();
     final preferences = await SharedPreferences.getInstance();

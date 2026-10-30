@@ -206,6 +206,21 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     FlutterSecureStorage.setMockInitialValues({});
   });
+  testWidgets('conversation route opens chat without needing a message ID', (
+    tester,
+  ) async {
+    await _openChat(tester);
+    final router = GoRouter.of(tester.element(find.byType(ChatPage)));
+    router.go('/today');
+    await tester.pumpAndSettle();
+    router.go('/chat?conversationId=existing-mac');
+    await tester.pumpAndSettle();
+    expect(find.byType(AgentStatusRing), findsOneWidget);
+    expect(find.byType(EditableText), findsOneWidget);
+    expect(find.text('与设备对话'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
   testWidgets('runtime control is in header and absent from transcript', (
     tester,
   ) async {

@@ -41,6 +41,7 @@ import '../../features/chat/domain/chat_transcript.dart';
 import '../../features/chat/presentation/agent_event_cards.dart';
 import '../../features/chat/presentation/chat_header_status.dart';
 import '../../features/chat/presentation/chat_device_picker.dart';
+import '../../features/chat/presentation/chat_shortcut_button.dart';
 import '../../features/chat/presentation/chat_thinking_indicator.dart';
 import '../../features/chat/presentation/chat_progress_summary.dart';
 import '../../features/chat/presentation/chat_message_search.dart';
@@ -665,7 +666,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
     unawaited(_notificationConversationSubscription?.cancel());
     _notificationConversationSubscription = null;
     final messageId = widget.messageId;
-    if (messageId == null || messageId.isEmpty) return;
+    if ((messageId == null || messageId.isEmpty) &&
+        (widget.conversationId == 'default' || widget.shareId != null)) {
+      return;
+    }
     final conversationId = widget.conversationId;
     _notificationConversationSubscription = widget.repository
         .watchConversations()
@@ -731,7 +735,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
   }
 
-  Future<void> _chooseChatDevice() async {
+  Future<void> _chooseChatDevice({bool useDefault = false}) async {
     if (_startingDeviceChat || _sending) return;
     if (_controller.text.isNotEmpty ||
         _attachments.isNotEmpty ||
@@ -742,28 +746,30 @@ class _ChatPageState extends ConsumerState<ChatPage>
     setState(() => _startingDeviceChat = true);
     try {
       final service = ref.read(agentChatServiceProvider);
-      final device = await showLuminaSheet<ChatAgentDevice>(
-        context: context,
-        builder: (context) => ChatDevicePicker(
-          agents: service,
-          onRename: (device) async {
-            final name = await _askChatName(
-              title: '修改设备名称',
-              initial: device.label,
-              hint: '设备名称（仅本机）',
+      final device = useDefault
+          ? await service.defaultDevice()
+          : await showLuminaSheet<ChatAgentDevice>(
+              context: context,
+              builder: (context) => ChatDevicePicker(
+                agents: service,
+                onRename: (device) async {
+                  final name = await _askChatName(
+                    title: '修改设备名称',
+                    initial: device.label,
+                    hint: '设备名称（仅本机）',
+                  );
+                  if (name == null || !mounted) return null;
+                  try {
+                    await service.renameDevice(device.id, name);
+                    if (mounted) setState(() {});
+                    return name;
+                  } catch (_) {
+                    if (mounted) showLuminaToast(this.context, '设备名称未能保存，请重试。');
+                    return null;
+                  }
+                },
+              ),
             );
-            if (name == null || !mounted) return null;
-            try {
-              await service.renameDevice(device.id, name);
-              if (mounted) setState(() {});
-              return name;
-            } catch (_) {
-              if (mounted) showLuminaToast(this.context, '设备名称未能保存，请重试。');
-              return null;
-            }
-          },
-        ),
-      );
       if (device == null || !mounted) return;
       final remote = await service.createConversation(device);
       final conversation = await widget.repository.importDeviceConversation(
@@ -772,6 +778,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
       if (!mounted) return;
       await _openConversation(conversation, receiveShare: _shareId != null);
       if (mounted) setState(() => _chatDeviceId = device.id);
+    } on StateError catch (error) {
+      if (mounted) showLuminaToast(context, error.message.toString());
     } catch (_) {
       if (mounted) showLuminaToast(context, '设备对话未能建立。请确认已登录、服务器已更新且设备在线，再重试。');
     } finally {
@@ -947,6 +955,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
 
   Widget _conversationList() => OrialisPageScaffold(
     title: '聊天',
+    floatingActionButton: ChatShortcutButton(
+      tooltip: '新建对话；长按与默认设备聊天',
+      onPressed: _startingDeviceChat ? null : _createConversation,
+      onDefaultChat: _startingDeviceChat
+          ? null
+          : () => _chooseChatDevice(useDefault: true),
+    ),
     padding: EdgeInsets.zero,
     actions: [
       LuminaIconButton(

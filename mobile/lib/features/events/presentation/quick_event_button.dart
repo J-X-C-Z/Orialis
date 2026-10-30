@@ -1,4 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../app/app.dart' show chatRepositoryProvider;
+import '../../chat/presentation/chat_shortcut_button.dart';
+
 import 'package:lumina_ui/lumina_ui.dart';
 
 import '../../../pages/chat/chat_page.dart' show agentChatServiceProvider;
@@ -9,22 +14,57 @@ final quickEventServiceProvider = Provider<QuickEventService>(
   (ref) => QuickEventService(ref.watch(agentChatServiceProvider)),
 );
 
-class QuickEventButton extends ConsumerWidget {
+class QuickEventButton extends ConsumerStatefulWidget {
   const QuickEventButton({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) =>
-      LuminaFloatingActionButton(
-        tooltip: '快捷添加事件',
-        frosted: true,
-        icon: const LuminaIcon(LuminaIcons.add),
-        onPressed: () => showLuminaSheet<void>(
-          context: context,
-          builder: (_) => QuickEventEditor(
-            submit: ref.read(quickEventServiceProvider).submit,
-          ),
-        ),
+  ConsumerState<QuickEventButton> createState() => _QuickEventButtonState();
+}
+
+class _QuickEventButtonState extends ConsumerState<QuickEventButton> {
+  bool _opening = false;
+
+  Future<void> _openDefaultChat() async {
+    if (_opening) return;
+    setState(() => _opening = true);
+    try {
+      final service = ref.read(agentChatServiceProvider);
+      final repository = ref.read(chatRepositoryProvider);
+      final identity = await service.identity();
+      final device = await service.defaultDevice();
+      if (await service.identity() != identity || !mounted) return;
+      final remote = await service.createConversation(device);
+      if (await service.identity() != identity || !mounted) return;
+      final conversation = await repository.importDeviceConversation(remote);
+      if (await service.identity() != identity || !mounted) return;
+      context.go(
+        Uri(
+          path: '/chat',
+          queryParameters: {'conversationId': conversation.id},
+        ).toString(),
       );
+    } on StateError catch (error) {
+      if (mounted) showLuminaToast(context, error.message.toString());
+    } catch (_) {
+      if (mounted) showLuminaToast(context, '默认设备对话未能建立，请联网后重试。');
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ChatShortcutButton(
+    tooltip: '快捷添加事件；长按与默认设备聊天',
+    onDefaultChat: _opening ? null : _openDefaultChat,
+    onPressed: _opening
+        ? null
+        : () => showLuminaSheet<void>(
+            context: context,
+            builder: (_) => QuickEventEditor(
+              submit: ref.read(quickEventServiceProvider).submit,
+            ),
+          ),
+  );
 }
 
 class QuickEventEditor extends StatefulWidget {
