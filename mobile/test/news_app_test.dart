@@ -942,6 +942,10 @@ void main() {
   testWidgets('mobile精选 list expands without hiding content permanently', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final repository = _NewsRepositoryFake(articleCount: 12);
     await tester.pumpWidget(
       ProviderScope(

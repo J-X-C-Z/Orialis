@@ -18,6 +18,7 @@ import '../../features/events/presentation/quick_event_button.dart';
 import '../projects/projects_page.dart';
 import '../shared/page_parts.dart';
 import '../shared/glass_segmented.dart';
+import '../shared/compact_header.dart';
 
 class EventsPage extends ConsumerStatefulWidget {
   const EventsPage({super.key});
@@ -112,6 +113,18 @@ class _EventsPageState extends ConsumerState<EventsPage> {
     padding: EdgeInsets.zero,
     floatingActionButton: const QuickEventButton(),
     actions: [
+      if (_page == 0 && !ref.watch(desktopModeProvider))
+        LuminaIconButton(
+          tooltip: '恢复事件默认排序',
+          icon: const LuminaIcon(LuminaIcons.sync),
+          onPressed: () async {
+            final repository = ref.read(taskRepositoryProvider);
+            final tasks = await repository.watchTasks().first;
+            await repository.resetTaskOrder(
+              tasks.map((task) => task.id).toList(),
+            );
+          },
+        ),
       if (_page == 0)
         LuminaIconButton(
           tooltip: '新增事件',
@@ -122,17 +135,8 @@ class _EventsPageState extends ConsumerState<EventsPage> {
     body: ref.watch(desktopModeProvider)
         ? _tasks(20)
         : LuminaFloatingHeader(
-            header: OrialisGlassSegmented<int>(
-              items: const {0: '四象限', 1: '项目'},
-              value: _page,
-              onChanged: (v) => _pager.animateToPage(
-                v,
-                duration: MediaQuery.disableAnimationsOf(context)
-                    ? Duration.zero
-                    : const Duration(milliseconds: 220),
-                curve: luminaEaseOut,
-              ),
-            ),
+            horizontalPadding: 12,
+            header: _mobileHeader(),
             bodyBuilder: (context, topInset) => PageView(
               controller: _pager,
               onPageChanged: (v) => setState(() => _page = v),
@@ -150,6 +154,36 @@ class _EventsPageState extends ConsumerState<EventsPage> {
             ),
           ),
   );
+  Widget _mobileHeader() {
+    final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    return OrialisCompactHeader(
+      key: const ValueKey('events-compact-header'),
+      children: [
+        SizedBox(
+          width: 152 * scale.clamp(1.0, 2.0),
+          child: OrialisGlassSegmented<int>(
+            items: const {0: '四象限', 1: '项目'},
+            value: _page,
+            onChanged: (v) => _pager.animateToPage(
+              v,
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 220),
+              curve: luminaEaseOut,
+            ),
+          ),
+        ),
+        if (_page == 0) ...[
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 176 * scale.clamp(1.0, 2.0),
+            child: _filterSelector(),
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _tasks(double topInset) => StreamBuilder<List<Task>>(
     stream: _tasksStream,
     builder: (context, snapshot) {
@@ -170,7 +204,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
       if (!ref.watch(desktopModeProvider)) {
         return OrialisContentTransition(
           changeKey: _contentFilter,
-          child: _mobileTasks(topInset, snapshot.data!, tasks, grouped),
+          child: _mobileTasks(topInset, tasks, grouped),
         );
       }
       return ListView(
@@ -251,16 +285,17 @@ class _EventsPageState extends ConsumerState<EventsPage> {
       );
     },
   );
+  Widget _filterSelector() => LuminaSegmented<String>(
+    key: const ValueKey('events-filter-selector'),
+    transparent: true,
+    items: const {'active': '待完成', 'undated': '无截止', 'done': '已完成'},
+    value: _selectedFilter,
+    onChanged: _selectFilter,
+  );
+
   Widget _taskFilters(List<Task> allTasks) => Row(
     children: [
-      Expanded(
-        child: LuminaSegmented<String>(
-          transparent: true,
-          items: const {'active': '待完成', 'undated': '无截止', 'done': '已完成'},
-          value: _selectedFilter,
-          onChanged: _selectFilter,
-        ),
-      ),
+      Expanded(child: _filterSelector()),
       const SizedBox(width: 8),
       LuminaIconButton(
         tooltip: '恢复事件默认排序',
@@ -293,7 +328,6 @@ class _EventsPageState extends ConsumerState<EventsPage> {
 
   Widget _mobileTasks(
     double topInset,
-    List<Task> allTasks,
     List<Task> tasks,
     Map<TaskQuadrant, List<Task>> grouped,
   ) => CustomScrollView(
@@ -309,8 +343,6 @@ class _EventsPageState extends ConsumerState<EventsPage> {
         ),
         sliver: SliverMainAxisGroup(
           slivers: [
-            SliverToBoxAdapter(child: _taskFilters(allTasks)),
-            const SliverToBoxAdapter(child: SizedBox(height: 20)),
             if (_quadrantUndo case final undo?) ...[
               SliverToBoxAdapter(child: _undoPanel(undo)),
               const SliverToBoxAdapter(child: SizedBox(height: 12)),

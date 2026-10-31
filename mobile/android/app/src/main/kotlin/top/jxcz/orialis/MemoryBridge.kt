@@ -46,7 +46,11 @@ internal class MemoryBridge(private val activity: MainActivity, messenger: Binar
                         else result.success(false)
                     }
                     "setScope" -> {
-                        MemoryStore.setScope(activity, call.argument<String>("scope"))
+                        val scope = call.argument<String>("scope")
+                        MemoryStore.setScope(activity, scope)
+                        if (scope != null && MemoryStore.list(activity).isNotEmpty()) {
+                            MemoryAnalysisJobService.schedule(activity)
+                        }
                         result.success(null)
                     }
                     "takePendingRoute" -> {

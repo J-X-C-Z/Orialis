@@ -68,15 +68,15 @@ void main() {
         for (final route in ['/events', '/calendar', '/profile', '/system']) {
           router.go(route);
           await tester.pumpAndSettle();
-          expect(
-            titles,
-            findsWidgets,
-            reason: '$route has glass section headers',
-          );
-          expect(
-            LuminaGlassTitleScope.of(tester.element(titles.first)),
-            isTrue,
-          );
+          if (route == '/calendar') {
+            // An empty month has a view/date control row, without agenda cards.
+            final header = find.byKey(const ValueKey('calendar-compact-header'));
+            expect(header, findsOneWidget);
+            expect(LuminaGlassTitleScope.of(tester.element(header)), isTrue);
+          } else {
+            expect(titles, findsWidgets, reason: '$route has glass section headers');
+            expect(LuminaGlassTitleScope.of(tester.element(titles.first)), isTrue);
+          }
           expect(tester.takeException(), isNull);
         }
         router.go('/events');

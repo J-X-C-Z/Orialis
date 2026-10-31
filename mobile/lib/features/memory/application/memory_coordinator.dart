@@ -58,9 +58,7 @@ class MemoryCoordinator {
     });
     await _restore();
     if (_disposed) return;
-    final pending = await repository.channel.invokeMethod<String>(
-      'takePendingRoute',
-    );
+    final pending = await repository.takePendingRoute();
     if (!_disposed && pending == '/memory') onRoute?.call(pending!);
   }
 

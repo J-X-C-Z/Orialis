@@ -113,6 +113,7 @@ final memoryCoordinatorProvider = Provider<MemoryCoordinator?>((ref) {
   final desktop = ref.watch(desktopModeProvider);
   if (kIsWeb ||
       (defaultTargetPlatform != TargetPlatform.android &&
+          defaultTargetPlatform != TargetPlatform.iOS &&
           !(desktop &&
               {
                 TargetPlatform.macOS,

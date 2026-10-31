@@ -4,6 +4,10 @@
     "docs/implementation/assets/intelligent-ui-extended-preview.png": {
       "blob_id": "5306759d0f929018f8f3fee642f2616f859e180a",
       "rationale": "Reviewed 900x2843 native Flutter preview documenting the Intelligent UI appearance; retained at readable resolution as documentation, not a build artifact."
+    },
+    "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png": {
+      "blob_id": "62eae442295e6270ce1860d4e60fda892ab53b08",
+      "rationale": "Required 1024px iOS app icon copied from the existing Orialis branding asset; source image for Xcode, not a packaged application or build cache."
     }
   }
 }

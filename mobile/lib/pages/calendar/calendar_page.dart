@@ -14,6 +14,7 @@ import '../../features/system_integration/schedule_tracking_button.dart';
 import '../../features/events/presentation/task_editor.dart';
 import '../shared/page_parts.dart';
 import '../shared/glass_segmented.dart';
+import '../shared/compact_header.dart';
 import 'calendar_week_view.dart';
 
 typedef Schedule = CalendarEvent;
@@ -187,7 +188,8 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
           );
         }
         return LuminaFloatingHeader(
-          header: _viewSelector(),
+          horizontalPadding: 12,
+          header: _mobileHeader(),
           bodyBuilder: (context, topInset) => GestureDetector(
             behavior: HitTestBehavior.opaque,
             onHorizontalDragEnd: (details) {
@@ -205,6 +207,61 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       },
     ),
   );
+
+  Widget _mobileHeader() {
+    final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    return OrialisCompactHeader(
+      key: const ValueKey('calendar-compact-header'),
+      children: [
+        SizedBox(width: 156 * scale.clamp(1.0, 2.0), child: _viewSelector()),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 168 + 100 * (scale - 1).clamp(0.0, 2.0),
+          child: Row(
+            children: [
+              LuminaIconButton(
+                tooltip: _previousLabel,
+                icon: const LuminaIcon(LuminaIcons.back),
+                onPressed: () => _move(-1),
+              ),
+              Expanded(
+                child: ConstrainedBox(
+                  key: const ValueKey('calendar-date-selector'),
+                  constraints: const BoxConstraints(minHeight: 44),
+                  child: LuminaSurface(
+                    glass: true,
+                    radius: LuminaControlSize.capsuleRadius,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 12,
+                    ),
+                    onTap: _selectDate,
+                    child: Semantics(
+                      label: _dateLabel,
+                      button: true,
+                      child: Text(
+                        _view == 2
+                            ? '${_date.year}/${_date.month}'
+                            : '${_date.month}月${_date.day}日',
+                        maxLines: 1,
+                        textAlign: TextAlign.center,
+                        style: LuminaTheme.of(context).textTheme.labelMedium,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              LuminaIconButton(
+                tooltip: _nextLabel,
+                icon: const LuminaIcon(LuminaIcons.chevronRight),
+                onPressed: () => _move(1),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _viewSelector({bool desktop = false}) => desktop
       ? LuminaSegmented<int>(
@@ -425,31 +482,33 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     );
   }
 
+  String get _dateLabel =>
+      '${_date.year}年${_date.month}月${_view == 2 ? '' : '${_date.day}日'}';
+  String get _period => _view == 2
+      ? '月'
+      : _view == 1
+      ? '周'
+      : '天';
+  String get _previousLabel => '上一$_period';
+  String get _nextLabel => '下一$_period';
+
+  Future<void> _selectDate() async {
+    final date = await showLuminaDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (date != null && mounted) setState(() => _date = date);
+  }
+
   Widget _dateNavigation() => LuminaDateNavigator(
-    label: '${_date.year}年${_date.month}月${_view == 2 ? '' : '${_date.day}日'}',
-    previousLabel:
-        '上一${_view == 2
-            ? '月'
-            : _view == 1
-            ? '周'
-            : '天'}',
-    nextLabel:
-        '下一${_view == 2
-            ? '月'
-            : _view == 1
-            ? '周'
-            : '天'}',
+    label: _dateLabel,
+    previousLabel: _previousLabel,
+    nextLabel: _nextLabel,
     onPrevious: () => _move(-1),
     onNext: () => _move(1),
-    onSelectDate: () async {
-      final date = await showLuminaDatePicker(
-        context: context,
-        initialDate: _date,
-        firstDate: DateTime(2000),
-        lastDate: DateTime(2100),
-      );
-      if (date != null && mounted) setState(() => _date = date);
-    },
+    onSelectDate: _selectDate,
   );
 
   EdgeInsets _scrollInsets(double topInset) => EdgeInsets.only(
@@ -624,8 +683,6 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     key: const PageStorageKey('calendar-day-scroll'),
     padding: _scrollInsets(topInset),
     children: [
-      _dateNavigation(),
-      const SizedBox(height: 16),
       _dayFocus(),
       const SizedBox(height: 12),
       _agenda(_date),
@@ -774,13 +831,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
           LuminaNavigationInset.of(context) +
           MediaQuery.paddingOf(context).bottom,
     ),
-    child: Column(
-      children: [
-        _dateNavigation(),
-        const SizedBox(height: 12),
-        Expanded(child: _weekTimeline()),
-      ],
-    ),
+    child: _weekTimeline(),
   );
 
   Widget _dayFocus() {
@@ -900,8 +951,6 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       key: const PageStorageKey('calendar-month-scroll'),
       padding: _scrollInsets(topInset),
       children: [
-        _dateNavigation(),
-        const SizedBox(height: 16),
         LuminaSurface(
           child: Column(
             children: [

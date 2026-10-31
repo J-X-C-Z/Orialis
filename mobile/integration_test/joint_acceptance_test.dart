@@ -8,7 +8,7 @@ import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show LuminaCardMemory;
 import 'package:orialis_mobile/core/config/app_config.dart';
-import 'package:orialis_mobile/core/network/orialis_api_client.dart';
+import 'isolated_login.dart';
 import 'package:orialis_mobile/core/sync/sync_engine.dart';
 import 'package:orialis_mobile/features/devices/application/device_center_controller.dart';
 import 'package:orialis_mobile/features/devices/data/device_data_source.dart';
@@ -25,9 +25,7 @@ void main() {
     final url = await config.serverUrl();
     expect(Uri.parse(url).host, '127.0.0.1');
     await tester.runAsync(() async {
-      final api = OrialisApiClient(baseUrl: url, deviceId: await config.deviceId(), config: config);
-      await api.login(username: username, password: password);
-      await config.setSessionUsername(username);
+      await isolatedLogin(config, username, password);
       await LuminaCardMemory.initialize();
     });
     await tester.pumpWidget(ProviderScope(overrides: [appConfigProvider.overrideWithValue(config)], child: const OrialisApp()));

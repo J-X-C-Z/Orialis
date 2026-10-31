@@ -59,7 +59,8 @@ class MemoryRepository extends ChangeNotifier {
       return await channel.invokeMethod<Object?>(method, arguments);
     } on MissingPluginException {
       if (!kIsWeb &&
-          (defaultTargetPlatform == TargetPlatform.windows ||
+          (defaultTargetPlatform == TargetPlatform.iOS ||
+              defaultTargetPlatform == TargetPlatform.windows ||
               defaultTargetPlatform == TargetPlatform.linux)) {
         return _fallback.handle(method, arguments);
       }
@@ -87,6 +88,9 @@ class MemoryRepository extends ChangeNotifier {
     await _call('setScope', {'scope': scope});
     _scope = scope;
   }
+
+  Future<String?> takePendingRoute() async =>
+      await _call('takePendingRoute') as String?;
 
   Future<bool> requestAddTile() async => await _call('requestAddTile') == true;
   Future<void> capture() async => _call('capture');

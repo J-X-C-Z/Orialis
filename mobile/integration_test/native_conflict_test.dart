@@ -11,6 +11,7 @@ import 'package:orialis_mobile/core/database/app_database.dart';
 import 'package:orialis_mobile/features/devices/data/device_data_source.dart';
 import 'package:orialis_mobile/core/network/orialis_api_client.dart';
 import 'package:orialis_mobile/core/sync/sync_engine.dart';
+import 'isolated_login.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -20,8 +21,7 @@ void main() {
     late OrialisApiClient api;
     await tester.runAsync(() async {
       api = OrialisApiClient(baseUrl: await config.serverUrl(), deviceId: await config.deviceId(), config: config);
-      await api.login(username: const String.fromEnvironment('JOINT_USERNAME'), password: const String.fromEnvironment('JOINT_PASSWORD'));
-      await config.setSessionUsername(const String.fromEnvironment('JOINT_USERNAME'));
+      await isolatedLogin(config, const String.fromEnvironment('JOINT_USERNAME'), const String.fromEnvironment('JOINT_PASSWORD'));
       await LuminaCardMemory.initialize();
     });
     late String name;
