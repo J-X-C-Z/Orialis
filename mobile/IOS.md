@@ -1,6 +1,6 @@
 # Orialis iOS 1.4.0
 
-此版本用于个人自签安装，不公开发布。最低 iOS 15.0，iPhone/iPad，包标识 `top.jxcz.orialis`，版本 `1.4.0 (55)`。
+此版本用于个人自签安装，不通过 App Store 或 TestFlight 分发。最低 iOS 15.0，iPhone/iPad，包标识 `top.jxcz.orialis`，版本 `1.4.0 (55)`。
 
 ## 个人安装
 

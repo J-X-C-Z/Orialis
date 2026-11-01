@@ -2,7 +2,7 @@
 
 把待办、项目、日程和 AI 助手放在一起的日常事务工具。先在本机记录和安排，需要跨设备使用时再连接自己的服务；接入 Hermes 后，可以在聊天中整理信息、查看图表，并确认添加日程。
 
-[下载 Android 最新版](https://github.com/J-X-C-Z/Orialis/releases/latest) · [部署自己的服务](docs/deployment.md) · [1.3.0 更新内容](docs/releases/1.3.0.md)
+[下载 Android 最新版](https://github.com/J-X-C-Z/Orialis/releases/latest) · [部署自己的服务](docs/deployment.md) · [1.4.0 更新内容](docs/releases/1.4.0.md)
 
 ## 可以用它做什么
 
@@ -26,8 +26,9 @@
 
 | 平台 | 如何使用 |
 | --- | --- |
-| Android | 在 [GitHub Releases](https://github.com/J-X-C-Z/Orialis/releases/latest) 下载 APK。目前正式版为 **1.3.0（37）**，支持 Android 7.0 及以上的 arm64 设备，附 SHA256SUMS 校验文件。 |
-| macOS / Windows | 提供 Flutter 桌面源码，按 [客户端构建指南](mobile/README.md) 自行构建。当前 1.3.0 Release 未附桌面安装包。 |
+| Android | 在 [GitHub Releases](https://github.com/J-X-C-Z/Orialis/releases/latest) 下载 APK。目前正式版为 **1.4.0（55）**，支持 Android 7.0 及以上的 arm64 设备，附 SHA256SUMS 校验文件。 |
+| iOS | 下载 [个人自签用 IPA](https://github.com/J-X-C-Z/Orialis/releases/tag/v1.4.0)，支持 iOS 15 及以上。需自己的 Apple ID 重新签名后安装，见 [iOS 说明](mobile/IOS.md)。 |
+| macOS / Windows | 提供 Flutter 桌面源码，按 [客户端构建指南](mobile/README.md) 自行构建。本次 1.4.0 Release 未附桌面安装包。 |
 | 浏览器 | 提供可自托管的 Web 客户端，包含任务、项目、日程和基础聊天；按 [Web 部署说明](docs/deployment.md#可选部署-web-客户端) 配置。 |
 
 Android 也可以在 **我的 → 软件更新** 中检查 GitHub 最新正式版，下载后按系统提示确认安装。
