@@ -12,7 +12,7 @@ Map<String, Object?> columnValues(Insertable<Object?> row) => row
     .map((key, value) => MapEntry(key, (value as Variable).value));
 
 void main() {
-  test('v6 upgrades to v10 without changing existing data or outbox', () async {
+  test('v6 upgrades to v11 without changing existing data or outbox', () async {
     final fixture = File('test/fixtures/schema_v6.sql').readAsStringSync();
     final database = AppDatabase(
       executor: NativeDatabase.memory(
@@ -26,7 +26,7 @@ void main() {
     final version = await database
         .customSelect('PRAGMA user_version')
         .getSingle();
-    expect(version.read<int>('user_version'), 10);
+    expect(version.read<int>('user_version'), 11);
     final indexes = await database
         .customSelect(
           "PRAGMA index_info('idx_project_milestones_project_position')",
@@ -85,6 +85,7 @@ void main() {
         goal: const Value('Goal'),
         description: const Value('Description'),
         color: const Value('#0088ff'),
+        category: const Value('general'),
         status: const Value('archived'),
         startDate: const Value('2026-09-17'),
         due: const Value('2026-10-01'),
@@ -143,6 +144,54 @@ void main() {
       );
       expect((await database.watchActiveProjects().first).single.id, 'p1');
       expect(await database.select(database.calendarEvents).get(), isEmpty);
+    },
+  );
+
+  test(
+    'v10 upgrade defaults existing project category without changing status',
+    () async {
+      final database = AppDatabase(
+        executor: NativeDatabase.memory(
+          setup: (sqlite) {
+            sqlite.execute('''
+              CREATE TABLE projects (
+                manual_position INTEGER,
+                id TEXT NOT NULL PRIMARY KEY,
+                name TEXT NOT NULL,
+                goal TEXT,
+                description TEXT,
+                color TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                start_date TEXT,
+                due TEXT,
+                next_action_task_id TEXT,
+                version INTEGER NOT NULL DEFAULT 1,
+                remote_version INTEGER NOT NULL DEFAULT 0,
+                local_revision INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT,
+                sync_status TEXT NOT NULL DEFAULT 'synced'
+              );
+              INSERT INTO projects (
+                id, name, status, created_at, updated_at
+              ) VALUES (
+                'old-project', 'Old project', 'active', '$timestamp', '$timestamp'
+              );
+              PRAGMA user_version = 10;
+            ''');
+          },
+        ),
+      );
+      addTearDown(database.close);
+
+      final project = await database.select(database.projects).getSingle();
+      expect(project.category, 'general');
+      expect(project.status, 'active');
+      final version = await database
+          .customSelect('PRAGMA user_version')
+          .getSingle();
+      expect(version.read<int>('user_version'), 11);
     },
   );
 }

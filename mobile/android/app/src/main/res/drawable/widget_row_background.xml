@@ -1,0 +1,14 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <gradient android:angle="315" android:startColor="@color/widget_well_high" android:endColor="@color/widget_well_low" />
+            <corners android:radius="@dimen/widget_radius_attachment" />
+        </shape>
+    </item>
+    <item android:left="1dp" android:top="1dp" android:right="1dp" android:bottom="1dp">
+        <shape>
+            <solid android:color="@color/widget_row" />
+            <corners android:radius="@dimen/widget_radius_attachment" />
+        </shape>
+    </item>
+</layer-list>

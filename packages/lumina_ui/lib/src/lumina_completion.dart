@@ -365,12 +365,16 @@ class _SliverCompletionEmptyState extends State<_SliverCompletionEmpty>
   }
 
   @override
-  Widget build(BuildContext context) => SizeTransition(
-    alignment: Alignment.topCenter,
-    sizeFactor: _extent,
-    child: FadeTransition(
-      opacity: _extent,
-      child: SizedBox(width: double.infinity, child: widget.child),
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _extent,
+    child: SizedBox(width: double.infinity, child: widget.child),
+    builder: (context, child) => ClipRect(
+      clipBehavior: _extent.value == 1 ? Clip.none : Clip.hardEdge,
+      child: Align(
+        alignment: Alignment.topCenter,
+        heightFactor: _extent.value,
+        child: FadeTransition(opacity: _extent, child: child),
+      ),
     ),
   );
 }
@@ -586,7 +590,7 @@ class _CompletionEntryState extends State<_CompletionEntry>
                             ? 1 - releaseClose
                             : (1 - aperture * .15) * arrival.value,
                         child: ClipPath(
-                          clipBehavior: Clip.antiAlias,
+                          clipBehavior: collapse == 1 ? Clip.none : Clip.antiAlias,
                           clipper: _CompletionAperture(
                             1 - collapse.clamp(0.0, 1.0),
                           ),

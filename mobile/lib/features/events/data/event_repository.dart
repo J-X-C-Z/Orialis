@@ -346,7 +346,7 @@ class EventRepository {
   }
 
   /// Updates only quadrant attributes, preserving concurrent edits to title,
-  /// due date, relations and completion. Returns the pre-move snapshot for undo.
+  /// due date, relations and completion. Returns the pre-move snapshot.
   Future<Task> setTaskQuadrant(String id, {bool? important, bool? urgent}) =>
       database.transaction(() async {
         final current = await (database.select(

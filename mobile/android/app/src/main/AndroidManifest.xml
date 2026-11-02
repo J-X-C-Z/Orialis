@@ -113,9 +113,59 @@
             </intent-filter>
         </receiver>
         <receiver android:name=".TodayWidgetProvider" android:exported="false" android:process=":widgetProvider"
-            android:label="@string/widget_today_label">
+            android:label="@string/widget_today_name">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_today_info" />
+        </receiver>
+        <receiver android:name=".TodayCompactWidgetProvider" android:exported="false" android:process=":widgetProvider"
+            android:label="@string/widget_today_compact_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_today_compact_info" />
+        </receiver>
+        <receiver android:name=".TodayExpandedWidgetProvider" android:exported="false" android:process=":widgetProvider"
+            android:label="@string/widget_today_expanded_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_today_expanded_info" />
+        </receiver>
+        <receiver android:name=".TasksCompactWidgetProvider" android:exported="false" android:process=":widgetProvider"
+            android:label="@string/widget_tasks_compact_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_tasks_compact_info" />
+        </receiver>
+        <receiver android:name=".TasksWidgetProvider" android:exported="false" android:process=":widgetProvider"
+            android:label="@string/widget_tasks_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_tasks_info" />
+        </receiver>
+        <receiver android:name=".TasksExpandedWidgetProvider" android:exported="false" android:process=":widgetProvider"
+            android:label="@string/widget_tasks_expanded_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_tasks_expanded_info" />
+        </receiver>
+        <receiver android:name=".AgendaWidgetProvider" android:exported="false" android:process=":widgetProvider"
+            android:label="@string/widget_agenda_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_agenda_info" />
+        </receiver>
+        <receiver android:name=".AgendaExpandedWidgetProvider" android:exported="false" android:process=":widgetProvider"
+            android:label="@string/widget_agenda_expanded_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_agenda_expanded_info" />
+        </receiver>
+        <receiver android:name=".MonthWidgetProvider" android:exported="false" android:process=":widgetProvider"
+            android:label="@string/widget_month_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_month_info" />
+        </receiver>
+        <receiver android:name=".ShortcutsCompactWidgetProvider" android:exported="false" android:process=":widgetProvider"
+            android:label="@string/widget_shortcuts_compact_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_shortcuts_compact_info" />
+        </receiver>
+        <receiver android:name=".ShortcutsWidgetProvider" android:exported="false" android:process=":widgetProvider"
+            android:label="@string/widget_shortcuts_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_shortcuts_info" />
         </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

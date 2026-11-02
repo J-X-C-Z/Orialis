@@ -10,7 +10,6 @@ import 'package:orialis_mobile/core/sync/sync_coordinator.dart';
 import 'package:orialis_mobile/core/sync/sync_engine.dart';
 import 'package:orialis_mobile/features/events/data/event_repository.dart';
 import 'package:orialis_mobile/pages/shared/glass_segmented.dart';
-import 'package:orialis_mobile/pages/shared/navigation_glass.dart';
 
 class _Config extends AppConfig {
   @override
@@ -136,7 +135,7 @@ void main() {
     await db.close();
   });
 
-  testWidgets('glass event selectors preserve filters and endpoint travel', (
+  testWidgets('solid event selectors preserve filters and endpoint travel', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(432, 960);
@@ -168,17 +167,18 @@ void main() {
           .getSize(
             find.descendant(
               of: find.byWidget(pageSelector),
-              matching: find.byType(OrialisNavigationGlassFrame),
+              matching: find.byKey(const ValueKey('page-segment-track')),
             ),
           )
           .width,
       lessThanOrEqualTo(282),
     );
     expect(
-      tester
-          .widget<LuminaSegmented<String>>(find.byType(LuminaSegmented<String>))
-          .transparent,
-      isTrue,
+      find.descendant(
+        of: find.byType(OrialisGlassSegmented<String>),
+        matching: find.byType(BackdropFilter),
+      ),
+      findsNothing,
     );
     expect(find.text('有截止待办'), findsOneWidget);
     await tester.tap(find.text('无截止'));
@@ -195,7 +195,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 70));
     expect(
       tester
-          .widget<LuminaSegmented<String>>(find.byType(LuminaSegmented<String>))
+          .widget<OrialisGlassSegmented<String>>(
+            find.byType(OrialisGlassSegmented<String>),
+          )
           .value,
       'active',
     );
@@ -387,129 +389,123 @@ void main() {
     await db.close();
   });
 
-  testWidgets(
-    'week timeline and daily schedule rows use the recessed card treatment',
-    (tester) async {
-      tester.view.physicalSize = const Size(432, 960);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final db = AppDatabase(executor: NativeDatabase.memory());
-      final today = DateTime.now();
-      await EventRepository(
-        database: db,
-        config: _Config(),
-      ).createCalendarEvent(
-        title: '周视图凹陷日程',
-        startAt: DateTime(today.year, today.month, today.day, 10),
-        endAt: DateTime(today.year, today.month, today.day, 11),
-      );
-      await tester.pumpWidget(_app(db));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('日历').last);
-      await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<OrialisGlassSegmented<int>>(
-              find.byType(OrialisGlassSegmented<int>),
-            )
-            .value,
-        2,
-      );
-      final dateTiles = find.byWidgetPredicate(
-        (w) =>
-            w is LuminaSurface &&
-            w.key is ValueKey<String> &&
-            (w.key! as ValueKey<String>).value.startsWith(
-              'calendar-date-month-',
-            ),
-      );
-      final sizes = dateTiles
-          .evaluate()
-          .map((e) => tester.getSize(find.byWidget(e.widget)))
-          .toList();
-      expect(sizes, isNotEmpty);
-      for (final size in sizes) {
-        expect(size.width, closeTo(sizes.first.width, .1));
-        expect(size.height, sizes.first.height);
-      }
-      for (final tile in tester.widgetList<LuminaSurface>(dateTiles)) {
-        expect(tile.glass, isTrue);
-        expect(tile.onTap, isNotNull);
-      }
-      await tester.tap(
-        find
-            .descendant(
-              of: find.byType(OrialisGlassSegmented<int>),
-              matching: find.text('周'),
-            )
-            .first,
-      );
-      await tester.pumpAndSettle();
-      final event = (await db.select(db.calendarEvents).get()).single;
-      final dateKey =
-          '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-      final weekEvent = find.byKey(
-        ValueKey('calendar-week-event-$dateKey-${event.id}'),
-      );
-      expect(weekEvent, findsOneWidget);
-      final eventPalette = find.descendant(
+  testWidgets('week cards are raised and daily schedule rows remain recessed', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(432, 960);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final db = AppDatabase(executor: NativeDatabase.memory());
+    final today = DateTime.now();
+    await EventRepository(database: db, config: _Config()).createCalendarEvent(
+      title: '周视图凹陷日程',
+      startAt: DateTime(today.year, today.month, today.day, 10),
+      endAt: DateTime(today.year, today.month, today.day, 11),
+    );
+    await tester.pumpWidget(_app(db));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('日历').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<OrialisGlassSegmented<int>>(
+            find.byType(OrialisGlassSegmented<int>),
+          )
+          .value,
+      2,
+    );
+    final dateTiles = find.byWidgetPredicate(
+      (w) =>
+          w is LuminaSurface &&
+          w.key is ValueKey<String> &&
+          (w.key! as ValueKey<String>).value.startsWith('calendar-date-month-'),
+    );
+    final sizes = dateTiles
+        .evaluate()
+        .map((e) => tester.getSize(find.byWidget(e.widget)))
+        .toList();
+    expect(sizes, isNotEmpty);
+    for (final size in sizes) {
+      expect(size.width, closeTo(sizes.first.width, .1));
+      expect(size.height, sizes.first.height);
+    }
+    for (final tile in tester.widgetList<LuminaSurface>(dateTiles)) {
+      expect(tile.glass, isTrue);
+      expect(tile.onTap, isNotNull);
+    }
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byType(OrialisGlassSegmented<int>),
+            matching: find.text('周'),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    final event = (await db.select(db.calendarEvents).get()).single;
+    final dateKey =
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    final weekEvent = find.byKey(
+      ValueKey('calendar-week-event-$dateKey-${event.id}'),
+    );
+    expect(weekEvent, findsOneWidget);
+    final eventPalette = find.descendant(
+      of: weekEvent,
+      matching: find.byType(LuminaPalette),
+    );
+    expect(eventPalette, findsOneWidget);
+    final weekSurface = tester.widget<LuminaSurface>(
+      find
+          .descendant(of: eventPalette, matching: find.byType(LuminaSurface))
+          .first,
+    );
+    expect(weekSurface.depth, LuminaSurfaceDepth.raised);
+    expect(
+      find.ancestor(
         of: weekEvent,
-        matching: find.byType(LuminaPalette),
-      );
-      expect(eventPalette, findsOneWidget);
-      final weekSurface = tester.widget<LuminaSurface>(
-        find
-            .descendant(of: eventPalette, matching: find.byType(LuminaSurface))
-            .first,
-      );
-      expect(weekSurface.depth, LuminaSurfaceDepth.recessed);
-      expect(
-        find.ancestor(
-          of: weekEvent,
-          matching: find.byKey(const ValueKey('calendar-week-timeline')),
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('附属事件'), findsNothing);
-      await tester.tap(weekEvent);
-      await tester.pumpAndSettle();
-      expect(find.text('附属事件'), findsOneWidget);
-      Navigator.of(tester.element(find.text('附属事件'))).pop();
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find
-            .descendant(
-              of: find.byType(OrialisGlassSegmented<int>),
-              matching: find.text('日'),
-            )
-            .first,
-      );
-      await tester.pumpAndSettle();
-      expect(find.byType(LuminaTitledContentCard), findsNWidgets(2));
-      final row = tester.widget<LuminaListRow>(
-        find.widgetWithText(LuminaListRow, '周视图凹陷日程'),
-      );
-      expect(row.depth, LuminaSurfaceDepth.recessed);
-      expect(
-        find.ancestor(
-          of: find.widgetWithText(LuminaListRow, '周视图凹陷日程'),
-          matching: find.byType(LuminaTitledContentCard),
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('当天截止'), findsOneWidget);
-      expect(find.text('这一天没有截止事项。'), findsOneWidget);
-      expect(find.text('附属事件'), findsNothing);
-      await tester.tap(find.widgetWithText(LuminaListRow, '周视图凹陷日程'));
-      await tester.pumpAndSettle();
-      expect(find.text('附属事件'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-      await tester.pumpAndSettle();
-      await db.close();
-    },
-  );
+        matching: find.byKey(const ValueKey('calendar-week-timeline')),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('附属事件'), findsNothing);
+    await tester.tap(weekEvent);
+    await tester.pumpAndSettle();
+    expect(find.text('附属事件'), findsOneWidget);
+    Navigator.of(tester.element(find.text('附属事件'))).pop();
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find
+          .descendant(
+            of: find.byType(OrialisGlassSegmented<int>),
+            matching: find.text('日'),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(LuminaTitledContentCard), findsNWidgets(2));
+    final row = tester.widget<LuminaListRow>(
+      find.widgetWithText(LuminaListRow, '周视图凹陷日程'),
+    );
+    expect(row.depth, LuminaSurfaceDepth.recessed);
+    expect(
+      find.ancestor(
+        of: find.widgetWithText(LuminaListRow, '周视图凹陷日程'),
+        matching: find.byType(LuminaTitledContentCard),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('当天截止'), findsOneWidget);
+    expect(find.text('这一天没有截止事项。'), findsOneWidget);
+    expect(find.text('附属事件'), findsNothing);
+    await tester.tap(find.widgetWithText(LuminaListRow, '周视图凹陷日程'));
+    await tester.pumpAndSettle();
+    expect(find.text('附属事件'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    await db.close();
+  });
 
   testWidgets('today nests recessed tasks and quadrants scroll in one column', (
     tester,

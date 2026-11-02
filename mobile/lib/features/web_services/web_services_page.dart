@@ -3,10 +3,14 @@ import 'package:flutter/material.dart' show MaterialPageRoute;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../app/app.dart';
+import '../../core/config/app_config.dart';
+
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show OrialisPageScaffold;
+
 import '../../pages/shared/page_parts.dart';
 import 'web_service.dart';
 import 'web_service_browser.dart';
@@ -19,6 +23,8 @@ class WebServicesPage extends ConsumerStatefulWidget {
 }
 
 class _WebServicesPageState extends ConsumerState<WebServicesPage> {
+  late final AppConfig _config;
+  int _identityGeneration = 0;
   WebServiceStore? _store;
   List<WebService>? _services;
   String? _error;
@@ -28,14 +34,40 @@ class _WebServicesPageState extends ConsumerState<WebServicesPage> {
   @override
   void initState() {
     super.initState();
+    _config = ref.read(appConfigProvider);
+    _config.addIdentityListener(_clearIdentity);
+    _config.addIdentityCommittedListener(_load);
     _load();
   }
 
+  @override
+  void dispose() {
+    _config.removeIdentityListener(_clearIdentity);
+    _config.removeIdentityCommittedListener(_load);
+    super.dispose();
+  }
+
+  Future<void> _clearIdentity() async {
+    _identityGeneration++;
+    if (!mounted) return;
+    setState(() {
+      _store = null;
+      _services = null;
+      _error = null;
+      _starting = null;
+    });
+  }
+
   Future<void> _load() async {
+    final generation = _identityGeneration;
     try {
-      final store = WebServiceStore(await SharedPreferences.getInstance());
+      final scope = await _config.desktopDatabaseName();
+      final store = WebServiceStore(
+        await SharedPreferences.getInstance(),
+        scope: scope,
+      );
       final services = await store.load(desktop: ref.read(desktopModeProvider));
-      if (mounted) {
+      if (mounted && generation == _identityGeneration) {
         setState(() {
           _store = store;
           _services = services;
@@ -43,11 +75,15 @@ class _WebServicesPageState extends ConsumerState<WebServicesPage> {
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _error = '服务列表未能读取，请重试');
+      if (mounted && generation == _identityGeneration) {
+        setState(() => _error = '服务列表未能读取，请重试');
+      }
     }
   }
 
   Future<void> _edit(WebService service) async {
+    final store = _store;
+    final generation = _identityGeneration;
     final controller = TextEditingController(text: service.url);
     final value = await showLuminaDialog<String>(
       context: context,
@@ -74,9 +110,14 @@ class _WebServicesPageState extends ConsumerState<WebServicesPage> {
       ),
     );
     // Dialog route may still animate out while the field is mounted.
-    if (value == null || !mounted) return;
+    if (value == null ||
+        !mounted ||
+        store == null ||
+        generation != _identityGeneration) {
+      return;
+    }
     try {
-      await _store!.saveUrl(service.id, value);
+      await store.saveUrl(service.id, value);
       await _load();
     } on FormatException catch (error) {
       if (mounted) showLuminaMessage(context, error.message);

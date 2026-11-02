@@ -201,7 +201,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('performance navigation paints frost without sampling the page', (
+  testWidgets('navigation uses real frosted glass in both performance modes', (
     tester,
   ) async {
     final policy = LuminaBlurPolicy.instance;
@@ -210,8 +210,16 @@ void main() {
     await _mount(tester, highPerformance: false);
     expect(find.byType(BackdropFilter), findsOneWidget);
     await _mount(tester);
-    expect(find.byType(BackdropFilter), findsNothing);
+    expect(find.byType(BackdropFilter), findsOneWidget);
     expect(find.byType(OrialisNavigationGlassLens), findsOneWidget);
+    expect(
+      tester
+          .widget<OrialisNavigationGlassLens>(
+            find.byType(OrialisNavigationGlassLens),
+          )
+          .shaderRefraction,
+      isTrue,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -233,12 +241,31 @@ void main() {
               .bottom;
           expect(reserved, greaterThanOrEqualTo(880 - 24 - frame.top));
           expect(find.byType(ImageFiltered), findsNothing);
-          expect(find.byType(BackdropFilter), findsNothing);
+          expect(find.byType(BackdropFilter), findsOneWidget);
           final lens = tester.getRect(
             find.byKey(const ValueKey('nav-glass-slider')),
           );
           expect(lens.top, closeTo(frame.top + 7, .01));
           expect(lens.bottom, closeTo(frame.bottom - 7, .01));
+          final sampling = tester.getRect(
+            find.byKey(const ValueKey('nav-glass-sampling-region')),
+          );
+          final samplingPaint = tester.widget<ColoredBox>(
+            find.byKey(const ValueKey('nav-glass-sampling-region')),
+          );
+          expect(samplingPaint.color.a, greaterThan(0));
+          expect(samplingPaint.color.a, lessThan(.01));
+          expect(sampling.top, closeTo(lens.top, .01));
+          expect(sampling.bottom, closeTo(lens.bottom, .01));
+          expect(sampling.left, closeTo(lens.left, .01));
+          await tester.tap(find.text('Me'));
+          await tester.pumpAndSettle();
+          expect(
+            tester
+                .getRect(find.byKey(const ValueKey('nav-glass-slider')))
+                .right,
+            closeTo(sampling.right, .01),
+          );
           expect(tester.takeException(), isNull);
         }
       }
@@ -260,8 +287,11 @@ void main() {
 
       final originalLabel = tester.widget<Text>(find.text('Chat'));
       final raised = _engraving(tester, 0).transform;
-      expect(raised.entry(1, 1), lessThan(1));
-      expect(raised.entry(1, 3), greaterThan(0));
+      expect(raised.entry(0, 0), closeTo(1.035, .0001));
+      expect(raised.entry(1, 1), closeTo(1.035, .0001));
+      expect(raised.entry(0, 1), 0);
+      expect(raised.entry(1, 0), 0);
+      expect(raised.entry(1, 3), 0);
       final drag = await tester.startGesture(
         tester.getCenter(find.text('Today')),
       );
@@ -279,8 +309,8 @@ void main() {
       );
       expect(_engraving(tester, 0).transform.entry(1, 1), closeTo(1, .001));
       expect(_engraving(tester, 0).transform.entry(1, 3), closeTo(0, .001));
-      expect(_engraving(tester, 2).transform.entry(1, 1), lessThan(1));
-      expect(_engraving(tester, 2).transform.entry(1, 3), greaterThan(0));
+      expect(_engraving(tester, 2).transform.entry(1, 1), greaterThan(1));
+      expect(_engraving(tester, 2).transform.entry(1, 3), 0);
 
       await drag.up();
       await tester.pumpAndSettle();
@@ -288,6 +318,14 @@ void main() {
       await tester.tap(find.text('Me'));
       await tester.pumpAndSettle();
       expect(nav.selected(), 4);
+      expect(
+        _engraving(tester, 4).transform.entry(0, 0),
+        closeTo(1.035, .0001),
+      );
+      expect(
+        _engraving(tester, 4).transform.entry(1, 1),
+        closeTo(1.035, .0001),
+      );
       expect(tester.getRect(slider).right, closeTo(frame.right - 9, .01));
       nav.setKeyboard(true);
       await tester.pumpAndSettle();

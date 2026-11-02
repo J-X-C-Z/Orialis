@@ -14,7 +14,7 @@ void main() {
     FlutterSecureStorage.setMockInitialValues({});
   });
   testWidgets(
-    'long press reorders adjacent tasks and empty quadrant accepts move with undo',
+    'long press reorders adjacent tasks and empty quadrant accepts move without undo prompt',
     (tester) async {
       final h = await openChat(tester);
       final repo = EventRepository(database: h.db, config: AppConfig());
@@ -52,13 +52,8 @@ void main() {
       ))!.singleWhere((t) => t.title == '排序甲');
       expect(moved.important, isFalse);
       expect(moved.urgent, isTrue);
-      await tester.tap(find.text('撤销'));
-      await tester.pumpAndSettle();
-      final undone = (await tester.runAsync(
-        () => h.db.select(h.db.tasks).get(),
-      ))!.singleWhere((t) => t.title == '排序甲');
-      expect(undone.important, isTrue);
-      expect(undone.urgent, isTrue);
+      expect(find.text('撤销'), findsNothing);
+      expect(find.text('已调整象限'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();

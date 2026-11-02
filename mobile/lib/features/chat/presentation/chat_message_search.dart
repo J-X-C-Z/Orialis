@@ -107,6 +107,7 @@ class _ChatMessageSearchState extends State<ChatMessageSearch> {
                               final excerpt =
                                   '${start > 0 ? '…' : ''}${item.text.substring(start)}';
                               return LuminaSurface(
+                                depth: LuminaSurfaceDepth.raised,
                                 onTap: () => widget.onSelected(item.message.id),
                                 padding: const EdgeInsets.all(12),
                                 radius: 14,

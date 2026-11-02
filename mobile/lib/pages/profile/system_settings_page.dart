@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/app.dart';
 import '../../features/chat/domain/chat_transcript.dart';
+import '../../features/system_integration/system_widget_catalog.dart';
 
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
@@ -27,6 +28,16 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
   Map<Object?, Object?> _status = const {};
   bool _busy = true;
 
+  int? get _widgetCount {
+    final value = _status['widgetCount'];
+    return value is num ? value.toInt() : int.tryParse('$value');
+  }
+
+  bool? get _pinWidgetSupported => switch (_status['pinWidgetSupported']) {
+    final bool value => value,
+    _ => null,
+  };
+
   @override
   void initState() {
     super.initState();
@@ -46,18 +57,20 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
   }
 
   Future<void> _load() async {
-    final system = ref.read(systemIntegrationProvider);
-    if (system != null) {
-      await system.start();
-      await system.refresh();
-      final status = await system.status();
-      if (!mounted) return;
-      setState(() {
-        _status = status ?? const {};
-        _busy = false;
-      });
-    } else if (mounted) {
-      setState(() => _busy = false);
+    if (mounted) setState(() => _busy = true);
+    try {
+      final system = ref.read(systemIntegrationProvider);
+      Map<Object?, Object?> status = const {};
+      if (system != null) {
+        await system.start();
+        await system.refresh();
+        status = await system.status() ?? const {};
+      }
+      if (mounted) setState(() => _status = status);
+    } catch (_) {
+      if (mounted) setState(() => _status = const {});
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -106,17 +119,43 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
     return false;
   }
 
+  Future<void> _requestWidget(SystemWidgetDefinition widget) async {
+    final system = ref.read(systemIntegrationProvider);
+    if (system == null || !system.supported || _busy) return;
+    await _run(() async {
+      final requested = await system.requestPinWidget(kind: widget.kind);
+      if (!mounted) return;
+      showLuminaMessage(
+        context,
+        requested == true
+            ? '请在桌面确认添加${widget.title}（${widget.size}）'
+            : '未能打开一键添加。请长按桌面 → 小部件 → Android小组件/全部小组件 → Orialis，再选择${widget.title}（${widget.size}）。小米/HyperOS 的入口名称可能略有不同。',
+      );
+    });
+  }
+
+  LuminaIcons _iconForGroup(SystemWidgetGroup group) => switch (group.title) {
+    '今日' => LuminaIcons.today,
+    '任务' => LuminaIcons.tasks,
+    '日程' => LuminaIcons.calendar,
+    _ => LuminaIcons.sparkles,
+  };
+
   @override
   Widget build(BuildContext context) {
     final system = ref.watch(systemIntegrationProvider);
     final notification = _status['notificationsEnabled'] == true;
     final exact = _status['exactAlarmsEnabled'] == true;
+    final androidSupported = system?.supported == true;
+    final pinWidgetSupported = _pinWidgetSupported;
+    final widgetCount = _widgetCount;
+    final canPin = androidSupported && !_busy && pinWidgetSupported != false;
     final focus =
         _status['focusPermission'] == true &&
         _status['focusBusinessConfigured'] == true;
     return OrialisPageScaffold(
       padding: EdgeInsets.zero,
-      title: '系统提醒与桌面',
+      title: '系统提醒与小组件',
       leading: LuminaIconButton(
         tooltip: '返回',
         icon: const LuminaIcon(LuminaIcons.back),
@@ -237,37 +276,89 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
                   ),
                 ),
                 LuminaSection(
-                  title: '桌面卡片与快捷入口',
+                  title: '桌面小组件',
                   child: ContentStack(
                     children: [
-                      const QuietLabel(
-                        '今日卡片显示本地待办与日程，点击返回今日页。长按应用图标可直达今日、任务或日历。',
+                      LuminaListRow(
+                        title: '已添加小组件',
+                        subtitle: _busy
+                            ? '正在读取系统状态…'
+                            : widgetCount == null
+                            ? '暂时无法读取，返回此页可重试'
+                            : '当前桌面已添加 $widgetCount 个 Orialis 小组件',
+                        trailing: Text(
+                          _busy ? '读取中' : '${widgetCount ?? '—'}',
+                          style: LuminaTheme.of(context).textTheme.titleLarge,
+                        ),
                       ),
-                      LuminaButton(
-                        primary: false,
-                        onPressed:
-                            system == null ||
-                                _busy ||
-                                !system.enabled ||
-                                !system.identityCompatible
-                            ? null
-                            : () => _run(() async {
-                                final requested = await system
-                                    .requestPinWidget();
-                                if (context.mounted) {
-                                  showLuminaMessage(
-                                    context,
-                                    requested == true
-                                        ? '请在桌面确认添加卡片'
-                                        : '请长按桌面，在小部件中添加 Orialis 今日安排',
-                                  );
-                                }
-                              }),
-                        child: const Text('添加今日卡片'),
+                      LuminaListRow(
+                        title: '应用内固定',
+                        subtitle: _busy
+                            ? '正在确认系统固定能力…'
+                            : !androidSupported
+                            ? '当前平台不支持 Android 桌面小组件'
+                            : pinWidgetSupported == null
+                            ? '也可在桌面的小部件列表中手动添加'
+                            : pinWidgetSupported
+                            ? '支持一键打开系统的固定流程'
+                            : '不支持一键固定，请按下方步骤手动添加',
+                        trailing: _StatusBadge(
+                          label: _busy
+                              ? '读取中'
+                              : !androidSupported
+                              ? '不支持'
+                              : pinWidgetSupported == null
+                              ? '未知'
+                              : pinWidgetSupported
+                              ? '支持'
+                              : '手动',
+                          available:
+                              androidSupported && pinWidgetSupported != false,
+                        ),
                       ),
+                      if (androidSupported &&
+                          !_busy &&
+                          pinWidgetSupported == false)
+                        const QuietLabel(
+                          '长按桌面 → 小部件 → Android小组件/全部小组件 → Orialis，再选择需要的尺寸。小米/HyperOS 的入口名称可能略有不同。',
+                        )
+                      else
+                        const QuietLabel(
+                          '可先添加到桌面。登录并开启系统展示后，即可显示你的任务和日程；快捷入口无需登录。',
+                        ),
                     ],
                   ),
                 ),
+                for (final group in systemWidgetCatalog)
+                  LuminaSection(
+                    title: group.title,
+                    trailing: Text(
+                      '${group.widgets.length} 款',
+                      style: LuminaTheme.of(context).textTheme.bodySmall,
+                    ),
+                    child: ContentStack(
+                      children: [
+                        QuietLabel(group.description),
+                        for (final widget in group.widgets)
+                          LuminaListRow(
+                            title: widget.title,
+                            subtitle: widget.description,
+                            detail: Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: _WidgetSizeBadge(widget.size),
+                            ),
+                            leading: LuminaIcon(_iconForGroup(group)),
+                            trailing: LuminaIconButton(
+                              tooltip: '添加${widget.title} ${widget.size} 小组件',
+                              icon: const LuminaIcon(LuminaIcons.add),
+                              onPressed: canPin
+                                  ? () => _requestWidget(widget)
+                                  : null,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 LuminaSection(
                   title: '小米超级岛',
                   child: QuietLabel(
@@ -281,6 +372,39 @@ class _SystemSettingsPageState extends ConsumerState<SystemSettingsPage>
           ],
         ),
       ),
+    );
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.label, required this.available});
+
+  final String label;
+  final bool available;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = LuminaTheme.of(context);
+    return LuminaSurface(
+      color: available ? theme.colors.accentSoft : theme.colors.surface,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child: Text(label, style: theme.textTheme.labelMedium),
+    );
+  }
+}
+
+class _WidgetSizeBadge extends StatelessWidget {
+  const _WidgetSizeBadge(this.size);
+
+  final String size;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = LuminaTheme.of(context);
+    return LuminaSurface(
+      color: theme.colors.accentSoft,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      child: Text(size, style: theme.textTheme.labelMedium),
     );
   }
 }

@@ -5,37 +5,42 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Call [recordSuccessfulSwitch] only after Hermes confirms the model change.
 /// Attempted switches must not be recorded as successful history.
 class RecentHermesModels {
-  RecentHermesModels({SharedPreferences? preferences})
+  RecentHermesModels({SharedPreferences? preferences, this.accountScope})
     : _preferences = preferences;
 
   static const maxEntries = 5;
   static const storageKey = 'orialis.chat.recentHermesModels';
 
   final SharedPreferences? _preferences;
+  final Future<String> Function()? accountScope;
+
+  Future<String> get _key async => accountScope == null
+      ? storageKey
+      : '$storageKey:${await accountScope!()}';
   Future<void> _pendingWrite = Future<void>.value();
 
   Future<SharedPreferences> get _store async =>
       _preferences ?? SharedPreferences.getInstance();
 
   Future<List<String>> load() async {
+    final key = await _key;
     await _pendingWrite;
     final preferences = await _store;
-    return _normalise(preferences.getStringList(storageKey) ?? const []);
+    return _normalise(preferences.getStringList(key) ?? const []);
   }
 
-  Future<void> recordSuccessfulSwitch(String model) {
+  Future<void> recordSuccessfulSwitch(String model) async {
     final selected = model.trim();
     if (selected.isEmpty) return Future<void>.value();
 
+    final key = await _key;
     // A rapid second selection must observe the first write before updating
     // the persisted list. Keep the queue usable if an earlier write failed.
     final write = _pendingWrite.catchError((Object _) {}).then((_) async {
       final preferences = await _store;
-      final existing = _normalise(
-        preferences.getStringList(storageKey) ?? const [],
-      );
+      final existing = _normalise(preferences.getStringList(key) ?? const []);
       final updated = _normalise([selected, ...existing]);
-      await preferences.setStringList(storageKey, updated);
+      await preferences.setStringList(key, updated);
     });
     _pendingWrite = write;
     return write;

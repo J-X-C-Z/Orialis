@@ -14,6 +14,7 @@ class LuminaTextField extends StatefulWidget {
     this.autofocus = false,
     this.readOnly = false,
     this.frosted = false,
+    this.radius = 16,
     this.enabled = true,
     this.onTap,
     this.onSubmitted,
@@ -29,6 +30,8 @@ class LuminaTextField extends StatefulWidget {
 
   /// A single soft frost layer, without the glass control's clear outer coat.
   final bool frosted;
+
+  final double radius;
   final ValueChanged<String>? onChanged, onSubmitted;
   final TextInputType? keyboardType;
   final TextInputAction? textInputAction;
@@ -92,7 +95,7 @@ class _LuminaTextFieldState extends State<LuminaTextField> {
                 ),
                 decoration: BoxDecoration(
                   color: neumorphic ? const Color(0x00000000) : colors.surface,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(widget.radius),
                   border: Border.all(
                     color: focus.hasFocus
                         ? colors.accent
@@ -161,13 +164,13 @@ class _LuminaTextFieldState extends State<LuminaTextField> {
               ),
             );
             if (widget.frosted) {
-              return LuminaGlassWell(radius: 16, child: field);
+              return LuminaGlassWell(radius: widget.radius, child: field);
             }
             return neumorphic
                 ? LuminaSurface(
                     depth: LuminaSurfaceDepth.recessed,
                     glass: true,
-                    radius: 16,
+                    radius: widget.radius,
                     padding: EdgeInsets.zero,
                     child: field,
                   )
@@ -331,14 +334,20 @@ class LuminaSlidingSelection extends StatefulWidget {
     required this.count,
     required this.child,
     this.longTravel = false,
+    this.direction = Axis.horizontal,
     this.backdrop = true,
     this.confirmed = false,
+    this.floating = false,
     this.onDragEnd,
     super.key,
   }) : assert(count > 0),
        assert(index >= 0 && index < count);
   final int index, count;
   final bool longTravel;
+  final Axis direction;
+
+  /// A freestanding glass lens has no recessed backing to sink into.
+  final bool floating;
 
   /// Disable when the host already blurs the same stationary well.
   final bool backdrop;
@@ -364,25 +373,33 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
   bool _atEdge = false;
   int? _dragTick;
 
+  bool get _vertical => widget.direction == Axis.vertical;
+  bool get _rtl =>
+      !_vertical && Directionality.of(context) == TextDirection.rtl;
+  double _coordinate(Offset offset) => _vertical ? offset.dy : offset.dx;
+  double get _slotExtent =>
+      (_vertical ? context.size?.height ?? 0 : context.size?.width ?? 0) /
+      widget.count;
+
   void _startDrag(LongPressStartDetails details) {
-    final width = (context.size?.width ?? 0) / widget.count;
+    final width = _slotExtent;
     if (width <= 0) return;
-    final rtl = Directionality.of(context) == TextDirection.rtl;
+    final rtl = _rtl;
     final selected = rtl ? widget.count - 1 - position.value : position.value;
-    final slot = details.localPosition.dx / width;
+    final slot = _coordinate(details.localPosition) / width;
     if ((slot - selected - .5).abs() > .5) return;
     _dragging = true;
     _dragTick = widget.index;
     position.stop();
-    _grabOffset = details.localPosition.dx - (selected + .5) * width;
+    _grabOffset = _coordinate(details.localPosition) - (selected + .5) * width;
     unawaited(LuminaHaptics.dragStart());
   }
 
   void _moveDrag(Offset local) {
     if (!_dragging) return;
-    final width = (context.size?.width ?? 0) / widget.count;
+    final width = _slotExtent;
     if (width <= 0) return;
-    final raw = (local.dx - _grabOffset) / width - .5;
+    final raw = (_coordinate(local) - _grabOffset) / width - .5;
     final last = (widget.count - 1).toDouble();
     final edge = raw < 0 || raw > last;
     if (edge != _atEdge) unawaited(LuminaHaptics.threshold(edge));
@@ -392,7 +409,7 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
         : raw > last
         ? last + ((raw - last) * .22).clamp(0.0, .18)
         : raw;
-    final rtl = Directionality.of(context) == TextDirection.rtl;
+    final rtl = _rtl;
     position.value = rtl ? last - damped : damped;
     final tick = position.value.round().clamp(0, widget.count - 1);
     if (tick != _dragTick) {
@@ -426,7 +443,9 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
   @override
   void didUpdateWidget(LuminaSlidingSelection oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.index != widget.index || oldWidget.count != widget.count) {
+    if (oldWidget.index != widget.index ||
+        oldWidget.count != widget.count ||
+        oldWidget.direction != widget.direction) {
       _dragging = false;
       final reduced =
           LuminaTheme.motionReducedOf(context) ||
@@ -498,27 +517,36 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
             onLongPressCancel: _cancelDrag,
             child: widget.child,
           );
-    if (LuminaTheme.of(context).data.neumorphicGlass) {
+    if (!widget.floating && LuminaTheme.of(context).data.neumorphicGlass) {
       Widget movingLayer({required bool cover}) => Positioned.fill(
         child: IgnorePointer(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final width = constraints.maxWidth / widget.count;
-              final rtl = Directionality.of(context) == TextDirection.rtl;
+              final width = _vertical
+                  ? constraints.maxWidth
+                  : constraints.maxWidth / widget.count;
+              final height = _vertical
+                  ? constraints.maxHeight / widget.count
+                  : constraints.maxHeight;
+              final rtl = _rtl;
               return AnimatedBuilder(
                 animation: position,
                 builder: (context, _) {
                   final value = position.value.clamp(0.0, widget.count - 1.0);
                   return Align(
-                    alignment: Alignment.centerLeft,
+                    alignment: _vertical
+                        ? Alignment.topCenter
+                        : Alignment.centerLeft,
                     child: Transform.translate(
                       offset: Offset(
-                        (rtl ? widget.count - 1 - value : value) * width,
-                        0,
+                        _vertical
+                            ? 0
+                            : (rtl ? widget.count - 1 - value : value) * width,
+                        _vertical ? value * height : 0,
                       ),
                       child: SizedBox(
                         width: width,
-                        height: constraints.maxHeight,
+                        height: height,
                         child: cover
                             ? const LuminaGlassCoat()
                             : LuminaGlassWell(
@@ -558,16 +586,25 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
         ],
       );
     }
+    final floatingOpaque =
+        widget.floating &&
+        (LuminaTheme.of(context).reduceTransparency ||
+            MediaQuery.highContrastOf(context));
     final lens = Positioned.fill(
       child: IgnorePointer(
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final width = constraints.maxWidth / widget.count;
-            final rtl = Directionality.of(context) == TextDirection.rtl;
+            final width = _vertical
+                ? constraints.maxWidth
+                : constraints.maxWidth / widget.count;
+            final height = _vertical
+                ? constraints.maxHeight / widget.count
+                : constraints.maxHeight;
+            final rtl = _rtl;
             return AnimatedBuilder(
               animation: position,
               child: _magnifier(
-                size: Size(width, constraints.maxHeight),
+                size: Size(width, height),
                 magnificationScale:
                     LuminaTheme.of(context).reduceTransparency ||
                         MediaQuery.highContrastOf(context)
@@ -583,9 +620,14 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
                 child: CustomPaint(
                   key: const ValueKey('lumina-selection-lens'),
                   painter: _LuminaMaterial(
-                    neumorphic: LuminaTheme.of(context).data.neumorphic,
+                    neumorphic:
+                        !widget.floating &&
+                        LuminaTheme.of(context).data.neumorphic,
                     colors: LuminaTheme.of(context).colors,
-                    tint: LuminaTheme.of(context).data.neumorphic
+                    tint: floatingOpaque
+                        ? LuminaTheme.of(context).colors.surface
+                        : !widget.floating &&
+                              LuminaTheme.of(context).data.neumorphic
                         ? Color.lerp(
                             LuminaTheme.of(context).colors.surface,
                             LuminaTheme.of(context).colors.accentSoft,
@@ -609,13 +651,15 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
                     shoulder: false,
                     contrast:
                         MediaQuery.highContrastOf(context) ||
+                        floatingOpaque ||
                         (LuminaTheme.of(context).data.liquidGlass &&
                             LuminaTheme.of(context).reduceTransparency),
                     focused: false,
                     pressed: false,
-                    glass: !LuminaCardScope.of(context),
+                    glass: !floatingOpaque && !LuminaCardScope.of(context),
                     diffuseGlass: false,
                     liquidGlass:
+                        !widget.floating &&
                         !LuminaCardScope.of(context) &&
                         LuminaTheme.of(context).data.liquidGlass,
                     cheapShadow: true,
@@ -650,27 +694,39 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
                     ? 0.0
                     : (position.velocity.abs() * .004).clamp(0.0, .035);
                 return Align(
-                  alignment: Alignment.centerLeft,
+                  alignment: _vertical
+                      ? Alignment.topCenter
+                      : Alignment.centerLeft,
                   child: Transform.translate(
                     offset: Offset(
-                      (rtl
-                              ? widget.count -
-                                    1 -
-                                    x.clamp(0.0, widget.count - 1.0)
-                              : x.clamp(0.0, widget.count - 1.0)) *
-                          width,
-                      0,
+                      _vertical
+                          ? 0
+                          : (rtl
+                                    ? widget.count -
+                                          1 -
+                                          x.clamp(0.0, widget.count - 1.0)
+                                    : x.clamp(0.0, widget.count - 1.0)) *
+                                width,
+                      _vertical ? x.clamp(0.0, widget.count - 1.0) * height : 0,
                     ),
                     child: Transform.scale(
                       key: const ValueKey('lumina-selection-deformation'),
-                      alignment: (x < 0) != rtl
+                      alignment: _vertical
+                          ? (x < 0
+                                ? Alignment.topCenter
+                                : Alignment.bottomCenter)
+                          : (x < 0) != rtl
                           ? Alignment.centerLeft
                           : Alignment.centerRight,
-                      scaleX: 1 + stretch - squeeze,
-                      scaleY: 1 - stretch * .5 + squeeze * .3,
+                      scaleX: _vertical
+                          ? 1 - stretch * .5 + squeeze * .3
+                          : 1 + stretch - squeeze,
+                      scaleY: _vertical
+                          ? 1 + stretch - squeeze
+                          : 1 - stretch * .5 + squeeze * .3,
                       child: SizedBox(
                         width: width,
-                        height: constraints.maxHeight,
+                        height: height,
                         child: child,
                       ),
                     ),
@@ -688,7 +744,10 @@ class _LuminaSlidingSelectionState extends State<LuminaSlidingSelection>
         LuminaCardScope.of(context) || LuminaTheme.of(context).data.neumorphic;
     return Stack(
       children: [
-        Positioned.fill(child: _LuminaSelectionWell(backdrop: widget.backdrop)),
+        if (!widget.floating)
+          Positioned.fill(
+            child: _LuminaSelectionWell(backdrop: widget.backdrop),
+          ),
         if (!card) content,
         lens,
         if (card) content,

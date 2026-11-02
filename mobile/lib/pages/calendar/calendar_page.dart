@@ -13,8 +13,8 @@ import '../../features/events/presentation/task_children.dart';
 import '../../features/system_integration/schedule_tracking_button.dart';
 import '../../features/events/presentation/task_editor.dart';
 import '../shared/page_parts.dart';
+import '../shared/adaptive_layout.dart';
 import '../shared/glass_segmented.dart';
-import '../shared/compact_header.dart';
 import 'calendar_week_view.dart';
 
 typedef Schedule = CalendarEvent;
@@ -30,6 +30,7 @@ class CalendarPage extends ConsumerStatefulWidget {
 class _CalendarPageState extends ConsumerState<CalendarPage> {
   late DateTime _date = widget.initialDate ?? DateTime.now();
   bool _openedInitialSchedule = false;
+  bool _collapseFreeHours = false;
   late int _view = widget.initialScheduleId == null ? 2 : 0;
   late final Stream<List<Schedule>> _schedules;
   late final Stream<List<Task>> _tasks;
@@ -150,6 +151,25 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
             icon: const LuminaIcon(LuminaIcons.back),
             onPressed: () => Navigator.of(context).maybePop(),
           ),
+    floatingActionButton: _view == 1
+        ? Semantics(
+            toggled: _collapseFreeHours,
+            child: LuminaIconButton(
+              key: const ValueKey('calendar-fold-hours'),
+              tooltip: _collapseFreeHours ? '展开空闲时段' : '折叠空闲时段',
+              icon: AnimatedRotation(
+                turns: _collapseFreeHours ? 0 : .5,
+                duration: LuminaTheme.motionReducedOf(context)
+                    ? Duration.zero
+                    : LuminaMotion.standard,
+                curve: luminaEaseOut,
+                child: const LuminaIcon(LuminaIcons.chevronDown),
+              ),
+              onPressed: () =>
+                  setState(() => _collapseFreeHours = !_collapseFreeHours),
+            ),
+          )
+        : null,
     actions: [
       LuminaIconButton(
         tooltip: '新增日程',
@@ -157,7 +177,14 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         onPressed: () => _edit(),
       ),
     ],
-    body: LayoutBuilder(
+    controls: ref.watch(desktopModeProvider)
+        ? null
+        : Transform.translate(
+            offset: const Offset(0, -4),
+            child: _mobileHeader(),
+          ),
+    controlsExtent: OrialisControlCard.extentOf(context),
+    bodyBuilder: (context, topInset) => LayoutBuilder(
       builder: (context, constraints) {
         final desktop =
             ref.watch(desktopModeProvider) &&
@@ -187,20 +214,35 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
             ),
           );
         }
-        return LuminaFloatingHeader(
-          horizontalPadding: 12,
-          header: _mobileHeader(),
-          bodyBuilder: (context, topInset) => GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onHorizontalDragEnd: (details) {
-              final velocity = details.primaryVelocity ?? 0;
-              if (velocity.abs() < 250) return;
-              _move(velocity < 0 ? 1 : -1);
-            },
-            child: OrialisContentTransition(
-              changeKey: (_view, dateKey(_date)),
-              direction: _direction,
-              child: _calendarContent(topInset),
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragEnd: (details) {
+            final velocity = details.primaryVelocity ?? 0;
+            if (velocity.abs() < 250) return;
+            _move(velocity < 0 ? 1 : -1);
+          },
+          child: OrialisContentTransition(
+            changeKey: (
+              _view,
+              dateKey(
+                _view == 1
+                    ? DateTime(
+                        _date.year,
+                        _date.month,
+                        _date.day - _date.weekday + 1,
+                      )
+                    : _view == 2
+                    ? DateTime(_date.year, _date.month, 1)
+                    : _date,
+              ),
+            ),
+            direction: _direction,
+            child: _calendarContent(
+              topInset,
+              adaptiveSplit:
+                  (OrialisAdaptiveLayout.maybeOf(context)?.wide ?? false) &&
+                  constraints.maxWidth >=
+                      600 * MediaQuery.textScalerOf(context).scale(14) / 14,
             ),
           ),
         );
@@ -209,57 +251,102 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   );
 
   Widget _mobileHeader() {
-    final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-    return OrialisCompactHeader(
-      key: const ValueKey('calendar-compact-header'),
-      children: [
-        SizedBox(width: 156 * scale.clamp(1.0, 2.0), child: _viewSelector()),
-        const SizedBox(width: 8),
-        SizedBox(
-          width: 168 + 100 * (scale - 1).clamp(0.0, 2.0),
-          child: Row(
-            children: [
-              LuminaIconButton(
-                tooltip: _previousLabel,
-                icon: const LuminaIcon(LuminaIcons.back),
-                onPressed: () => _move(-1),
-              ),
-              Expanded(
-                child: ConstrainedBox(
-                  key: const ValueKey('calendar-date-selector'),
-                  constraints: const BoxConstraints(minHeight: 44),
-                  child: LuminaSurface(
-                    glass: true,
-                    radius: LuminaControlSize.capsuleRadius,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 12,
-                    ),
-                    onTap: _selectDate,
-                    child: Semantics(
-                      label: _dateLabel,
-                      button: true,
-                      child: Text(
-                        _view == 2
-                            ? '${_date.year}/${_date.month}'
-                            : '${_date.month}月${_date.day}日',
-                        maxLines: 1,
-                        textAlign: TextAlign.center,
-                        style: LuminaTheme.of(context).textTheme.labelMedium,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              LuminaIconButton(
-                tooltip: _nextLabel,
-                icon: const LuminaIcon(LuminaIcons.chevronRight),
-                onPressed: () => _move(1),
-              ),
-            ],
+    if (OrialisAdaptiveLayout.maybeOf(context)?.wide ?? false) {
+      return Column(
+        key: const ValueKey('calendar-controls-card'),
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _viewSelector(),
+          const SizedBox(height: 8),
+          _compactDateNavigation(vertical: true),
+        ],
+      );
+    }
+    return OrialisControlCard(
+      key: const ValueKey('calendar-controls-card'),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        key: const ValueKey('calendar-compact-header'),
+        children: [
+          Expanded(flex: 2, child: _viewSelector()),
+          const SizedBox(width: 8),
+          Expanded(flex: 3, child: _compactDateNavigation()),
+        ],
+      ),
+    );
+  }
+
+  Widget _compactDateNavigation({bool vertical = false}) {
+    final previous = SizedBox.square(
+      dimension: LuminaControlSize.minimum,
+      child: LuminaIconButton(
+        tooltip: _previousLabel,
+        icon: const LuminaIcon(LuminaIcons.arrowLeft),
+        onPressed: () => _move(-1),
+      ),
+    );
+    final next = SizedBox.square(
+      dimension: LuminaControlSize.minimum,
+      child: LuminaIconButton(
+        tooltip: _nextLabel,
+        icon: const LuminaIcon(LuminaIcons.arrowRight),
+        onPressed: () => _move(1),
+      ),
+    );
+    final date = ConstrainedBox(
+      key: const ValueKey('calendar-date-selector'),
+      constraints: const BoxConstraints(minHeight: 44),
+      child: LuminaSurface(
+        glass: true,
+        radius: LuminaControlSize.capsuleRadius,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        onTap: _selectDate,
+        child: Center(
+          child: Semantics(
+            label: _dateLabel,
+            button: true,
+            child: Text(
+              _view == 2
+                  ? '${_date.year}/${_date.month}'
+                  : '${_date.month}月${_date.day}日',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: LuminaTheme.of(context).textTheme.labelMedium,
+            ),
           ),
         ),
-      ],
+      ),
+    );
+    return SizedBox(
+      key: const ValueKey('calendar-date-navigation'),
+      width: double.infinity,
+      child: vertical
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: OrialisControlCard.extentOf(context) - 12,
+                  child: date,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  runSpacing: 8,
+                  children: [previous, next],
+                ),
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(child: previous),
+                Expanded(child: date),
+                Center(child: next),
+              ],
+            ),
     );
   }
 
@@ -276,6 +363,11 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         )
       : OrialisGlassSegmented<int>(
           key: const ValueKey('calendar-view-selector'),
+          compact: true,
+          direction: (OrialisAdaptiveLayout.maybeOf(context)?.wide ?? false)
+              ? Axis.vertical
+              : Axis.horizontal,
+          stretch: true,
           items: const {0: '日', 1: '周', 2: '月'},
           value: _view,
           onChanged: (v) => setState(() {
@@ -284,47 +376,51 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
           }),
         );
 
-  Widget _calendarContent(double topInset, {bool desktop = false}) =>
-      StreamBuilder<List<Schedule>>(
-        stream: _schedules,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) return const PageFailure();
-          if (!snapshot.hasData) {
-            return const Center(child: LuminaProgress());
+  Widget _calendarContent(
+    double topInset, {
+    bool desktop = false,
+    bool adaptiveSplit = false,
+  }) => StreamBuilder<List<Schedule>>(
+    stream: _schedules,
+    builder: (context, snapshot) {
+      if (snapshot.hasError) return const PageFailure();
+      if (!snapshot.hasData) {
+        return const Center(child: LuminaProgress());
+      }
+      final all = snapshot.data!;
+      if (!_openedInitialSchedule && widget.initialScheduleId != null) {
+        _openedInitialSchedule = true;
+        final target = all
+            .where((s) => s.id == widget.initialScheduleId)
+            .firstOrNull;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (target == null) {
+            showLuminaMessage(context, '这条日程已不存在。');
+          } else {
+            _detail(target);
           }
-          final all = snapshot.data!;
-          if (!_openedInitialSchedule && widget.initialScheduleId != null) {
-            _openedInitialSchedule = true;
-            final target = all
-                .where((s) => s.id == widget.initialScheduleId)
-                .firstOrNull;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted) return;
-              if (target == null) {
-                showLuminaMessage(context, '这条日程已不存在。');
-              } else {
-                _detail(target);
-              }
-            });
-          }
-          return StreamBuilder<List<Task>>(
-            stream: _tasks,
-            builder: (context, tasks) {
-              if (tasks.hasError) return const PageFailure();
-              _indexDates(all, tasks.data ?? const []);
-              if (desktop) return _desktopCalendar();
-              return switch (_view) {
-                1 => _week(topInset),
-                2 => _month(topInset),
-                _ => _day(topInset),
-              };
-            },
-          );
+        });
+      }
+      return StreamBuilder<List<Task>>(
+        stream: _tasks,
+        builder: (context, tasks) {
+          if (tasks.hasError) return const PageFailure();
+          _indexDates(all, tasks.data ?? const []);
+          if (desktop) return _desktopCalendar();
+          if (adaptiveSplit && _view != 1) return _adaptiveCalendar();
+          return switch (_view) {
+            1 => _week(topInset),
+            2 => _month(topInset),
+            _ => _day(topInset),
+          };
         },
       );
+    },
+  );
 
   Widget _desktopCalendar() {
-    if (_view == 1) return _weekTimeline();
+    if (_view == 1) return _weekTimeline(bottomInset: 80);
     if (_view == 0) {
       return Align(
         alignment: Alignment.topLeft,
@@ -554,6 +650,64 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       gap: 14,
       children: [
         LuminaPalette(
+          palette: LuminaCardPalette.amber,
+          child: LuminaSurface(
+            key: ValueKey('calendar-due-${dateKey(day)}'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: _categoryIcon(LuminaIcons.tasks, '当天截止'),
+                ),
+                const SizedBox(height: 14),
+                if (due.isEmpty) const QuietLabel('这一天没有截止事项。'),
+                if (due.isNotEmpty)
+                  LuminaCompletionList(
+                    animateChanges: true,
+                    children: [
+                      for (final task in due)
+                        LuminaListRow(
+                          key: ValueKey(task.id),
+                          depth: LuminaSurfaceDepth.recessed,
+                          title: task.title,
+                          subtitle: task.dueTime ?? '当天截止',
+                          detail: TaskSourceLabel(task: task),
+                          trailing: LuminaCheck(
+                            value: task.completed,
+                            onChanged: (v) => ref
+                                .read(taskRepositoryProvider)
+                                .complete(task, v),
+                          ),
+                          onTap: () => showTaskEditor(
+                            context,
+                            task: task,
+                            onSave: (d) => ref
+                                .read(taskRepositoryProvider)
+                                .updateDetails(
+                                  task,
+                                  title: d.title,
+                                  notes: d.notes,
+                                  due: d.due,
+                                  dueTime: d.dueTime,
+                                  important: d.important,
+                                  urgent: d.urgent,
+                                  reminderMinutes: d.reminderMinutes,
+                                  recurrence: d.recurrence,
+                                  projectId: d.projectId,
+                                  reminderMinutesProvided: true,
+                                  recurrenceProvided: true,
+                                  projectIdProvided: true,
+                                ),
+                          ),
+                        ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ),
+        LuminaPalette(
           palette: LuminaCardPalette.sage,
           child: LuminaTitledContentCard(
             key: ValueKey('calendar-schedules-${dateKey(day)}'),
@@ -564,60 +718,12 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
             ],
           ),
         ),
-        LuminaPalette(
-          palette: LuminaCardPalette.amber,
-          child: LuminaTitledContentCard(
-            key: ValueKey('calendar-due-${dateKey(day)}'),
-            title: '当天截止',
-            emptyText: '这一天没有截止事项。',
-            children: [
-              if (due.isNotEmpty)
-                LuminaCompletionList(
-                  animateChanges: true,
-                  children: [
-                    for (final task in due)
-                      LuminaListRow(
-                        key: ValueKey(task.id),
-                        depth: LuminaSurfaceDepth.recessed,
-                        title: task.title,
-                        subtitle: task.dueTime ?? '当天截止',
-                        detail: TaskSourceLabel(task: task),
-                        trailing: LuminaCheck(
-                          value: task.completed,
-                          onChanged: (v) => ref
-                              .read(taskRepositoryProvider)
-                              .complete(task, v),
-                        ),
-                        onTap: () => showTaskEditor(
-                          context,
-                          task: task,
-                          onSave: (d) => ref
-                              .read(taskRepositoryProvider)
-                              .updateDetails(
-                                task,
-                                title: d.title,
-                                notes: d.notes,
-                                due: d.due,
-                                dueTime: d.dueTime,
-                                important: d.important,
-                                urgent: d.urgent,
-                                reminderMinutes: d.reminderMinutes,
-                                recurrence: d.recurrence,
-                                projectId: d.projectId,
-                                reminderMinutesProvided: true,
-                                recurrenceProvided: true,
-                                projectIdProvided: true,
-                              ),
-                        ),
-                      ),
-                  ],
-                ),
-            ],
-          ),
-        ),
       ],
     );
   }
+
+  Widget _categoryIcon(LuminaIcons icon, String label) =>
+      Semantics(label: label, child: LuminaIcon(icon, size: 20));
 
   Widget _scheduleRow(Schedule s) {
     final start = DateTime.parse(s.startAt).toLocal();
@@ -625,57 +731,89 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     final now = DateTime.now();
     final ongoing = !s.allDay && !now.isBefore(start) && now.isBefore(end);
     final text = LuminaTheme.of(context).textTheme;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: MediaQuery.textScalerOf(context).scale(64).clamp(64, 96),
-          child: Padding(
-            padding: const EdgeInsets.only(top: 14, right: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  s.allDay ? '全天' : timeLabel(start),
-                  style: text.labelMedium,
-                ),
-                if (!s.allDay) ...[
-                  Text('—', style: text.bodySmall),
-                  Text(timeLabel(end), style: text.bodySmall),
-                  if (dateKey(start) != dateKey(end))
-                    Text('跨日', style: text.bodySmall),
-                ],
-                if (ongoing)
-                  Text(
-                    '进行中',
-                    style: text.labelSmall.copyWith(
-                      color: LuminaTheme.of(context).colors.accent,
+    final card = LuminaPalette(
+      palette: s.important
+          ? LuminaCardPalette.ocean
+          : ongoing
+          ? LuminaCardPalette.amber
+          : LuminaCardPalette.sage,
+      child: LuminaListRow(
+        depth: LuminaSurfaceDepth.recessed,
+        title: s.title,
+        subtitle: [
+          if (s.important) '重要',
+          if (s.location?.isNotEmpty == true) s.location!,
+          if (s.description?.isNotEmpty == true) s.description!,
+        ].join(' · '),
+        onTap: () => _detail(s),
+      ),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 280) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  if (s.allDay)
+                    _categoryIcon(LuminaIcons.calendar, '全天')
+                  else
+                    Text(
+                      '${timeLabel(start)} — ${timeLabel(end)}${dateKey(start) != dateKey(end) ? ' · 跨日' : ''}',
+                      style: text.labelMedium,
                     ),
-                  ),
-              ],
+                  if (ongoing)
+                    Text(
+                      '进行中',
+                      style: text.labelSmall.copyWith(
+                        color: LuminaTheme.of(context).colors.accent,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              card,
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: MediaQuery.textScalerOf(context).scale(64).clamp(64, 96),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 14, right: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (s.allDay)
+                      _categoryIcon(LuminaIcons.calendar, '全天')
+                    else
+                      Text(timeLabel(start), style: text.labelMedium),
+                    if (!s.allDay) ...[
+                      Text('—', style: text.bodySmall),
+                      Text(timeLabel(end), style: text.bodySmall),
+                      if (dateKey(start) != dateKey(end))
+                        Text('跨日', style: text.bodySmall),
+                    ],
+                    if (ongoing)
+                      Text(
+                        '进行中',
+                        style: text.labelSmall.copyWith(
+                          color: LuminaTheme.of(context).colors.accent,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
-          ),
-        ),
-        Expanded(
-          child: LuminaPalette(
-            palette: s.important
-                ? LuminaCardPalette.ocean
-                : ongoing
-                ? LuminaCardPalette.amber
-                : LuminaCardPalette.sage,
-            child: LuminaListRow(
-              depth: LuminaSurfaceDepth.recessed,
-              title: s.title,
-              subtitle: [
-                if (s.important) '重要',
-                if (s.location?.isNotEmpty == true) s.location!,
-                if (s.description?.isNotEmpty == true) s.description!,
-              ].join(' · '),
-              onTap: () => _detail(s),
-            ),
-          ),
-        ),
-      ],
+            Expanded(child: card),
+          ],
+        );
+      },
     );
   }
 
@@ -728,7 +866,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
             colors.accentSoft,
             selection,
           ),
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 2),
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
           child: Column(
             children: [
               FittedBox(
@@ -788,50 +926,54 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     );
   }
 
-  Widget _weekTimeline() => CalendarWeekView(
-    date: _date,
-    eventsOn: _on,
-    tasksOn: _dueOn,
-    onSelect: (day) => setState(() => _date = day),
-    onEvent: _detail,
-    onCreate: (start) {
-      setState(() => _date = start);
-      _edit(null, start);
-    },
-    onAgenda: (day) {
-      setState(() => _date = day);
-      showLuminaSheet<void>(
-        context: context,
-        builder: (_) => StreamBuilder<List<Schedule>>(
-          stream: _schedules,
-          builder: (context, schedules) => StreamBuilder<List<Task>>(
-            stream: _tasks,
-            builder: (context, tasks) {
-              if (schedules.hasError || tasks.hasError) {
-                return const PageFailure();
-              }
-              if (!schedules.hasData || !tasks.hasData) {
-                return const LuminaProgress();
-              }
-              _indexDates(schedules.data!, tasks.data!);
-              return _agenda(day);
-            },
-          ),
-        ),
+  Widget _weekTimeline({double topInset = 0, double bottomInset = 0}) =>
+      CalendarWeekView(
+        topInset: topInset,
+        collapseFreeHours: _collapseFreeHours,
+        bottomInset: bottomInset,
+        date: _date,
+        eventsOn: _on,
+        tasksOn: _dueOn,
+        onSelect: (day) => setState(() => _date = day),
+        onEvent: _detail,
+        onCreate: (start) {
+          setState(() => _date = start);
+          _edit(null, start);
+        },
+        onAgenda: (day) {
+          setState(() => _date = day);
+          showLuminaSheet<void>(
+            context: context,
+            builder: (_) => StreamBuilder<List<Schedule>>(
+              stream: _schedules,
+              builder: (context, schedules) => StreamBuilder<List<Task>>(
+                stream: _tasks,
+                builder: (context, tasks) {
+                  if (schedules.hasError || tasks.hasError) {
+                    return const PageFailure();
+                  }
+                  if (!schedules.hasData || !tasks.hasData) {
+                    return const LuminaProgress();
+                  }
+                  _indexDates(schedules.data!, tasks.data!);
+                  return _agenda(day);
+                },
+              ),
+            ),
+          );
+        },
       );
-    },
-  );
 
   Widget _week(double topInset) => Padding(
-    padding: EdgeInsets.fromLTRB(
-      12,
-      topInset,
-      12,
-      12 +
+    padding: const EdgeInsets.symmetric(horizontal: 12),
+    child: _weekTimeline(
+      topInset: topInset,
+      bottomInset:
+          12 +
+          80 +
           LuminaNavigationInset.of(context) +
           MediaQuery.paddingOf(context).bottom,
     ),
-    child: _weekTimeline(),
   );
 
   Widget _dayFocus() {
@@ -884,6 +1026,24 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
           const SizedBox(height: 12),
           if (schedules.isEmpty && due.isEmpty)
             const QuietLabel('当天暂无安排，留一点时间给自己。'),
+          if (due.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Row(
+                children: [
+                  _categoryIcon(LuminaIcons.tasks, '当天截止'),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      due.take(2).map((t) => t.title).join('、'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: LuminaTheme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           for (final event in schedules.take(3))
             LuminaTap(
               onTap: () => _detail(event),
@@ -893,13 +1053,13 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                   children: [
                     SizedBox(
                       width: 68,
-                      child: QuietLabel(
-                        event.allDay
-                            ? '全天'
-                            : timeLabel(
+                      child: event.allDay
+                          ? _categoryIcon(LuminaIcons.calendar, '全天')
+                          : QuietLabel(
+                              timeLabel(
                                 DateTime.parse(event.startAt).toLocal(),
                               ),
-                      ),
+                            ),
                     ),
                     Expanded(
                       child: Text(
@@ -910,16 +1070,6 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                     ),
                   ],
                 ),
-              ),
-            ),
-          if (due.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Text(
-                '${due.length} 项截止 · ${due.take(2).map((t) => t.title).join('、')}',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: LuminaTheme.of(context).textTheme.bodySmall,
               ),
             ),
           const SizedBox(height: 10),
@@ -938,7 +1088,47 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     );
   }
 
-  Widget _month(double topInset) {
+  Widget _adaptiveCalendar() => Padding(
+    padding: const EdgeInsets.all(12),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final gridWidth = (constraints.maxWidth * .46).clamp(320.0, 400.0);
+        return Row(
+          key: const ValueKey('adaptive-calendar-split'),
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              width: gridWidth,
+              child: SingleChildScrollView(
+                key: const PageStorageKey('adaptive-calendar-grid'),
+                primary: false,
+                child: _monthGrid(compact: true),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ListView(
+                key: PageStorageKey(
+                  'adaptive-calendar-agenda-${dateKey(_date)}',
+                ),
+                primary: false,
+                padding: EdgeInsets.zero,
+                children: [_agenda(_date)],
+              ),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+
+  Widget _month(double topInset) => ListView(
+    key: const PageStorageKey('calendar-month-scroll'),
+    padding: _scrollInsets(topInset),
+    children: [_monthGrid(), const SizedBox(height: 18), _monthAgenda()],
+  );
+
+  Widget _monthGrid({bool compact = false}) {
     final first = DateTime(_date.year, _date.month, 1);
     final length = DateTime(_date.year, _date.month + 1, 0).day;
     final rows = ((first.weekday - 1 + length) / 7).ceil();
@@ -947,55 +1137,45 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       final day = DateTime(_date.year, _date.month, number);
       cells.add(_dayCell(day));
     }
-    return ListView(
-      key: const PageStorageKey('calendar-month-scroll'),
-      padding: _scrollInsets(topInset),
-      children: [
-        LuminaSurface(
-          child: Column(
+    return LuminaSurface(
+      padding: EdgeInsets.all(compact ? 8 : 16),
+      child: Column(
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  for (final day in ['一', '二', '三', '四', '五', '六', '日'])
-                    Expanded(child: Center(child: QuietLabel(day))),
-                ],
-              ),
-              const SizedBox(height: 8),
-              for (var row = 0; row < rows; row++)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (var column = 0; column < 7; column++)
-                        Expanded(
-                          child: Builder(
-                            builder: (context) {
-                              final index =
-                                  row * 7 + column - first.weekday + 1;
-                              if (index < 0 || index >= cells.length) {
-                                return const SizedBox(height: 38);
-                              }
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 2,
-                                ),
-                                child: cells[index],
-                              );
-                            },
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              const SizedBox(height: 14),
-              const QuietLabel('圆点 · 日程　菱形 · 截止事项'),
+              for (final day in ['一', '二', '三', '四', '五', '六', '日'])
+                Expanded(child: Center(child: QuietLabel(day))),
             ],
           ),
-        ),
-        const SizedBox(height: 18),
-        _monthAgenda(),
-      ],
+          const SizedBox(height: 8),
+          for (var row = 0; row < rows; row++)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var column = 0; column < 7; column++)
+                    Expanded(
+                      child: Builder(
+                        builder: (context) {
+                          final index = row * 7 + column - first.weekday + 1;
+                          if (index < 0 || index >= cells.length) {
+                            return const SizedBox(height: 38);
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            child: cells[index],
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 14),
+          const QuietLabel('圆点 · 日程　菱形 · 截止事项'),
+        ],
+      ),
     );
   }
 

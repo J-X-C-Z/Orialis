@@ -119,6 +119,18 @@ class _NewsRepositoryFake extends NewsRepository {
           'useCases': ['旧AI场景不应出现'],
         },
       },
+      'campus/items' => {
+        'items': [
+          {
+            'id': 'campus-1',
+            'title': '校园讲座通知',
+            'summary': '讲座摘要',
+            'content': '校园讲座完整正文',
+            'url': 'https://example.com/campus',
+            'source': '消息中枢信息站',
+          },
+        ],
+      },
       'projects' => projects,
       'projects/daily' =>
         accountAware
@@ -240,6 +252,38 @@ void main() {
     SharedPreferences.setMockInitialValues({'orialis.appearanceMode': 'light'});
   });
 
+  testWidgets('campus entry loads account feed and opens full article', (
+    tester,
+  ) async {
+    final repository = _NewsRepositoryFake();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [newsRepositoryProvider.overrideWithValue(repository)],
+        child: const OrialisNewsApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('信息站'));
+    await tester.pumpAndSettle();
+    expect(repository.requests, contains(('campus/items', true)));
+    expect(find.text('校园讲座通知'), findsOneWidget);
+    await tester.tap(find.text('校园讲座通知'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('校园讲座完整正文'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('打开原文链接'),
+      200,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView).last,
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(find.text('打开原文链接'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'system appearance updates live and explicit appearance stays fixed',
     (tester) async {
@@ -258,6 +302,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       final context = tester.element(find.byType(NewsHomePage));
+      expect(LuminaTheme.of(context).data.neumorphic, isTrue);
+      expect(LuminaTheme.of(context).data.neumorphicGlass, isTrue);
       expect(LuminaTheme.of(context).brightness, Brightness.light);
       tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
       await tester.pumpAndSettle();

@@ -429,6 +429,20 @@ class NewsRepository {
           message: '账号或服务地址已更改，请刷新资讯。',
         );
       }
+      if (path == 'campus/items' && error.response?.statusCode == 404) {
+        return const NewsLoadResult(
+          NewsLoadKind.error,
+          message: '信息站暂未上线，请稍后刷新。',
+        );
+      }
+      if (path == 'campus/items' && error.response?.statusCode == 403) {
+        final preferences = await SharedPreferences.getInstance();
+        await preferences.remove(cacheKey);
+        return const NewsLoadResult(
+          NewsLoadKind.error,
+          message: '当前账号暂无信息站访问权限。',
+        );
+      }
       if (error.response?.statusCode == 401 ||
           error.response?.statusCode == 403) {
         final preferences = await SharedPreferences.getInstance();

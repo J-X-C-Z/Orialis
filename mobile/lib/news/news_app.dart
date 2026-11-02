@@ -97,6 +97,7 @@ class OrialisNewsApp extends ConsumerWidget {
         return AnimatedLuminaTheme(
           brightness: brightness,
           highPerformanceMode: highPerformanceMode,
+          data: const LuminaThemeData(neumorphic: true, neumorphicGlass: true),
           child: Builder(
             builder: (context) => LuminaMaterialBridge(
               child: DefaultTextStyle(
@@ -176,14 +177,14 @@ class _DesktopNewsPageState extends State<DesktopNewsPage> {
 
 class _NewsHomePageState extends State<NewsHomePage> {
   int _selected = 0;
-  final _refreshGenerations = [0, 0, 0];
+  final _refreshGenerations = [0, 0, 0, 0];
 
   @override
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width >= 840;
     final desktop = DesktopLayoutScope.of(context);
     final page = OrialisPageScaffold(
-      title: const ['AI 热点', 'GitHub', '项目资讯'][_selected],
+      title: const ['AI 热点', 'GitHub', '项目资讯', '信息站'][_selected],
       leading: wide || desktop
           ? const _NewsBrandLogo()
           : LuminaIconButton(
@@ -217,13 +218,14 @@ class _NewsHomePageState extends State<NewsHomePage> {
           final pages = LuminaBranchTransition(
             index: _selected,
             children: [
-              for (var i = 0; i < 3; i++)
+              for (var i = 0; i < 4; i++)
                 NewsRefreshScope(
                   generation: _refreshGenerations[i],
                   child: const [
                     AihotPage(),
                     GithubPage(),
                     ProjectsNewsPage(),
+                    CampusNewsPage(),
                   ][i],
                 ),
             ],
@@ -278,11 +280,12 @@ class _NewsHomePageState extends State<NewsHomePage> {
 
 List<NavigationDestination> _newsDestinations(BuildContext context) {
   final colors = LuminaTheme.of(context).colors;
-  const labels = ['AI 热点', 'GitHub', '项目'];
+  const labels = ['AI 热点', 'GitHub', '项目', '信息站'];
   const icons = [
     LuminaIcons.sparkles,
     LuminaIcons.terminal,
     LuminaIcons.folder,
+    LuminaIcons.notification,
   ];
   return [
     for (var i = 0; i < labels.length; i++)
@@ -433,6 +436,7 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
               ),
               children: [
                 LuminaSection(
+                  raised: true,
                   title: 'Orialis 服务',
                   trailing: const _NewsBrandLogo(size: 24),
                   child: Column(
@@ -471,6 +475,7 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
                 ),
                 const SizedBox(height: 18),
                 LuminaSection(
+                  raised: true,
                   title: '外观',
                   child: Column(
                     children: [
@@ -507,6 +512,7 @@ class _NewsAccountPageState extends ConsumerState<NewsAccountPage> {
                 ),
                 const SizedBox(height: 18),
                 LuminaSection(
+                  raised: true,
                   title: '登录状态',
                   child: _username == null
                       ? Column(

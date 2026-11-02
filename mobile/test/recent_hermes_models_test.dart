@@ -53,4 +53,33 @@ void main() {
 
     expect(await history.load(), ['second', 'first']);
   });
+  test(
+    'account histories do not inherit another user or global history',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        RecentHermesModels.storageKey: <String>['legacy-private'],
+      });
+      var account = 'a';
+      final history = RecentHermesModels(accountScope: () async => account);
+      await history.recordSuccessfulSwitch('a-private');
+      account = 'b';
+      expect(await history.load(), isEmpty);
+      await history.recordSuccessfulSwitch('b-private');
+      account = 'a';
+      expect(await history.load(), ['a-private']);
+    },
+  );
+  test(
+    'a queued write retains the account captured before switching',
+    () async {
+      var account = 'a';
+      final history = RecentHermesModels(accountScope: () async => account);
+      final saving = history.recordSuccessfulSwitch('a-private');
+      account = 'b';
+      await saving;
+      expect(await history.load(), isEmpty);
+      account = 'a';
+      expect(await history.load(), ['a-private']);
+    },
+  );
 }

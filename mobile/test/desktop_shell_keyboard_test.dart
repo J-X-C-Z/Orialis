@@ -136,6 +136,29 @@ Future<void> _withShell(
 }
 
 void main() {
+  testWidgets('desktop sidebar collapse and resize preserve editor state', (tester) async {
+    await _withShell(tester, const Size(1180, 800), (router) async {
+      final editor = find.descendant(of: find.byKey(const ValueKey('editor0')),
+          matching: find.byType(EditableText));
+      await tester.enterText(editor, 'Desktop draft');
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byKey(const ValueKey('desktop-sidebar'))).width, 224);
+      await tester.tap(find.byKey(const ValueKey('desktop-toggle-sidebar')));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byKey(const ValueKey('desktop-sidebar'))).width, 88);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byKey(const ValueKey('desktop-sidebar'))).width, 224);
+      tester.view.physicalSize = const Size(800, 600);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byKey(const ValueKey('desktop-sidebar'))).width, 88);
+      expect(tester.widget<EditableText>(editor).controller.text, 'Desktop draft');
+      _expectDestination(tester, router, 0);
+    });
+  });
   for (final layout in {
     'wide': const Size(1180, 800),
     'narrow': const Size(560, 800),

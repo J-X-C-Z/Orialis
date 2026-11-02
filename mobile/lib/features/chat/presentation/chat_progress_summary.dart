@@ -30,6 +30,7 @@ class _ChatProgressSummaryState extends State<ChatProgressSummary> {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 8),
     child: LuminaSurface(
+      depth: LuminaSurfaceDepth.raised,
       radius: 16,
       liquidGlass: false,
       padding: const EdgeInsets.all(12),

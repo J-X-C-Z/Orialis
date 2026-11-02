@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orialis_mobile/core/config/app_config.dart';
@@ -64,6 +65,37 @@ Future<void> _until(bool Function() condition) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
+  test(
+    'campus missing endpoint shows friendly message without signing out',
+    () async {
+      final config = _Config();
+      final adapter = _Adapter()..status = 404;
+      final repo = NewsRepository(
+        config,
+        dio: Dio()..httpClientAdapter = adapter,
+      );
+      final result = await repo.get('campus/items');
+      expect(result.kind, NewsLoadKind.error);
+      expect(result.message, '信息站暂未上线，请稍后刷新。');
+      expect(config.token, 'account-a');
+    },
+  );
+  test('campus forbidden clears its cache without signing out', () async {
+    final config = _Config();
+    final adapter = _Adapter();
+    final repo = NewsRepository(
+      config,
+      dio: Dio()..httpClientAdapter = adapter,
+    );
+    await repo.get('campus/items');
+    adapter.status = 403;
+    final result = await repo.get('campus/items');
+    expect(result.kind, NewsLoadKind.error);
+    expect(result.message, '当前账号暂无信息站访问权限。');
+    expect(config.token, 'account-a');
+    final cached = await repo.cached(['campus/items']);
+    expect(cached.single.payload, isNull);
+  });
   test('reopen uses persisted cache; explicit refresh still fetches', () async {
     final config = _Config();
     final adapter = _Adapter();

@@ -17,8 +17,8 @@ import '../../features/events/presentation/long_press_orderable.dart';
 import '../../features/events/presentation/quick_event_button.dart';
 import '../projects/projects_page.dart';
 import '../shared/page_parts.dart';
+import '../shared/adaptive_layout.dart';
 import '../shared/glass_segmented.dart';
-import '../shared/compact_header.dart';
 
 class EventsPage extends ConsumerStatefulWidget {
   const EventsPage({super.key});
@@ -33,9 +33,9 @@ class _EventsPageState extends ConsumerState<EventsPage> {
   static const _filterOrder = ['active', 'undated', 'done'];
   String _selectedFilter = 'active';
   String _contentFilter = 'active';
+  String? _projectStatusFilter;
   Timer? _filterCommit;
   bool _holdUnclassified = false;
-  ({Task task, bool? important, bool? urgent})? _quadrantUndo;
   @override
   void initState() {
     super.initState();
@@ -132,55 +132,85 @@ class _EventsPageState extends ConsumerState<EventsPage> {
           onPressed: () => _edit(),
         ),
     ],
-    body: ref.watch(desktopModeProvider)
+    controls: ref.watch(desktopModeProvider) ? null : _mobileHeader(),
+    controlsExtent: OrialisControlCard.extentOf(context),
+    bodyBuilder: (context, topInset) => ref.watch(desktopModeProvider)
         ? _tasks(20)
-        : LuminaFloatingHeader(
-            horizontalPadding: 12,
-            header: _mobileHeader(),
-            bodyBuilder: (context, topInset) => PageView(
-              controller: _pager,
-              onPageChanged: (v) => setState(() => _page = v),
-              children: [
-                _tasks(topInset),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 80),
-                  child: ProjectsPage(
-                    embedded: true,
-                    active: _page == 1,
-                    topInset: topInset,
-                  ),
+        : PageView(
+            controller: _pager,
+            onPageChanged: (v) => setState(() => _page = v),
+            children: [
+              _tasks(topInset),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 80),
+                child: ProjectsPage(
+                  embedded: true,
+                  active: _page == 1,
+                  topInset: topInset,
+                  statusFilter: _projectStatusFilter,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
   );
   Widget _mobileHeader() {
-    final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-    return OrialisCompactHeader(
-      key: const ValueKey('events-compact-header'),
-      children: [
-        SizedBox(
-          width: 152 * scale.clamp(1.0, 2.0),
-          child: OrialisGlassSegmented<int>(
-            items: const {0: '四象限', 1: '项目'},
-            value: _page,
-            onChanged: (v) => _pager.animateToPage(
-              v,
-              duration: MediaQuery.disableAnimationsOf(context)
-                  ? Duration.zero
-                  : const Duration(milliseconds: 220),
-              curve: luminaEaseOut,
-            ),
-          ),
-        ),
-        if (_page == 0) ...[
+    final modes = OrialisGlassSegmented<int>(
+      key: const ValueKey('events-mode-selector'),
+      compact: true,
+      direction: (OrialisAdaptiveLayout.maybeOf(context)?.wide ?? false)
+          ? Axis.vertical
+          : Axis.horizontal,
+      stretch: true,
+      items: const {0: '四象限', 1: '项目'},
+      value: _page,
+      onChanged: (v) => _pager.animateToPage(
+        v,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 220),
+        curve: luminaEaseOut,
+      ),
+    );
+    final filters = _page == 0
+        ? _filterSelector(compactGlass: true)
+        : _projectStatusFilterSelector();
+    final wide = OrialisAdaptiveLayout.maybeOf(context)?.wide ?? false;
+    if (wide) {
+      return Column(
+        key: const ValueKey('events-wide-controls'),
+        mainAxisSize: MainAxisSize.min,
+        children: [modes, const SizedBox(height: 8), filters],
+      );
+    }
+    return OrialisControlCard(
+      key: const ValueKey('events-controls-card'),
+      child: Row(
+        key: const ValueKey('events-compact-header'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(flex: 2, child: modes),
           const SizedBox(width: 8),
-          SizedBox(
-            width: 176 * scale.clamp(1.0, 2.0),
-            child: _filterSelector(),
-          ),
+          Expanded(flex: 3, child: filters),
         ],
-      ],
+      ),
+    );
+  }
+
+  Widget _projectStatusFilterSelector() {
+    const labels = {'not_started': '未开始', 'active': '进行中', 'completed': '已完成'};
+    final current = _projectStatusFilter;
+    return OrialisGlassSegmented<String>(
+      key: const ValueKey('events-project-status-filter'),
+      compact: true,
+      direction: (OrialisAdaptiveLayout.maybeOf(context)?.wide ?? false)
+          ? Axis.vertical
+          : Axis.horizontal,
+      stretch: true,
+      items: labels,
+      value: current,
+      onChanged: (value) => setState(
+        () => _projectStatusFilter = value == current ? null : value,
+      ),
     );
   }
 
@@ -221,7 +251,6 @@ class _EventsPageState extends ConsumerState<EventsPage> {
           const SizedBox(height: 20),
           ContentStack(
             children: [
-              if (_quadrantUndo case final undo?) _undoPanel(undo),
               LayoutBuilder(
                 builder: (context, constraints) {
                   const quadrants = [
@@ -285,13 +314,25 @@ class _EventsPageState extends ConsumerState<EventsPage> {
       );
     },
   );
-  Widget _filterSelector() => LuminaSegmented<String>(
-    key: const ValueKey('events-filter-selector'),
-    transparent: true,
-    items: const {'active': '待完成', 'undated': '无截止', 'done': '已完成'},
-    value: _selectedFilter,
-    onChanged: _selectFilter,
-  );
+  Widget _filterSelector({bool compactGlass = false}) => compactGlass
+      ? OrialisGlassSegmented<String>(
+          key: const ValueKey('events-filter-selector'),
+          compact: true,
+          direction: (OrialisAdaptiveLayout.maybeOf(context)?.wide ?? false)
+              ? Axis.vertical
+              : Axis.horizontal,
+          stretch: true,
+          items: const {'active': '待完成', 'undated': '无截止', 'done': '已完成'},
+          value: _selectedFilter,
+          onChanged: _selectFilter,
+        )
+      : LuminaSegmented<String>(
+          key: const ValueKey('events-filter-selector'),
+          transparent: true,
+          items: const {'active': '待完成', 'undated': '无截止', 'done': '已完成'},
+          value: _selectedFilter,
+          onChanged: _selectFilter,
+        );
 
   Widget _taskFilters(List<Task> allTasks) => Row(
     children: [
@@ -307,81 +348,130 @@ class _EventsPageState extends ConsumerState<EventsPage> {
     ],
   );
 
-  Widget _undoPanel(({Task task, bool? important, bool? urgent}) undo) =>
-      LuminaSurface(
-        glass: true,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        child: Row(
-          children: [
-            const Expanded(child: Text('已调整象限')),
-            LuminaButton(
-              primary: false,
-              onPressed: () async {
-                await _setTaskQuadrant(undo.task, undo.important, undo.urgent);
-                if (mounted) setState(() => _quadrantUndo = null);
-              },
-              child: const Text('撤销'),
-            ),
-          ],
-        ),
-      );
-
   Widget _mobileTasks(
     double topInset,
     List<Task> tasks,
     Map<TaskQuadrant, List<Task>> grouped,
-  ) => CustomScrollView(
-    slivers: [
-      SliverPadding(
-        padding: EdgeInsets.fromLTRB(
-          20,
-          topInset,
-          20,
-          104 +
-              LuminaNavigationInset.of(context) +
-              MediaQuery.paddingOf(context).bottom,
-        ),
-        sliver: SliverMainAxisGroup(
-          slivers: [
-            if (_quadrantUndo case final undo?) ...[
-              SliverToBoxAdapter(child: _undoPanel(undo)),
-              const SliverToBoxAdapter(child: SizedBox(height: 12)),
-            ],
-            for (final q in const [
-              TaskQuadrant.urgentImportant,
-              TaskQuadrant.urgentOnly,
-              TaskQuadrant.importantOnly,
-              TaskQuadrant.neither,
-            ]) ...[
-              if (q != TaskQuadrant.urgentImportant)
-                const SliverToBoxAdapter(child: SizedBox(height: 12)),
-              _sliverQuadrant(q, grouped[q]!),
-            ],
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
-            LuminaSliverReveal(
-              visible:
-                  _holdUnclassified ||
-                  grouped[TaskQuadrant.unclassified]!.isNotEmpty,
-              sliver: _sliverQuadrant(
-                TaskQuadrant.unclassified,
-                grouped[TaskQuadrant.unclassified]!,
-                onCompletionActivityChanged: (active) {
-                  if (mounted && _holdUnclassified != active) {
-                    setState(() => _holdUnclassified = active);
-                  }
-                },
-              ),
-            ),
-            if (tasks.isEmpty)
-              const SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.only(top: 16),
-                  child: QuietLabel('从右上角记下一件事，再为它选择轻重缓急。'),
+  ) => LayoutBuilder(
+    builder: (context, constraints) =>
+        constraints.maxWidth >=
+            560 * MediaQuery.textScalerOf(context).scale(14) / 14
+        ? _wideTasks(topInset, tasks, grouped)
+        : CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  topInset,
+                  20,
+                  104 +
+                      LuminaNavigationInset.of(context) +
+                      MediaQuery.paddingOf(context).bottom,
+                ),
+                sliver: SliverMainAxisGroup(
+                  slivers: [
+                    for (final q in const [
+                      TaskQuadrant.urgentImportant,
+                      TaskQuadrant.urgentOnly,
+                      TaskQuadrant.importantOnly,
+                      TaskQuadrant.neither,
+                    ]) ...[
+                      if (q != TaskQuadrant.urgentImportant)
+                        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                      _sliverQuadrant(q, grouped[q]!),
+                    ],
+                    const SliverToBoxAdapter(child: SizedBox(height: 16)),
+                    LuminaSliverReveal(
+                      visible:
+                          _holdUnclassified ||
+                          grouped[TaskQuadrant.unclassified]!.isNotEmpty,
+                      sliver: _sliverQuadrant(
+                        TaskQuadrant.unclassified,
+                        grouped[TaskQuadrant.unclassified]!,
+                        onCompletionActivityChanged: (active) {
+                          if (mounted && _holdUnclassified != active) {
+                            setState(() => _holdUnclassified = active);
+                          }
+                        },
+                      ),
+                    ),
+                    if (tasks.isEmpty)
+                      const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.only(top: 16),
+                          child: QuietLabel('从右上角记下一件事，再为它选择轻重缓急。'),
+                        ),
+                      ),
+                  ],
                 ),
               ),
-          ],
+            ],
+          ),
+  );
+
+  Widget _wideTasks(
+    double topInset,
+    List<Task> tasks,
+    Map<TaskQuadrant, List<Task>> grouped,
+  ) => ListView(
+    padding: EdgeInsets.fromLTRB(
+      20,
+      topInset,
+      20,
+      104 +
+          LuminaNavigationInset.of(context) +
+          MediaQuery.paddingOf(context).bottom,
+    ),
+    children: [
+      Row(
+        key: const ValueKey('adaptive-task-columns'),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: ContentStack(
+              gap: 16,
+              children: [
+                _quadrant(
+                  TaskQuadrant.urgentImportant,
+                  grouped[TaskQuadrant.urgentImportant]!,
+                ),
+                _quadrant(
+                  TaskQuadrant.importantOnly,
+                  grouped[TaskQuadrant.importantOnly]!,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: ContentStack(
+              gap: 16,
+              children: [
+                _quadrant(
+                  TaskQuadrant.urgentOnly,
+                  grouped[TaskQuadrant.urgentOnly]!,
+                ),
+                _quadrant(TaskQuadrant.neither, grouped[TaskQuadrant.neither]!),
+              ],
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 16),
+      LuminaReveal(
+        visible:
+            _holdUnclassified || grouped[TaskQuadrant.unclassified]!.isNotEmpty,
+        child: _quadrant(
+          TaskQuadrant.unclassified,
+          grouped[TaskQuadrant.unclassified]!,
+          onCompletionActivityChanged: (active) {
+            if (mounted && _holdUnclassified != active) {
+              setState(() => _holdUnclassified = active);
+            }
+          },
         ),
       ),
+      if (tasks.isEmpty) const QuietLabel('从左侧记下一件事，再为它选择轻重缓急。'),
     ],
   );
 
@@ -477,31 +567,12 @@ class _EventsPageState extends ConsumerState<EventsPage> {
       TaskQuadrant.unclassified => (null, null),
     };
     try {
-      final before = await ref
+      await ref
           .read(taskRepositoryProvider)
           .setQuadrant(task.id, important: important, urgent: urgent);
-      if (mounted) {
-        setState(() {
-          _quadrantUndo = (
-            task: before,
-            important: before.important,
-            urgent: before.urgent,
-          );
-        });
-      }
     } on Object {
       if (mounted) showLuminaToast(context, '移动未能保存，请重试');
     }
-  }
-
-  Future<void> _setTaskQuadrant(
-    Task task,
-    bool? important,
-    bool? urgent,
-  ) async {
-    await ref
-        .read(taskRepositoryProvider)
-        .setQuadrant(task.id, important: important, urgent: urgent);
   }
 
   Widget _task(Task t) => LuminaSurface(

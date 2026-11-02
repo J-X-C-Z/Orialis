@@ -4559,6 +4559,18 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _categoryMeta = const VerificationMeta(
+    'category',
+  );
+  @override
+  late final GeneratedColumn<String> category = GeneratedColumn<String>(
+    'category',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('general'),
+  );
   static const VerificationMeta _statusMeta = const VerificationMeta('status');
   @override
   late final GeneratedColumn<String> status = GeneratedColumn<String>(
@@ -4689,6 +4701,7 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
     goal,
     description,
     color,
+    category,
     status,
     startDate,
     due,
@@ -4754,6 +4767,12 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
       context.handle(
         _colorMeta,
         color.isAcceptableOrUnknown(data['color']!, _colorMeta),
+      );
+    }
+    if (data.containsKey('category')) {
+      context.handle(
+        _categoryMeta,
+        category.isAcceptableOrUnknown(data['category']!, _categoryMeta),
       );
     }
     if (data.containsKey('status')) {
@@ -4868,6 +4887,10 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
         DriftSqlType.string,
         data['${effectivePrefix}color'],
       ),
+      category: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}category'],
+      )!,
       status: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}status'],
@@ -4928,6 +4951,7 @@ class Project extends DataClass implements Insertable<Project> {
   final String? goal;
   final String? description;
   final String? color;
+  final String category;
   final String status;
   final String? startDate;
   final String? due;
@@ -4946,6 +4970,7 @@ class Project extends DataClass implements Insertable<Project> {
     this.goal,
     this.description,
     this.color,
+    required this.category,
     required this.status,
     this.startDate,
     this.due,
@@ -4975,6 +5000,7 @@ class Project extends DataClass implements Insertable<Project> {
     if (!nullToAbsent || color != null) {
       map['color'] = Variable<String>(color);
     }
+    map['category'] = Variable<String>(category);
     map['status'] = Variable<String>(status);
     if (!nullToAbsent || startDate != null) {
       map['start_date'] = Variable<String>(startDate);
@@ -5011,6 +5037,7 @@ class Project extends DataClass implements Insertable<Project> {
       color: color == null && nullToAbsent
           ? const Value.absent()
           : Value(color),
+      category: Value(category),
       status: Value(status),
       startDate: startDate == null && nullToAbsent
           ? const Value.absent()
@@ -5043,6 +5070,7 @@ class Project extends DataClass implements Insertable<Project> {
       goal: serializer.fromJson<String?>(json['goal']),
       description: serializer.fromJson<String?>(json['description']),
       color: serializer.fromJson<String?>(json['color']),
+      category: serializer.fromJson<String>(json['category']),
       status: serializer.fromJson<String>(json['status']),
       startDate: serializer.fromJson<String?>(json['startDate']),
       due: serializer.fromJson<String?>(json['due']),
@@ -5066,6 +5094,7 @@ class Project extends DataClass implements Insertable<Project> {
       'goal': serializer.toJson<String?>(goal),
       'description': serializer.toJson<String?>(description),
       'color': serializer.toJson<String?>(color),
+      'category': serializer.toJson<String>(category),
       'status': serializer.toJson<String>(status),
       'startDate': serializer.toJson<String?>(startDate),
       'due': serializer.toJson<String?>(due),
@@ -5087,6 +5116,7 @@ class Project extends DataClass implements Insertable<Project> {
     Value<String?> goal = const Value.absent(),
     Value<String?> description = const Value.absent(),
     Value<String?> color = const Value.absent(),
+    String? category,
     String? status,
     Value<String?> startDate = const Value.absent(),
     Value<String?> due = const Value.absent(),
@@ -5107,6 +5137,7 @@ class Project extends DataClass implements Insertable<Project> {
     goal: goal.present ? goal.value : this.goal,
     description: description.present ? description.value : this.description,
     color: color.present ? color.value : this.color,
+    category: category ?? this.category,
     status: status ?? this.status,
     startDate: startDate.present ? startDate.value : this.startDate,
     due: due.present ? due.value : this.due,
@@ -5133,6 +5164,7 @@ class Project extends DataClass implements Insertable<Project> {
           ? data.description.value
           : this.description,
       color: data.color.present ? data.color.value : this.color,
+      category: data.category.present ? data.category.value : this.category,
       status: data.status.present ? data.status.value : this.status,
       startDate: data.startDate.present ? data.startDate.value : this.startDate,
       due: data.due.present ? data.due.value : this.due,
@@ -5164,6 +5196,7 @@ class Project extends DataClass implements Insertable<Project> {
           ..write('goal: $goal, ')
           ..write('description: $description, ')
           ..write('color: $color, ')
+          ..write('category: $category, ')
           ..write('status: $status, ')
           ..write('startDate: $startDate, ')
           ..write('due: $due, ')
@@ -5187,6 +5220,7 @@ class Project extends DataClass implements Insertable<Project> {
     goal,
     description,
     color,
+    category,
     status,
     startDate,
     due,
@@ -5209,6 +5243,7 @@ class Project extends DataClass implements Insertable<Project> {
           other.goal == this.goal &&
           other.description == this.description &&
           other.color == this.color &&
+          other.category == this.category &&
           other.status == this.status &&
           other.startDate == this.startDate &&
           other.due == this.due &&
@@ -5229,6 +5264,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
   final Value<String?> goal;
   final Value<String?> description;
   final Value<String?> color;
+  final Value<String> category;
   final Value<String> status;
   final Value<String?> startDate;
   final Value<String?> due;
@@ -5248,6 +5284,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     this.goal = const Value.absent(),
     this.description = const Value.absent(),
     this.color = const Value.absent(),
+    this.category = const Value.absent(),
     this.status = const Value.absent(),
     this.startDate = const Value.absent(),
     this.due = const Value.absent(),
@@ -5268,6 +5305,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     this.goal = const Value.absent(),
     this.description = const Value.absent(),
     this.color = const Value.absent(),
+    this.category = const Value.absent(),
     this.status = const Value.absent(),
     this.startDate = const Value.absent(),
     this.due = const Value.absent(),
@@ -5291,6 +5329,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     Expression<String>? goal,
     Expression<String>? description,
     Expression<String>? color,
+    Expression<String>? category,
     Expression<String>? status,
     Expression<String>? startDate,
     Expression<String>? due,
@@ -5311,6 +5350,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
       if (goal != null) 'goal': goal,
       if (description != null) 'description': description,
       if (color != null) 'color': color,
+      if (category != null) 'category': category,
       if (status != null) 'status': status,
       if (startDate != null) 'start_date': startDate,
       if (due != null) 'due': due,
@@ -5333,6 +5373,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     Value<String?>? goal,
     Value<String?>? description,
     Value<String?>? color,
+    Value<String>? category,
     Value<String>? status,
     Value<String?>? startDate,
     Value<String?>? due,
@@ -5353,6 +5394,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
       goal: goal ?? this.goal,
       description: description ?? this.description,
       color: color ?? this.color,
+      category: category ?? this.category,
       status: status ?? this.status,
       startDate: startDate ?? this.startDate,
       due: due ?? this.due,
@@ -5388,6 +5430,9 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     }
     if (color.present) {
       map['color'] = Variable<String>(color.value);
+    }
+    if (category.present) {
+      map['category'] = Variable<String>(category.value);
     }
     if (status.present) {
       map['status'] = Variable<String>(status.value);
@@ -5437,6 +5482,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
           ..write('goal: $goal, ')
           ..write('description: $description, ')
           ..write('color: $color, ')
+          ..write('category: $category, ')
           ..write('status: $status, ')
           ..write('startDate: $startDate, ')
           ..write('due: $due, ')
@@ -8427,6 +8473,7 @@ typedef $$ProjectsTableCreateCompanionBuilder =
       Value<String?> goal,
       Value<String?> description,
       Value<String?> color,
+      Value<String> category,
       Value<String> status,
       Value<String?> startDate,
       Value<String?> due,
@@ -8448,6 +8495,7 @@ typedef $$ProjectsTableUpdateCompanionBuilder =
       Value<String?> goal,
       Value<String?> description,
       Value<String?> color,
+      Value<String> category,
       Value<String> status,
       Value<String?> startDate,
       Value<String?> due,
@@ -8498,6 +8546,11 @@ class $$ProjectsTableFilterComposer
 
   ColumnFilters<String> get color => $composableBuilder(
     column: $table.color,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get category => $composableBuilder(
+    column: $table.category,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -8596,6 +8649,11 @@ class $$ProjectsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get category => $composableBuilder(
+    column: $table.category,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get status => $composableBuilder(
     column: $table.status,
     builder: (column) => ColumnOrderings(column),
@@ -8683,6 +8741,9 @@ class $$ProjectsTableAnnotationComposer
   GeneratedColumn<String> get color =>
       $composableBuilder(column: $table.color, builder: (column) => column);
 
+  GeneratedColumn<String> get category =>
+      $composableBuilder(column: $table.category, builder: (column) => column);
+
   GeneratedColumn<String> get status =>
       $composableBuilder(column: $table.status, builder: (column) => column);
 
@@ -8759,6 +8820,7 @@ class $$ProjectsTableTableManager
                 Value<String?> goal = const Value.absent(),
                 Value<String?> description = const Value.absent(),
                 Value<String?> color = const Value.absent(),
+                Value<String> category = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<String?> startDate = const Value.absent(),
                 Value<String?> due = const Value.absent(),
@@ -8778,6 +8840,7 @@ class $$ProjectsTableTableManager
                 goal: goal,
                 description: description,
                 color: color,
+                category: category,
                 status: status,
                 startDate: startDate,
                 due: due,
@@ -8799,6 +8862,7 @@ class $$ProjectsTableTableManager
                 Value<String?> goal = const Value.absent(),
                 Value<String?> description = const Value.absent(),
                 Value<String?> color = const Value.absent(),
+                Value<String> category = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<String?> startDate = const Value.absent(),
                 Value<String?> due = const Value.absent(),
@@ -8818,6 +8882,7 @@ class $$ProjectsTableTableManager
                 goal: goal,
                 description: description,
                 color: color,
+                category: category,
                 status: status,
                 startDate: startDate,
                 due: due,

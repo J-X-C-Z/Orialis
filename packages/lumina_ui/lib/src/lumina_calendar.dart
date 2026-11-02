@@ -8,6 +8,8 @@ class LuminaFloatingHeader extends StatelessWidget {
     required this.bodyBuilder,
     this.headerExtent,
     this.horizontalPadding = 20,
+    this.contentGap = 16,
+    this.showHeader = true,
     super.key,
   });
 
@@ -15,6 +17,8 @@ class LuminaFloatingHeader extends StatelessWidget {
   final Widget Function(BuildContext context, double topInset) bodyBuilder;
   final double? headerExtent;
   final double horizontalPadding;
+  final double contentGap;
+  final bool showHeader;
 
   @override
   Widget build(BuildContext context) {
@@ -33,14 +37,18 @@ class LuminaFloatingHeader extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        bodyBuilder(context, pageInset + extent + 24),
-        Positioned(
-          top: pageInset + 8,
-          left: horizontalPadding,
-          right: horizontalPadding,
-          height: extent,
-          child: header,
+        bodyBuilder(
+          context,
+          showHeader ? pageInset + extent + 8 + contentGap : 0,
         ),
+        if (showHeader)
+          Positioned(
+            top: pageInset + 8,
+            left: horizontalPadding,
+            right: horizontalPadding,
+            height: extent,
+            child: header,
+          ),
       ],
     );
   }
@@ -64,7 +72,7 @@ class LuminaDateNavigator extends StatelessWidget {
     children: [
       LuminaIconButton(
         tooltip: previousLabel,
-        icon: const LuminaIcon(LuminaIcons.back),
+        icon: const LuminaIcon(LuminaIcons.arrowLeft),
         onPressed: onPrevious,
       ),
       const SizedBox(width: 12),
@@ -78,7 +86,7 @@ class LuminaDateNavigator extends StatelessWidget {
       const SizedBox(width: 12),
       LuminaIconButton(
         tooltip: nextLabel,
-        icon: const LuminaIcon(LuminaIcons.chevronRight),
+        icon: const LuminaIcon(LuminaIcons.arrowRight),
         onPressed: onNext,
       ),
     ],

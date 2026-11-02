@@ -305,7 +305,7 @@ class _AihotPageState extends State<AihotPage> {
                 ),
                 itemCount: events.isEmpty ? 1 : events.length,
                 itemBuilder: (context, i) => events.isEmpty
-                    ? const LuminaEmptyState(text: '暂无 AI 热点')
+                    ? const LuminaEmptyState(card: false, text: '暂无 AI 热点')
                     : _NewsItemCard(
                         item: events[i],
                         rank:
@@ -322,7 +322,7 @@ class _AihotPageState extends State<AihotPage> {
                 title: '精选资讯',
                 child: _statusFor(items) != null
                     ? _StateCard.fromResult(items, onRetry: refresh)
-                    : const LuminaEmptyState(text: '暂无精选资讯'),
+                    : const LuminaEmptyState(card: false, text: '暂无精选资讯'),
               )
             else
               _LazyNewsSection(
@@ -462,7 +462,7 @@ class _GithubPageState extends State<GithubPage> {
                   child: _GithubBriefSummary(result: brief, period: _period),
                 ),
               if (repos.isEmpty)
-                const LuminaEmptyState(text: '当前榜单还没有数据')
+                const LuminaEmptyState(card: false, text: '当前榜单还没有数据')
               else
                 _LazyNewsSection(
                   title: '热门仓库',
@@ -503,9 +503,9 @@ class _GithubBriefSummary extends StatelessWidget {
     final highlights = data['highlights'];
     final hasBrief = data.isNotEmpty;
     return LuminaSurface(
-      depth: LuminaSurfaceDepth.recessed,
+      depth: LuminaSurfaceDepth.normal,
       radius: LuminaRadius.card,
-      padding: const EdgeInsets.all(16),
+      padding: LuminaCardMetrics.contentInsets,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -588,6 +588,57 @@ class _BriefPoints extends StatelessWidget {
   );
 }
 
+class CampusNewsPage extends StatelessWidget {
+  const CampusNewsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) => _NewsRequest(
+    paths: const ['campus/items'],
+    builder: (context, results, refresh) {
+      final result = results.single;
+      final items = (result.payload?.items ?? const <Map<String, dynamic>>[])
+          .map(
+            (item) => <String, dynamic>{
+              ...item,
+              'status': switch (item['contentStatus']) {
+                'title_only' => '仅标题',
+                'pending' || 'summary_only' => '正文待补全',
+                'failed' || 'fetch_error' => '抓取失败',
+                _ => _str(item['content']) == null ? '正文待补全' : '正文已同步',
+              },
+            },
+          )
+          .toList();
+      return RefreshIndicator(
+        onRefresh: refresh,
+        child: _ResponsiveContent(
+          children: [
+            if (_statusFor(result) != null)
+              _StateCard.fromResult(result, onRetry: refresh)
+            else
+              _LazyNewsSection(
+                title: '校园信息站',
+                leading: result.payload == null
+                    ? null
+                    : _UpdateNote(
+                        payload: result.payload!,
+                        offline: result.kind == NewsLoadKind.offline,
+                      ),
+                itemCount: items.isEmpty ? 1 : items.length,
+                itemBuilder: (context, index) => items.isEmpty
+                    ? const LuminaEmptyState(card: false, text: '信息站暂无内容')
+                    : _NewsItemCard(
+                        item: items[index],
+                        onTap: () => _openArticle(context, items[index]),
+                      ),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 class ProjectsNewsPage extends StatelessWidget {
   const ProjectsNewsPage({super.key});
   @override
@@ -621,7 +672,10 @@ class ProjectsNewsPage extends StatelessWidget {
                     : null,
                 itemCount: projects.isEmpty ? 1 : projects.length,
                 itemBuilder: (context, index) => projects.isEmpty
-                    ? const LuminaEmptyState(text: '尚未收到该账号的项目秘书报告')
+                    ? const LuminaEmptyState(
+                        card: false,
+                        text: '尚未收到该账号的项目秘书报告',
+                      )
                     : _ProjectCard(
                         project: projects[index],
                         onTap: () => _openProject(context, projects[index]),
@@ -813,7 +867,7 @@ class _LoadingState extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 14),
             child: LuminaSurface(
-              padding: const EdgeInsets.all(16),
+              padding: LuminaCardMetrics.contentInsets,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -848,7 +902,7 @@ class _SkeletonBar extends StatelessWidget {
     height: 10,
     decoration: BoxDecoration(
       color: color,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(LuminaRadius.control),
     ),
   );
 }
@@ -877,7 +931,13 @@ class _StateCard extends StatelessWidget {
   Widget build(BuildContext context) {
     if (kind == NewsLoadKind.loading) {
       return const LuminaSurface(
-        child: Padding(padding: EdgeInsets.all(16), child: Text('正在加载…')),
+        child: Row(
+          children: [
+            LuminaProgress(),
+            SizedBox(width: LuminaSpacing.item),
+            Text('正在加载…'),
+          ],
+        ),
       );
     }
     final title = switch (kind) {
@@ -887,9 +947,9 @@ class _StateCard extends StatelessWidget {
       _ => '暂时无法加载',
     };
     return LuminaSurface(
-      depth: LuminaSurfaceDepth.recessed,
+      depth: LuminaSurfaceDepth.normal,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: LuminaCardMetrics.contentInsets,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -987,12 +1047,12 @@ class _NewsItemCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: LuminaSurface(
-        depth: LuminaSurfaceDepth.recessed,
+        depth: LuminaSurfaceDepth.normal,
         onTap: onTap,
-        radius: 16,
+        radius: LuminaRadius.card,
         liquidGlass: false,
 
-        padding: const EdgeInsets.all(16),
+        padding: LuminaCardMetrics.contentInsets,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1009,7 +1069,7 @@ class _NewsItemCard extends StatelessWidget {
                     title,
                     maxLines: accent ? 3 : 2,
                     overflow: TextOverflow.ellipsis,
-                    style: LuminaTheme.of(context).textTheme.cardTitle,
+                    style: LuminaTheme.of(context).textTheme.titleSmall,
                   ),
                 ),
                 if (heat != null)
@@ -1021,15 +1081,15 @@ class _NewsItemCard extends StatelessWidget {
             ),
             if (summary != null)
               Padding(
-                padding: const EdgeInsets.only(top: 7),
+                padding: const EdgeInsets.only(top: LuminaSpacing.item),
                 child: Text(
                   summary,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
-                  style: LuminaTheme.of(context).textTheme.bodySmall,
+                  style: LuminaTheme.of(context).textTheme.bodyMedium,
                 ),
               ),
-            const SizedBox(height: 8),
+            const SizedBox(height: LuminaSpacing.item),
             Wrap(
               spacing: 12,
               runSpacing: 4,
@@ -1087,12 +1147,12 @@ class _RepoCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: LuminaSurface(
-        depth: LuminaSurfaceDepth.recessed,
-        radius: 16,
+        depth: LuminaSurfaceDepth.normal,
+        radius: LuminaRadius.card,
         liquidGlass: false,
 
         onTap: onTap,
-        padding: const EdgeInsets.all(16),
+        padding: LuminaCardMetrics.contentInsets,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1108,22 +1168,22 @@ class _RepoCard extends StatelessWidget {
                     title,
                     maxLines: ranking <= 3 ? 3 : 2,
                     overflow: TextOverflow.ellipsis,
-                    style: LuminaTheme.of(context).textTheme.cardTitle,
+                    style: LuminaTheme.of(context).textTheme.titleSmall,
                   ),
                 ),
               ],
             ),
             if (summary != null)
               Padding(
-                padding: const EdgeInsets.only(top: 7),
+                padding: const EdgeInsets.only(top: LuminaSpacing.item),
                 child: Text(
                   summary,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
-                  style: LuminaTheme.of(context).textTheme.bodySmall,
+                  style: LuminaTheme.of(context).textTheme.bodyMedium,
                 ),
               ),
-            const SizedBox(height: 8),
+            const SizedBox(height: LuminaSpacing.item),
             Wrap(
               spacing: 12,
               runSpacing: 4,
@@ -1167,11 +1227,11 @@ class _ProjectCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: LuminaSurface(
-        depth: LuminaSurfaceDepth.recessed,
-        radius: 16,
+        depth: LuminaSurfaceDepth.normal,
+        radius: LuminaRadius.card,
         liquidGlass: false,
         onTap: onTap,
-        padding: const EdgeInsets.all(16),
+        padding: LuminaCardMetrics.contentInsets,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1180,7 +1240,7 @@ class _ProjectCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     name,
-                    style: LuminaTheme.of(context).textTheme.cardTitle,
+                    style: LuminaTheme.of(context).textTheme.titleSmall,
                   ),
                 ),
                 if (updates != null) _MetaLabel('$updates 项更新'),
@@ -1194,7 +1254,7 @@ class _ProjectCard extends StatelessWidget {
                   _str(project['summary'])!,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: LuminaTheme.of(context).textTheme.bodySmall,
+                  style: LuminaTheme.of(context).textTheme.bodyMedium,
                 ),
               ),
             if (project['completed'] is List)
@@ -1286,10 +1346,10 @@ class _GenericReportCard extends StatelessWidget {
         '${data['attentionCount']} 项待关注',
     ].join(' · ');
     return LuminaSurface(
-      depth: LuminaSurfaceDepth.recessed,
-      radius: 16,
+      depth: LuminaSurfaceDepth.normal,
+      radius: LuminaRadius.card,
       liquidGlass: false,
-      padding: const EdgeInsets.all(16),
+      padding: LuminaCardMetrics.contentInsets,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1334,14 +1394,14 @@ class _ProjectDailySummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) {
-      return const LuminaEmptyState(text: '尚未发布今日项目总报');
+      return const LuminaEmptyState(card: false, text: '尚未发布今日项目总报');
     }
     final detail =
         _str(data['summary']) ??
         _str(data['overview']) ??
         _str(data['content']);
     return LuminaSurface(
-      depth: LuminaSurfaceDepth.recessed,
+      depth: LuminaSurfaceDepth.normal,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1402,8 +1462,16 @@ class _MetaLabel extends StatelessWidget {
   const _MetaLabel(this.text);
   final String text;
   @override
-  Widget build(BuildContext context) =>
-      Text(text, style: LuminaTheme.of(context).textTheme.bodySmall);
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: LuminaTheme.of(context).colors.accentSoft,
+      borderRadius: BorderRadius.circular(LuminaControlSize.capsuleRadius),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: Text(text, style: LuminaTheme.of(context).textTheme.labelSmall),
+    ),
+  );
 }
 
 void _openAihotEvent(BuildContext context, Map<String, dynamic> item) {
@@ -1884,7 +1952,7 @@ class _RepositoryDetail extends StatelessWidget {
             child: SafeMarkdownView(source: readme),
           ),
         if (content == null && summary == null && readme == null)
-          const LuminaEmptyState(text: '暂未提供仓库正文，可查看来源原文。', card: false),
+          const LuminaEmptyState(card: false, text: '暂未提供仓库正文，可查看来源原文。'),
       ],
     );
   }
@@ -2021,7 +2089,8 @@ class _ProjectReportsDetail extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       if (payload != null) _UpdateNote(payload: payload!, offline: offline),
-      if (reports.isEmpty) const LuminaEmptyState(text: '尚未收到项目秘书报告'),
+      if (reports.isEmpty)
+        const LuminaEmptyState(card: false, text: '尚未收到项目秘书报告'),
       for (var i = 0; i < reports.length; i++)
         _ProjectReportEntry(wrapper: reports[i], title: '$title ${i + 1}'),
     ],
@@ -2171,6 +2240,13 @@ class _StaticDetailPage extends StatelessWidget {
     body: _ResponsiveContent(
       children: [
         _DataDetail(data: data),
+        if (_str(data['contentStatus']) != null && _str(data['status']) != null)
+          Text(_str(data['status'])!),
+        if (_str(data['content']) != null)
+          LuminaSection(
+            title: '正文',
+            child: SafeMarkdownView(source: _str(data['content'])!),
+          ),
         if (link != null) _ExternalLink(label: '打开原文链接', url: link),
       ],
     ),
@@ -2346,7 +2422,7 @@ class _JsonContent extends StatelessWidget {
         )
         .toList();
     if (entries.isEmpty && readme == null) {
-      return const LuminaEmptyState(text: '服务端暂未提供已整理的内容', card: false);
+      return const LuminaEmptyState(card: false, text: '服务端暂未提供已整理的内容');
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

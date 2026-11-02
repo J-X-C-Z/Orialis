@@ -74,6 +74,13 @@ void main() {
             .completed,
         isTrue,
       );
+      expect(find.text('完成目录'), findsNothing);
+      expect(find.text('已完成 · 1'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('completed-milestones-toggle')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('完成目录'), findsOneWidget);
 
       await tester.tap(secondRow);
       await tester.pumpAndSettle();

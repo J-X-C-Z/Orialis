@@ -56,7 +56,7 @@ internal object SystemSnapshot {
     } catch (_: Exception) { null }
 
     fun validRoute(route: String): Boolean {
-        if (route in setOf("/today", "/calendar", "/events")) return true
+        if (route in setOf("/today", "/calendar", "/events", "/system")) return true
         if (Regex("^/chat\\?conversationId=[A-Za-z0-9_.~+%-]{1,512}(?:&messageId=[A-Za-z0-9_.~+%-]{1,512})?$").matches(route)) return true
         // Existing read-only Schedule detail route, optionally carrying its local date.
         return Regex("^/calendar/schedule/(?:[A-Za-z0-9_.~+-]|%[A-Fa-f0-9]{2})+(?:\\?date=[0-9TZ:+.%\\-]+)?$").matches(route)
@@ -93,14 +93,25 @@ internal object SystemSnapshot {
         val widget = arguments["widget"] as? Map<*, *> ?: emptyMap<Any, Any>()
         val widgetRoute = widget["route"] as? String ?: "/today"
         require(widgetRoute in setOf("/today", "/calendar", "/events")) { "Invalid widget route" }
-        val lines = JSONArray()
-        (widget["lines"] as? List<*>)?.take(5)?.forEach { lines.put((it as? String ?: "").take(256)) }
+        fun lines(key: String): JSONArray = JSONArray().apply {
+            (widget[key] as? List<*>)?.take(12)?.forEach { put((it as? String ?: "").take(256)) }
+        }
+        val calendarDays = JSONArray().apply {
+            (widget["calendarDays"] as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }
+                ?.filter { it in 1..31 }?.distinct()?.sorted()?.forEach { put(it) }
+        }
         val next = JSONObject().put("scope", scope).put("enabled", arguments["enabled"] == true)
             .put("liveSchedules", ScheduleLiveTracking.validateRows(arguments["liveSchedules"]))
             .put("reminders", reminders).put("widget", JSONObject()
                 .put("date", (widget["date"] as? String ?: "").take(32))
                 .put("title", (widget["title"] as? String ?: "今日").take(128))
-                .put("lines", lines).put("route", widgetRoute))
+                .put("lines", lines("lines")).put("route", widgetRoute)
+                .put("taskLines", lines("taskLines")).put("scheduleLines", lines("scheduleLines"))
+                .put("taskCount", ((widget["taskCount"] as? Number)?.toInt() ?: 0).coerceAtLeast(0))
+                .put("todayTaskCount", ((widget["todayTaskCount"] as? Number)?.toInt() ?: 0).coerceAtLeast(0))
+                .put("completedCount", ((widget["completedCount"] as? Number)?.toInt() ?: 0).coerceAtLeast(0))
+                .put("scheduleCount", ((widget["scheduleCount"] as? Number)?.toInt() ?: 0).coerceAtLeast(0))
+                .put("calendarDays", calendarDays))
         val previous = read(context)
         writeUnlocked(context, next)
         // Persist first: a receiver racing this change must only see the new identity.
@@ -278,7 +289,7 @@ internal object SystemSnapshot {
         val scope = intent.getStringExtra(SCOPE) ?: ""
         if (!validRoute(route)) return null
         if (scope.isBlank()) {
-            if (route !in setOf("/today", "/calendar", "/events")) return null
+            if (route !in setOf("/today", "/calendar", "/events", "/system")) return null
         } else if (read(context)?.optString("scope") != scope) return null
         // Dart also checks its current authenticated scope before opening any detail.
         return mapOf("route" to route, "scope" to scope)

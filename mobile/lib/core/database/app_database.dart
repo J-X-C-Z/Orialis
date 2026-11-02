@@ -65,6 +65,7 @@ class Projects extends Table {
   TextColumn get goal => text().nullable()();
   TextColumn get description => text().nullable()();
   TextColumn get color => text().nullable()();
+  TextColumn get category => text().withDefault(const Constant('general'))();
   TextColumn get status => text().withDefault(const Constant('active'))();
   TextColumn get startDate => text().nullable()();
   TextColumn get due => text().nullable()();
@@ -188,7 +189,7 @@ class AppDatabase extends _$AppDatabase {
   }) : super(executor ?? _openConnection(name, directoryProvider));
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -387,6 +388,13 @@ class AppDatabase extends _$AppDatabase {
           'calendar_events',
           'important',
           () => m.addColumn(calendarEvents, calendarEvents.important),
+        );
+      }
+      if (from < 11) {
+        await addColumnIfMissing(
+          'projects',
+          'category',
+          () => m.addColumn(projects, projects.category),
         );
       }
     },

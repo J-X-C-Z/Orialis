@@ -1,5 +1,7 @@
+import 'dart:convert';
+
 import 'package:drift/native.dart';
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide isNull;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orialis_mobile/core/database/app_database.dart';
 import 'package:orialis_mobile/features/projects/data/project_repository.dart';
@@ -39,6 +41,80 @@ void main() {
     );
     expect(mutations.every((row) => row.payloadJson.isNotEmpty), isTrue);
   });
+
+  test(
+    'new projects default to general and not_started in row and outbox',
+    () async {
+      final defaults = await repository.createProject(name: 'Defaults');
+      expect(defaults.category, 'general');
+      expect(defaults.status, 'not_started');
+
+      final custom = await repository.createProject(
+        name: 'Course',
+        category: 'course',
+        status: 'active',
+        description: 'Spring term',
+        startDate: '2026-02-01',
+        due: '2026-06-30',
+      );
+      final payload = jsonDecode(
+        (await (database.select(
+              database.outboxMutations,
+            )..where((row) => row.entityId.equals(custom.id))).getSingle())
+            .payloadJson,
+      ) as Map<String, dynamic>;
+      expect(payload, containsPair('category', 'course'));
+      expect(payload, containsPair('status', 'active'));
+      expect(payload, containsPair('description', 'Spring term'));
+      expect(payload, containsPair('startDate', '2026-02-01'));
+      expect(payload, containsPair('due', '2026-06-30'));
+    },
+  );
+
+  test(
+    'project updates preserve omitted fields and allow explicit clears',
+    () async {
+      final project = await repository.createProject(
+        name: 'Project',
+        category: 'health',
+        status: 'active',
+        description: 'Keep',
+        startDate: '2026-01-01',
+        due: '2026-03-01',
+      );
+
+      await repository.updateProject(
+        project,
+        name: 'Project renamed',
+        goal: project.goal,
+      );
+      var stored = await (database.select(
+        database.projects,
+      )..where((row) => row.id.equals(project.id))).getSingle();
+      expect(stored.category, 'health');
+      expect(stored.status, 'active');
+      expect(stored.description, 'Keep');
+      expect(stored.startDate, '2026-01-01');
+      expect(stored.due, '2026-03-01');
+
+      await repository.updateProject(
+        stored,
+        name: stored.name,
+        goal: stored.goal,
+        category: 'future_category',
+        status: 'not_started',
+        description: const Value(null),
+      );
+      stored = await (database.select(
+        database.projects,
+      )..where((row) => row.id.equals(project.id))).getSingle();
+      expect(stored.category, 'future_category');
+      expect(stored.status, 'not_started');
+      expect(stored.description, isNull);
+      expect(stored.startDate, '2026-01-01');
+      expect(stored.due, '2026-03-01');
+    },
+  );
 
   test(
     'next action prefers explicit incomplete task then stable due order',

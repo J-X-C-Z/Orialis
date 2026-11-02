@@ -122,7 +122,7 @@ class SystemIntegrationController {
     final route = arguments['route'];
     if (route is! String) return;
     if ((arguments['scope'] == null || arguments['scope'] == '') &&
-        const ['/today', '/events', '/calendar'].contains(route)) {
+        const ['/today', '/events', '/calendar', '/system'].contains(route)) {
       onRoute?.call(route);
       return;
     }
@@ -304,7 +304,8 @@ class SystemIntegrationController {
   Future<bool?> requestNotifications() => _invoke<bool>('requestNotifications');
   Future<void> openNotificationSettings() =>
       _invoke<void>('openNotificationSettings');
-  Future<bool?> requestPinWidget() => _invoke<bool>('requestPinWidget');
+  Future<bool?> requestPinWidget({String kind = 'today'}) =>
+      _invoke<bool>('requestPinWidget', {'kind': kind});
   Future<bool?> previewReminder() => _invoke<bool>('previewReminder');
   Future<bool> notifyChatMessage(
     Map<String, dynamic> payload, {

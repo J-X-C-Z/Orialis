@@ -127,6 +127,26 @@ void main() {
         expect(chat.key, const ValueKey(('desktop-alice', 'desktop-existing')));
         expect(find.byType(DesktopInsightsPanel), findsNothing);
         expect(find.byKey(const ValueKey('desktop-sidebar')), findsOneWidget);
+        for (final width in [1024.0, 1280.0]) {
+          tester.view.physicalSize = Size(width, 900);
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const ValueKey('chat-desktop-layout')),
+            findsOneWidget,
+          );
+          final list = find.byKey(const ValueKey('chat-conversation-sidebar'));
+          expect(tester.getSize(list).width, inInclusiveRange(240, 300));
+          expect(tester.takeException(), isNull);
+        }
+        tester.view.physicalSize = const Size(720, 900);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('chat-desktop-layout')), findsNothing);
+        expect(
+          find.byKey(const ValueKey('chat-narrow-layout')),
+          findsOneWidget,
+        );
+        tester.view.physicalSize = const Size(1440, 900);
+        await tester.pumpAndSettle();
         router.go('/memory');
         await tester.pumpAndSettle();
         final memory = tester.widget<MemoryPage>(find.byType(MemoryPage));

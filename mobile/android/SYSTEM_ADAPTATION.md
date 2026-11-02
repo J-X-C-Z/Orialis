@@ -1,14 +1,28 @@
 # Android system adaptation
 
 The existing Flutter host keeps Wear and haptics. The `top.jxcz.orialis/system`
-channel adds Android reminders, a native today widget, three launcher shortcuts,
+channel adds Android reminders, eleven native widgets, three launcher shortcuts,
 and scoped notification/widget navigation. No external SDK or background Flutter
 engine is used. This is source implementation; build and device acceptance must
 be reported separately.
 
+## Native Lumina material
+
+The eleven widgets use Lumina's neutral neumorphic color endpoints from
+`packages/lumina_ui/lib/src/app_theme.dart` and shared radii from
+`packages/lumina_tokens/lumina.v1.json`. Regenerate native resources with
+`python scripts/generate_android_widget_tokens.py`; `--check` detects drift.
+Light/dark drawable layers approximate the top-left light, raised card and
+recessed rows without an offscreen Flutter engine or live backdrop blur.
+Android 12 wallpaper-color overrides are intentionally absent. Native small
+accent labels slightly deepen the light accent to maintain 4.5:1 contrast.
+`python -m unittest scripts.repo_health.tests.test_android_widget_tokens`
+checks material tokens, text contrast and shortcut touch targets.
+
 ## Channel contract
 
-- `status`: `notificationsEnabled`, `exactAlarmsEnabled`, `widgetSupported`
+- `status`: `notificationsEnabled`, `exactAlarmsEnabled`, `widgetSupported`,
+  `pinWidgetSupported`, `widgetCount` (all eleven provider types)
   (launcher supports the pin request), `manufacturer`, `model`, `sdkInt`,
   `xiaomiAppIdConfigured`, `focusBusinessConfigured`, `focusProtocolVersion`,
   `focusPermission`/`hasFocusPermission`. Xiaomi provider queries run off the UI
@@ -19,7 +33,7 @@ be reported separately.
 - `openNotificationSettings`, `openExactAlarmSettings`: open this app's settings
   when invoked by a user action. Exact alarm permission is never automatically
   requested.
-- `requestPinWidget`: returns whether the launcher accepted a widget pin request;
+- `requestPinWidget`: accepts `{kind: <catalog ID>}` (default `today`) and returns whether the launcher accepted a widget pin request;
   this is not proof that the user completed placement. Users can also add the
   widget through their launcher's widget picker.
 - `updateSnapshot`: requires a nonempty account identity hash `scope`, `enabled`
@@ -29,7 +43,10 @@ be reported separately.
   Task reminders additionally carry `kind: task`, `due`, `dueTime`, and
   `reminderMinutes` so a timezone change can recompute their wall-clock instant.
   Widget has `date` (`yyyy-MM-dd` in the phone's timezone), `title`, `lines`
-  (maximum 5), `route`. Call only after user opt-in and a verified identity; never
+  (maximum 12), `route`, `taskLines`, `scheduleLines` (each maximum 12),
+  `taskCount`, `todayTaskCount`, `completedCount`, `scheduleCount`, and
+  `calendarDays` (unique day numbers in the current month).
+  Call only after user opt-in and a verified identity; never
   send a token, credentials, or unscoped shared database contents.
 - `clear`: removes projection, cancels all known alarms/notifications and clears
   widget content. Call on logout, identity changes, and when all system features
@@ -47,7 +64,7 @@ be reported separately.
   Hot launch calls Dart `openRoute` with the same map. Dart must reject a nonempty
   scope that differs from its current authenticated identity. The native host
   also compares it to the projection. Launcher shortcuts carry an empty scope
-  and can only navigate to `/today`, `/calendar`, `/events`.
+  and can only navigate to `/today`, `/calendar`, `/events`, `/system`.
 
 ## Persistence, delivery and privacy
 

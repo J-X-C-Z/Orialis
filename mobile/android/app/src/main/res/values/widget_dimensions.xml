@@ -1,0 +1,6 @@
+<!-- Generated from packages/lumina_tokens/lumina.v1.json. -->
+<resources>
+    <dimen name="widget_radius_card">24dp</dimen>
+    <dimen name="widget_radius_control">18dp</dimen>
+    <dimen name="widget_radius_attachment">14dp</dimen>
+</resources>

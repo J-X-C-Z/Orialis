@@ -244,12 +244,18 @@ class _LuminaSurfaceState extends State<LuminaSurface>
           LuminaSurfaceDepth.recessed => colors.recessedSurface,
         };
     final transparent = tint.a == 0 && !glass;
-    // Live backdrop blur stays off by default. Opt-in via [LuminaSurface.backdrop]
-    // for persistent chrome only. Performance mode uses painted frost even if
-    // a surrounding app has configured a higher shared blur budget.
+    // Explicit frosted actions retain a small blur like the floating navigation.
     final blur =
-        widget.backdrop && glass && !opaque && !theme.highPerformanceMode
-        ? LuminaBlurPolicy.instance.chrome
+        widget.backdrop &&
+            glass &&
+            !opaque &&
+            (!theme.highPerformanceMode || widget.frosted)
+        ? theme.highPerformanceMode
+              ? LuminaBlurPolicy.instance.chrome.copyWith(
+                  level: LuminaBlurLevel.blurS,
+                  backend: LuminaBlurBackend.downsampleGaussian,
+                )
+              : LuminaBlurPolicy.instance.chrome
         : LuminaBlurConfig.disabled;
     final backdrop = widget.backdrop && glass && !opaque && blur.enabled;
     final blurFilter = backdrop ? LuminaBlurFilters.forConfig(blur) : null;
@@ -344,6 +350,7 @@ class _LuminaSurfaceState extends State<LuminaSurface>
       // Clip the backdrop only, allowing the material shadow to breathe.
       content = Stack(
         fit: StackFit.passthrough,
+        clipBehavior: Clip.none,
         children: [
           Positioned.fill(
             child: ClipRRect(
@@ -623,6 +630,7 @@ class LuminaPageScaffold extends StatelessWidget {
     this.actions = const [],
     this.bottomActions,
     this.floatingActionButton,
+    this.showHeader = true,
     this.padding = const EdgeInsets.fromLTRB(20, 12, 20, 24),
     super.key,
   });
@@ -633,6 +641,7 @@ class LuminaPageScaffold extends StatelessWidget {
   final Widget body;
   final Widget? bottomActions, floatingActionButton;
   final EdgeInsetsGeometry padding;
+  final bool showHeader;
   @override
   Widget build(BuildContext context) => ColoredBox(
     color: LuminaTheme.of(context).colors.paper,
@@ -658,13 +667,14 @@ class LuminaPageScaffold extends StatelessWidget {
                   children: [
                     Positioned.fill(
                       child: LuminaPageHeaderInset(
-                        inset: headerHeight + 12,
+                        inset: showHeader ? headerHeight + 12 : 0,
                         child: MediaQuery(
                           data: MediaQuery.of(context).copyWith(
                             padding: EdgeInsets.only(
                               bottom:
                                   LuminaNavigationInset.of(context) +
-                                  MediaQuery.paddingOf(context).bottom,
+                                  MediaQuery.paddingOf(context).bottom +
+                                  (floatingActionButton == null ? 0 : 80),
                             ),
                           ),
                           child: Padding(
@@ -676,18 +686,19 @@ class LuminaPageScaffold extends StatelessWidget {
                         ),
                       ),
                     ),
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      height: headerHeight,
-                      child: LuminaTopBar(
-                        title: title,
-                        subtitle: subtitle,
-                        leading: leading,
-                        actions: actions,
+                    if (showHeader)
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: headerHeight,
+                        child: LuminaTopBar(
+                          title: title,
+                          subtitle: subtitle,
+                          leading: leading,
+                          actions: actions,
+                        ),
                       ),
-                    ),
                     if (floatingActionButton != null)
                       Positioned(
                         right: 20,
@@ -1115,6 +1126,7 @@ class LuminaChatBubble extends StatelessWidget {
           ),
           margin: const EdgeInsets.only(bottom: 12),
           child: LuminaSurface(
+            depth: LuminaSurfaceDepth.raised,
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
             color: isUser ? LuminaTheme.of(context).colors.accentSoft : null,
             radius: 22,

@@ -154,6 +154,7 @@ class _TaskEditorState extends ConsumerState<_TaskEditor> {
         onChanged: (v) => setState(() => _important = v),
       ),
       const QuietLabel('紧急程度'),
+      const QuietLabel('AI 会结合日程占用、任务内容和截止时间动态评估紧急程度。可在备注中补充工作量与进度。'),
       LuminaSegmented<TriStateChoice>(
         items: const {
           TriStateChoice.unset: '未分类',

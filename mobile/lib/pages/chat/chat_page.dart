@@ -15,11 +15,13 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/app.dart';
+import '../shared/adaptive_layout.dart';
+import '../shared/glass_segmented.dart' show OrialisControlCard;
 import '../../app/design/chat_symbols.dart';
 
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
-    show LuminaConversationVisibility, OrialisPageScaffold;
+    show DesktopLayoutScope, LuminaConversationVisibility, OrialisPageScaffold;
 
 import '../../core/database/app_database.dart';
 import '../../core/config/app_config.dart';
@@ -291,7 +293,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
   final _attachmentBridge = AttachmentBridge();
   final List<AttachmentRecord> _attachments = [];
   final Map<String, AgentEventStore> _conversationEvents = {};
-  final _recentModels = RecentHermesModels();
+  late final _recentModels = RecentHermesModels(
+    accountScope: () async => ref.read(desktopDatabaseNameProvider),
+  );
   final Map<String, Completer<CommandResult?>> _commandWaiters = {};
   final Map<String, String> _pendingModelSwitches = {};
   final Map<String, String> _reasoningByConversation = {};
@@ -313,6 +317,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
   bool _imeAdjusting = false;
   bool _imeAdjustmentScheduled = false;
   double _lastImeInset = 0;
+  Size? _lastViewSize;
   bool _positioningLatest = true;
   int _alignRetries = 0;
   String? _messageSignature;
@@ -366,10 +371,29 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _lastViewSize ??= View.of(context).physicalSize;
+  }
+
+  @override
   void didChangeMetrics() {
     if (!mounted) return;
-    final inset = View.of(context).viewInsets.bottom;
-    if (inset == _lastImeInset) return;
+    final view = View.of(context);
+    final inset = view.viewInsets.bottom;
+    final resized = view.physicalSize != _lastViewSize;
+    if (inset == _lastImeInset && !resized) return;
+    final position = _scrollController.hasClients
+        ? _scrollController.position
+        : null;
+    final historyFraction =
+        resized &&
+            !_followLatest &&
+            position != null &&
+            position.maxScrollExtent > 0
+        ? (position.pixels / position.maxScrollExtent).clamp(0.0, 1.0)
+        : null;
+    _lastViewSize = view.physicalSize;
     _lastImeInset = inset;
     _imeAdjusting = true;
     // A native keyboard animation can report several insets in one frame.
@@ -385,6 +409,15 @@ class _ChatPageState extends ConsumerState<ChatPage>
           _scrollController.jumpTo(position.maxScrollExtent);
         }
         _queueLatest();
+      }
+      if (historyFraction != null &&
+          !_followLatest &&
+          !_userDragging &&
+          _scrollController.hasClients) {
+        // Reflow changes line wrapping; keep the same part of history in view.
+        _scrollController.jumpTo(
+          historyFraction * _scrollController.position.maxScrollExtent,
+        );
       }
       _imeAdjusting = false;
     });
@@ -957,7 +990,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
     );
   }
 
-  Widget _conversationList() => OrialisPageScaffold(
+  Widget _conversationList({bool embedded = false}) => OrialisPageScaffold(
+    adaptiveHeader: !embedded,
     title: '聊天',
     floatingActionButton: ChatShortcutButton(
       tooltip: '新建对话；长按与默认设备聊天',
@@ -1030,265 +1064,246 @@ class _ChatPageState extends ConsumerState<ChatPage>
                   deviceLabel.toLowerCase().contains(query));
         }).toList();
         final pinnedCount = conversations.where((item) => item.pinned).length;
-        return Column(
-          children: [
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                36,
-                LuminaPageHeaderInset.of(context) + 8,
-                36,
-                6,
-              ),
-              child: Row(
-                key: const ValueKey('conversation-toolbar'),
-                children: [
-                  Expanded(
-                    child: LuminaTextField(
-                      key: const ValueKey('conversation-search'),
-                      controller: _conversationSearch,
-                      hintText: '搜索会话或设备',
-                      onChanged: (_) => setState(() {}),
-                    ),
+        return LuminaFloatingHeader(
+          key: const ValueKey('conversation-floating-controls'),
+          headerExtent: OrialisControlCard.extentOf(context) + 4,
+          contentGap: 6,
+          header: OrialisControlCard(
+            key: const ValueKey('conversation-controls-card'),
+            child: Row(
+              key: const ValueKey('conversation-toolbar'),
+              children: [
+                Expanded(
+                  child: LuminaTextField(
+                    key: const ValueKey('conversation-search'),
+                    radius: LuminaControlSize.capsuleRadius,
+                    controller: _conversationSearch,
+                    hintText: '搜索会话或设备',
+                    onChanged: (_) => setState(() {}),
                   ),
-                  const SizedBox(width: 8),
-                  LuminaButton(
-                    key: const ValueKey('conversation-filters'),
-                    onPressed: () => _showConversationFilters(
-                      devices,
-                      summaries,
-                      allConversations.length,
-                    ),
-                    child: Text(
-                      _conversationDeviceFilter == null &&
-                              _conversationStateFilter == null
-                          ? '筛选'
-                          : '筛选 ${(_conversationDeviceFilter != null ? 1 : 0) + (_conversationStateFilter != null ? 1 : 0)}',
-                    ),
+                ),
+                const SizedBox(width: 8),
+                LuminaButton(
+                  key: const ValueKey('conversation-filters'),
+                  onPressed: () => _showConversationFilters(
+                    devices,
+                    summaries,
+                    allConversations.length,
                   ),
-                ],
-              ),
+                  child: Text(
+                    _conversationDeviceFilter == null &&
+                            _conversationStateFilter == null
+                        ? '筛选'
+                        : '筛选 ${(_conversationDeviceFilter != null ? 1 : 0) + (_conversationStateFilter != null ? 1 : 0)}',
+                  ),
+                ),
+              ],
             ),
-            Expanded(
-              child: conversations.isEmpty
-                  ? const LuminaEmptyState(text: '没有匹配的会话，试试其他搜索或筛选。')
-                  : ReorderableList(
-                      // Keep the viewport full width so row shadows are not
-                      // clipped into a fixed rectangular frame around the list.
-                      padding: EdgeInsets.fromLTRB(
-                        20,
-                        0,
-                        20,
-                        MediaQuery.paddingOf(context).bottom + 24,
-                      ),
-                      itemCount: conversations.length,
-                      onReorderItem: (oldIndex, newIndex) async {
-                        if (filtering ||
-                            oldIndex >= pinnedCount ||
-                            newIndex >= pinnedCount) {
-                          return;
-                        }
-                        final ids = conversations
-                            .take(pinnedCount)
-                            .map((item) => item.id)
-                            .toList();
-                        ids.insert(newIndex, ids.removeAt(oldIndex));
-                        try {
-                          await widget.repository.reorderPinnedConversations(
-                            ids,
-                          );
-                        } on Object {
-                          if (context.mounted) {
-                            showLuminaToast(context, '排序未能保存，请重试');
-                          }
-                        }
-                      },
-                      itemBuilder: (context, index) {
-                        final conversation = conversations[index];
-                        return Consumer(
-                          key: ValueKey(conversation.id),
-                          builder: (context, ref, _) {
-                            final latest = ref
-                                .watch(
-                                  chatLatestMessageProvider((
-                                    repository: widget.repository,
-                                    conversationId: conversation.id,
-                                  )),
-                                )
-                                .value;
-                            final preview =
-                                latest == null || !isVisibleChatMessage(latest)
-                                ? null
-                                : _readableMessage(latest)
-                                      .replaceAll('\n', ' ')
-                                      .trim();
-                            final deviceLabel =
-                                devices[_visibleTargets[conversation.id]] ??
-                                '本地历史';
-                            final status = summaries[conversation.id]!.label;
-                            final theme = LuminaTheme.of(context);
-                            final colors = theme.colors;
-                            final deviceId = _visibleTargets[conversation.id];
-                            final deviceColor =
-                                deviceId == service.azureDeviceId
-                                ? colors.tone(
-                                    const Color(0xFF245EAB),
-                                    const Color(0xFF8AB4F8),
-                                  )
-                                : deviceId == service.macDeviceId
-                                ? colors.tone(
-                                    const Color(0xFF7950A6),
-                                    const Color(0xFFC4A7F0),
-                                  )
-                                : deviceId == service.windowsDeviceId
-                                ? colors.tone(
-                                    const Color(0xFF167568),
-                                    const Color(0xFF7CD5C4),
-                                  )
-                                : deviceId == service.hakariDeviceId
-                                ? colors.tone(
-                                    const Color(0xFF995A16),
-                                    const Color(0xFFF6BE77),
-                                  )
-                                : theme.colors.muted;
-                            final row = LuminaSurface(
-                              key: ValueKey(
-                                'conversation-row-${conversation.id}',
+          ),
+          bodyBuilder: (context, topInset) => conversations.isEmpty
+              ? const LuminaEmptyState(text: '没有匹配的会话，试试其他搜索或筛选。')
+              : ReorderableList(
+                  // Keep the viewport full width so row shadows are not
+                  // clipped into a fixed rectangular frame around the list.
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    topInset,
+                    20,
+                    MediaQuery.paddingOf(context).bottom + 24,
+                  ),
+                  itemCount: conversations.length,
+                  onReorderItem: (oldIndex, newIndex) async {
+                    if (filtering ||
+                        oldIndex >= pinnedCount ||
+                        newIndex >= pinnedCount) {
+                      return;
+                    }
+                    final ids = conversations
+                        .take(pinnedCount)
+                        .map((item) => item.id)
+                        .toList();
+                    ids.insert(newIndex, ids.removeAt(oldIndex));
+                    try {
+                      await widget.repository.reorderPinnedConversations(ids);
+                    } on Object {
+                      if (context.mounted) {
+                        showLuminaToast(context, '排序未能保存，请重试');
+                      }
+                    }
+                  },
+                  itemBuilder: (context, index) {
+                    final conversation = conversations[index];
+                    return Consumer(
+                      key: ValueKey(conversation.id),
+                      builder: (context, ref, _) {
+                        final latest = ref
+                            .watch(
+                              chatLatestMessageProvider((
+                                repository: widget.repository,
+                                conversationId: conversation.id,
+                              )),
+                            )
+                            .value;
+                        final preview =
+                            latest == null || !isVisibleChatMessage(latest)
+                            ? null
+                            : _readableMessage(latest)
+                                  .replaceAll('\n', ' ')
+                                  .trim();
+                        final deviceLabel =
+                            devices[_visibleTargets[conversation.id]] ?? '本地历史';
+                        final status = summaries[conversation.id]!.label;
+                        final theme = LuminaTheme.of(context);
+                        final colors = theme.colors;
+                        final deviceId = _visibleTargets[conversation.id];
+                        final deviceColor = deviceId == service.azureDeviceId
+                            ? colors.tone(
+                                const Color(0xFF245EAB),
+                                const Color(0xFF8AB4F8),
+                              )
+                            : deviceId == service.macDeviceId
+                            ? colors.tone(
+                                const Color(0xFF7950A6),
+                                const Color(0xFFC4A7F0),
+                              )
+                            : deviceId == service.windowsDeviceId
+                            ? colors.tone(
+                                const Color(0xFF167568),
+                                const Color(0xFF7CD5C4),
+                              )
+                            : deviceId == service.hakariDeviceId
+                            ? colors.tone(
+                                const Color(0xFF995A16),
+                                const Color(0xFFF6BE77),
+                              )
+                            : theme.colors.muted;
+                        final row = LuminaSurface(
+                          depth: LuminaSurfaceDepth.raised,
+                          key: ValueKey('conversation-row-${conversation.id}'),
+                          radius: 18,
+                          color:
+                              _showingConversation &&
+                                  conversation.id == _conversationId
+                              ? colors.accentSoft
+                              : Color.alphaBlend(
+                                  deviceColor.withValues(alpha: .07),
+                                  theme.colors.surface,
+                                ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          onTap: _importingShare
+                              ? null
+                              : () => _openConversation(
+                                  conversation,
+                                  receiveShare: _shareId != null,
+                                ),
+                          child: Row(
+                            children: [
+                              Container(
+                                key: ValueKey(
+                                  'conversation-device-marker-${conversation.id}',
+                                ),
+                                width: 3,
+                                height: 36,
+                                margin: const EdgeInsets.only(right: 10),
+                                decoration: BoxDecoration(
+                                  color: deviceColor,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
                               ),
-                              radius: 18,
-                              color:
-                                  _showingConversation &&
-                                      conversation.id == _conversationId
-                                  ? colors.accentSoft
-                                  : Color.alphaBlend(
-                                      deviceColor.withValues(alpha: .07),
-                                      theme.colors.surface,
-                                    ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              onTap: _importingShare
-                                  ? null
-                                  : () => _openConversation(
-                                      conversation,
-                                      receiveShare: _shareId != null,
-                                    ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    key: ValueKey(
-                                      'conversation-device-marker-${conversation.id}',
-                                    ),
-                                    width: 3,
-                                    height: 36,
-                                    margin: const EdgeInsets.only(right: 10),
-                                    decoration: BoxDecoration(
-                                      color: deviceColor,
-                                      borderRadius: BorderRadius.circular(2),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      mainAxisSize: MainAxisSize.min,
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Row(
                                       children: [
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: Text(
-                                                conversation.pinned
-                                                    ? '置顶 · ${conversation.title}'
-                                                    : conversation.title,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: theme
-                                                    .textTheme
-                                                    .titleSmall
-                                                    .copyWith(
-                                                      fontSize: 15,
-                                                      height: 1.3,
-                                                    ),
-                                              ),
-                                            ),
-                                            if (latest != null &&
-                                                !isChatProgressSummary(
-                                                  latest,
-                                                )) ...[
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                _formatMessageTime(
-                                                  latest.createdAt,
+                                        Expanded(
+                                          child: Text(
+                                            conversation.pinned
+                                                ? '置顶 · ${conversation.title}'
+                                                : conversation.title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.titleSmall
+                                                .copyWith(
+                                                  fontSize: 15,
+                                                  height: 1.3,
                                                 ),
-                                                style: theme
-                                                    .textTheme
-                                                    .labelSmall
-                                                    .copyWith(
-                                                      fontSize: 11,
-                                                      height: 1.3,
-                                                    ),
-                                              ),
-                                            ],
-                                          ],
+                                          ),
                                         ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          summaries[conversation.id]!.state ==
-                                                  ChatSessionState.ready
-                                              ? deviceLabel
-                                              : '$deviceLabel · $status',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.bodySmall
-                                              .copyWith(
-                                                color: deviceColor,
-                                                fontSize: 11,
-                                                height: 1.3,
-                                              ),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          preview != null && preview.isNotEmpty
-                                              ? preview
-                                              : conversation.type == 'main'
-                                              ? '主会话 · 随时开始新的想法'
-                                              : '轻触继续对话',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.bodySmall
-                                              .copyWith(
-                                                fontSize: 13,
-                                                height: 1.35,
-                                              ),
-                                        ),
+                                        if (latest != null &&
+                                            !isChatProgressSummary(latest)) ...[
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            _formatMessageTime(
+                                              latest.createdAt,
+                                            ),
+                                            style: theme.textTheme.labelSmall
+                                                .copyWith(
+                                                  fontSize: 11,
+                                                  height: 1.3,
+                                                ),
+                                          ),
+                                        ],
                                       ],
                                     ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  LuminaIconButton(
-                                    tooltip: '会话选项',
-                                    icon: const LuminaIcon(LuminaIcons.more),
-                                    onPressed: () =>
-                                        _conversationOptions(conversation),
-                                  ),
-                                ],
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      summaries[conversation.id]!.state ==
+                                              ChatSessionState.ready
+                                          ? deviceLabel
+                                          : '$deviceLabel · $status',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall.copyWith(
+                                        color: deviceColor,
+                                        fontSize: 11,
+                                        height: 1.3,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      preview != null && preview.isNotEmpty
+                                          ? preview
+                                          : conversation.type == 'main'
+                                          ? '主会话 · 随时开始新的想法'
+                                          : '轻触继续对话',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall.copyWith(
+                                        fontSize: 13,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            );
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 4),
-                              child: conversation.pinned && !filtering
-                                  ? ReorderableDelayedDragStartListener(
-                                      index: index,
-                                      child: row,
-                                    )
-                                  : row,
-                            );
-                          },
+                              const SizedBox(width: 4),
+                              LuminaIconButton(
+                                tooltip: '会话选项',
+                                icon: const LuminaIcon(LuminaIcons.more),
+                                onPressed: () =>
+                                    _conversationOptions(conversation),
+                              ),
+                            ],
+                          ),
+                        );
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: conversation.pinned && !filtering
+                              ? ReorderableDelayedDragStartListener(
+                                  index: index,
+                                  child: row,
+                                )
+                              : row,
                         );
                       },
-                    ),
-            ),
-          ],
+                    );
+                  },
+                ),
         );
       },
     ),
@@ -2358,15 +2373,21 @@ class _ChatPageState extends ConsumerState<ChatPage>
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                if (constraints.maxWidth >= 1050) {
+                final desktop = DesktopLayoutScope.of(context);
+                if ((desktop && constraints.maxWidth >= 760) ||
+                    constraints.maxWidth >= 1050 ||
+                    (OrialisAdaptiveLayout.maybeOf(context)?.wide == true &&
+                        constraints.maxWidth >= 900)) {
                   return Row(
                     key: const ValueKey('chat-desktop-layout'),
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       SizedBox(
                         key: const ValueKey('chat-conversation-sidebar'),
-                        width: 300,
-                        child: _conversationList(),
+                        width: desktop
+                            ? (constraints.maxWidth * .28).clamp(240.0, 300.0)
+                            : 300,
+                        child: _conversationList(embedded: true),
                       ),
                       Container(
                         width: 1,
@@ -2428,6 +2449,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         child: LuminaSurface(
+          depth: LuminaSurfaceDepth.raised,
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
@@ -2467,6 +2489,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
     );
   }
 
+  final _conversationDetailKey = GlobalKey();
+
   Widget _conversationDetail(BuildContext context, WidgetRef ref) {
     final colors = LuminaTheme.of(context).colors;
     final messages = ref.watch(
@@ -2476,8 +2500,68 @@ class _ChatPageState extends ConsumerState<ChatPage>
         limit: _historyLimit + 1,
       )),
     );
-    const headerHeight = 64.0;
+    final wide = OrialisAdaptiveLayout.maybeOf(context)?.wide == true;
+    final sideWidth = wide ? 112.0 : 0.0;
+    final headerHeight = wide ? 0.0 : 64.0;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
+    final back = LuminaIconButton(
+      onPressed: _closeConversation,
+      icon: const LuminaIcon(LuminaIcons.back),
+      tooltip: '返回会话列表',
+    );
+    final actions = <Widget>[
+      ChatHeaderStatus(
+        key: ValueKey('header-status-$_conversationId'),
+        store: _agentEvents,
+        agents: ref.read(agentChatServiceProvider),
+        deviceId: _chatDeviceId,
+        sending: _sending,
+        lastTurnFailed: _lastFailedTurn(messages.valueOrNull) != null,
+        onRefresh: _chatDeviceId == null ? null : _refreshAgentStatus,
+        onSessionAction: _isDshTarget ? null : _runSessionAction,
+      ),
+      LuminaIconButton(
+        onPressed: _showChatOptions,
+        icon: const LuminaIcon(LuminaIcons.more),
+        tooltip: '更多会话操作',
+      ),
+    ];
+    final header = wide
+        ? LuminaSurface(
+            key: const ValueKey('chat-side-header'),
+            depth: LuminaSurfaceDepth.raised,
+            liquidGlass: false,
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+            radius: 24,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  back,
+                  const SizedBox(height: 8),
+                  Text(
+                    _conversationTitle,
+                    textAlign: TextAlign.center,
+                    style: LuminaTheme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 16),
+                  for (final action in actions)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: action,
+                    ),
+                ],
+              ),
+            ),
+          )
+        : LuminaTopBar(
+            title: _conversationTitle,
+            leading: back,
+            actions: actions,
+          );
     return CallbackShortcuts(
+      key: _conversationDetailKey,
       bindings: {
         const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
             unawaited(_searchConversation()),
@@ -2495,10 +2579,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
           child: ColoredBox(
             color: colors.paper,
             child: SafeArea(
+              bottom: false,
               child: LayoutBuilder(
                 builder: (context, constraints) => Stack(
                   children: [
                     Positioned.fill(
+                      left: sideWidth,
                       child: SizedBox(
                         key: const ValueKey('chat-message-viewport'),
                         child: Stack(
@@ -2811,51 +2897,20 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                 },
                               ),
                             ),
-                            Positioned(
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              height: headerHeight,
-                              child: LuminaTopBar(
-                                title: _conversationTitle,
-                                leading: LuminaIconButton(
-                                  onPressed: _closeConversation,
-                                  icon: const LuminaIcon(LuminaIcons.back),
-                                  tooltip: '返回会话列表',
-                                ),
-                                actions: [
-                                  ChatHeaderStatus(
-                                    key: ValueKey(
-                                      'header-status-$_conversationId',
-                                    ),
-                                    store: _agentEvents,
-                                    agents: ref.read(agentChatServiceProvider),
-                                    deviceId: _chatDeviceId,
-                                    sending: _sending,
-                                    lastTurnFailed:
-                                        _lastFailedTurn(messages.valueOrNull) !=
-                                        null,
-                                    onRefresh: _chatDeviceId == null
-                                        ? null
-                                        : _refreshAgentStatus,
-                                    onSessionAction: _isDshTarget
-                                        ? null
-                                        : _runSessionAction,
-                                  ),
-                                  LuminaIconButton(
-                                    onPressed: _showChatOptions,
-                                    icon: const LuminaIcon(LuminaIcons.more),
-                                    tooltip: '更多会话操作',
-                                  ),
-                                ],
+                            if (!wide)
+                              Positioned(
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                height: headerHeight,
+                                child: header,
                               ),
-                            ),
                           ],
                         ),
                       ),
                     ),
                     Positioned(
-                      left: 0,
+                      left: sideWidth,
                       right: 0,
                       bottom: 0,
                       child: _ChatDockMeasure(
@@ -2871,7 +2926,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
                             reverse: true,
                             hitTestBehavior: HitTestBehavior.deferToChild,
                             child: Padding(
-                              padding: const EdgeInsets.only(top: 20),
+                              padding: EdgeInsets.only(
+                                top: 20,
+                                bottom: bottomInset,
+                              ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -2892,9 +2950,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                             key: const ValueKey(
                                               'chat-jump-latest',
                                             ),
-                                            glass: true,
-                                            frosted: true,
-                                            diffuseGlass: true,
+                                            depth: LuminaSurfaceDepth.raised,
                                             liquidGlass: false,
                                             radius:
                                                 LuminaControlSize.capsuleRadius,
@@ -2947,9 +3003,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                       ),
                                       child: LuminaSurface(
                                         key: const ValueKey('chat-composer'),
-                                        glass: true,
-                                        frosted: true,
-                                        diffuseGlass: true,
+                                        depth: LuminaSurfaceDepth.raised,
                                         liquidGlass: false,
                                         radius: 28,
                                         padding: const EdgeInsets.all(12),
@@ -3004,22 +3058,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                                 _composerFocus.requestFocus();
                                               },
                                             ),
-                                            LuminaTextField(
-                                              controller: _controller,
-                                              focusNode: _composerFocus,
-                                              minLines: 1,
-                                              maxLines: 5,
-                                              hintText: '写消息…',
-                                              readOnly: _importingShare,
-                                              textInputAction:
-                                                  TextInputAction.send,
-                                              onSubmitted: (_) =>
-                                                  _sendComposer(),
-                                            ),
-                                            const SizedBox(height: 4),
                                             Row(
                                               crossAxisAlignment:
-                                                  CrossAxisAlignment.end,
+                                                  CrossAxisAlignment.center,
                                               children: [
                                                 LuminaIconButton(
                                                   onPressed: _sending
@@ -3031,30 +3072,19 @@ class _ChatPageState extends ConsumerState<ChatPage>
                                                   tooltip: '附件与快捷指令',
                                                 ),
                                                 Expanded(
-                                                  child: Padding(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 8,
-                                                          vertical: 12,
-                                                        ),
-                                                    child: Text(
-                                                      ref
-                                                          .read(
-                                                            agentChatServiceProvider,
-                                                          )
-                                                          .agentLabel(
-                                                            _chatDeviceId,
-                                                          ),
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: LuminaTheme.of(
-                                                        context,
-                                                      ).textTheme.labelSmall,
-                                                    ),
+                                                  child: LuminaTextField(
+                                                    controller: _controller,
+                                                    focusNode: _composerFocus,
+                                                    minLines: 1,
+                                                    maxLines: 5,
+                                                    hintText: '写消息…',
+                                                    readOnly: _importingShare,
+                                                    textInputAction:
+                                                        TextInputAction.send,
+                                                    onSubmitted: (_) =>
+                                                        _sendComposer(),
                                                   ),
                                                 ),
-                                                const SizedBox(width: 8),
                                                 LuminaIconButton(
                                                   onPressed:
                                                       _sending ||
@@ -3082,6 +3112,14 @@ class _ChatPageState extends ConsumerState<ChatPage>
                         ),
                       ),
                     ),
+                    if (wide)
+                      Positioned(
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: sideWidth,
+                        child: header,
+                      ),
                   ],
                 ),
               ),

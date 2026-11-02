@@ -271,6 +271,8 @@ void main() {
       expect([p.version, p.remoteVersion, p.localRevision], [1, 1, 0]);
       expect(p.name, 'Project');
       expect(p.goal, 'Ship');
+      expect(p.category, 'general');
+      expect(p.status, 'active');
       expect(p.startDate, '2026-09-17');
       expect(p.nextActionTaskId, 't1');
       expect(p.due, '2026-09-30');
@@ -343,6 +345,14 @@ void main() {
       )..where((row) => row.entityId.equals(local.id))).get()).first;
       expect(await engine.syncOnce(), SyncState.idle);
       expect(api.calls['project.create']?['mutationId'], mutation.mutationId);
+      expect(
+        api.calls['project.create']?['payload'],
+        containsPair('category', 'general'),
+      );
+      expect(
+        api.calls['project.create']?['payload'],
+        containsPair('status', 'not_started'),
+      );
       expect(
         (await (database.select(
           database.projects,
@@ -594,7 +604,12 @@ void main() {
       await engine.applySnapshot(snapshot());
       await database
           .update(database.projects)
-          .write(const ProjectsCompanion(localRevision: Value(7)));
+          .write(
+            const ProjectsCompanion(
+              category: Value('course'),
+              localRevision: Value(7),
+            ),
+          );
       await database
           .update(database.projectMilestones)
           .write(const ProjectMilestonesCompanion(localRevision: Value(8)));
@@ -640,6 +655,7 @@ void main() {
         p.nextActionTaskId,
       ], everyElement(isNull));
       expect(p.status, 'completed');
+      expect(p.category, 'course');
       expect([m.version, m.remoteVersion, m.localRevision], [3, 3, 8]);
       expect(m.completedAt, timestamp);
       expect(m.completed, isTrue);
@@ -648,13 +664,51 @@ void main() {
       await engine.applySyncEvents(update);
       await engine.applySyncEvents(
         page([
-          upsert(13, 'project', project({'version': 2})),
+          upsert(
+            13,
+            'project',
+            project({
+              'version': 4,
+              'category': 'future_category',
+              'status': 'not_started',
+            }),
+          ),
           upsert(14, 'project_milestone', milestone({'version': 2})),
         ]),
       );
-      expect(await storedProject(), p);
+      final updatedProject = await storedProject();
+      expect(updatedProject.category, 'future_category');
+      expect(updatedProject.status, 'not_started');
+      for (final (cursor, version, invalidCategory) in [
+        (15, 5, null),
+        (16, 6, 7),
+        (17, 7, ''),
+      ]) {
+        await engine.applySyncEvents(
+          page([
+            upsert(
+              cursor,
+              'project',
+              project({
+                'version': version,
+                'category': invalidCategory,
+                'status': 'not_started',
+              }),
+            ),
+          ]),
+        );
+        expect((await storedProject()).category, 'future_category');
+      }
+      final projectAfterInvalidCategories = await storedProject();
+      await engine.applySyncEvents(
+        page([
+          upsert(18, 'project', project({'version': 2})),
+          upsert(19, 'project_milestone', milestone({'version': 2})),
+        ]),
+      );
+      expect(await storedProject(), projectAfterInvalidCategories);
       expect(await storedMilestone(), m);
-      expect(await cursor(), '14');
+      expect(await cursor(), '19');
       expect(await database.select(database.outboxMutations).get(), isEmpty);
     },
   );

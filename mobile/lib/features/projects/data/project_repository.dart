@@ -81,33 +81,53 @@ class ProjectRepository {
             ]))
           .watch();
 
-  Future<Project> createProject({required String name, String? goal}) =>
-      database.transaction(() async {
-        final now = DateTime.now().toUtc().toIso8601String();
-        final id = const Uuid().v7();
-        await database
-            .into(database.projects)
-            .insert(
-              ProjectsCompanion.insert(
-                id: id,
-                name: name.trim(),
-                goal: Value(goal),
-                createdAt: now,
-                updatedAt: now,
-                syncStatus: const Value('pendingCreate'),
-              ),
-            );
-        final project = await (database.select(
-          database.projects,
-        )..where((row) => row.id.equals(id))).getSingle();
-        await _enqueueProject(project);
-        return project;
-      });
+  Future<Project> createProject({
+    required String name,
+    String? goal,
+    String category = 'general',
+    String status = 'not_started',
+    String? description,
+    String? startDate,
+    String? due,
+  }) => database.transaction(() async {
+    final now = DateTime.now().toUtc().toIso8601String();
+    final id = const Uuid().v7();
+    await database
+        .into(database.projects)
+        .insert(
+          ProjectsCompanion.insert(
+            id: id,
+            name: name.trim(),
+            goal: Value(goal),
+            category: Value(_normalizeCategory(category)),
+            status: Value(_normalizeStatus(status)),
+            description: Value(description),
+            startDate: Value(startDate),
+            due: Value(due),
+            createdAt: now,
+            updatedAt: now,
+            syncStatus: const Value('pendingCreate'),
+          ),
+        );
+    final project = await (database.select(
+      database.projects,
+    )..where((row) => row.id.equals(id))).getSingle();
+    await _enqueueProject(project);
+    return project;
+  });
 
+  /// Null category/status preserves the current value; passing null goal clears
+  /// it. Omit nullable date/text fields or pass Value.absent to preserve them,
+  /// and pass Value(null) to clear one explicitly.
   Future<void> updateProject(
     Project project, {
     required String name,
     String? goal,
+    String? category,
+    String? status,
+    Value<String?> description = const Value.absent(),
+    Value<String?> startDate = const Value.absent(),
+    Value<String?> due = const Value.absent(),
   }) => database.transaction(() async {
     await (database.update(
       database.projects,
@@ -115,6 +135,15 @@ class ProjectRepository {
       ProjectsCompanion(
         name: Value(name.trim()),
         goal: Value(goal),
+        category: category == null
+            ? const Value.absent()
+            : Value(_normalizeCategory(category)),
+        status: status == null
+            ? const Value.absent()
+            : Value(_normalizeStatus(status)),
+        description: description,
+        startDate: startDate,
+        due: due,
         updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
         localRevision: Value(project.localRevision + 1),
         syncStatus: const Value('pendingUpdate'),
@@ -235,6 +264,7 @@ class ProjectRepository {
               'goal': project.goal,
               'description': project.description,
               'color': project.color,
+              'category': project.category,
               'status': project.status,
               'startDate': project.startDate,
               'due': project.due,
@@ -253,6 +283,24 @@ class ProjectRepository {
             entityRevision: project.localRevision,
           )
           .then((_) {});
+
+  String _normalizeCategory(String category) {
+    final normalized = category.trim();
+    return normalized.isEmpty ? 'general' : normalized;
+  }
+
+  String _normalizeStatus(String status) {
+    final normalized = status.trim();
+    if (!const {
+      'not_started',
+      'active',
+      'completed',
+      'archived',
+    }.contains(normalized)) {
+      throw ArgumentError.value(status, 'status', 'Unsupported project status');
+    }
+    return normalized;
+  }
 
   Future<void> _enqueueMilestone(ProjectMilestone milestone) =>
       OutboxStore(database)

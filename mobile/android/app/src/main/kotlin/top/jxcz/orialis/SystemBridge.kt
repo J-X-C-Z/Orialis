@@ -50,8 +50,11 @@ internal class SystemBridge(private val activity: MainActivity, messenger: Binar
                     }
                     "requestPinWidget" -> {
                         val manager = AppWidgetManager.getInstance(activity)
+                        val kindId = call.argument<String>("kind") ?: "today"
+                        val kind = TodayWidgetProvider.kinds.firstOrNull { it.id == kindId }
+                            ?: throw IllegalArgumentException("Unknown widget kind")
                         result.success(Build.VERSION.SDK_INT >= 26 && manager.isRequestPinAppWidgetSupported &&
-                            manager.requestPinAppWidget(ComponentName(activity, TodayWidgetProvider::class.java), null, null))
+                            manager.requestPinAppWidget(ComponentName(activity, kind.provider), null, null))
                     }
                     "updateSnapshot" -> {
                         SystemSnapshot.update(activity, call.arguments as? Map<*, *> ?: throw IllegalArgumentException("Invalid snapshot"))
@@ -103,6 +106,7 @@ internal class SystemBridge(private val activity: MainActivity, messenger: Binar
             "notificationsEnabled" to notificationsEnabled(),
             "exactAlarmsEnabled" to (Build.VERSION.SDK_INT < 31 || activity.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()),
             "widgetSupported" to (Build.VERSION.SDK_INT >= 26 && AppWidgetManager.getInstance(activity).isRequestPinAppWidgetSupported),
+            "pinWidgetSupported" to (Build.VERSION.SDK_INT >= 26 && AppWidgetManager.getInstance(activity).isRequestPinAppWidgetSupported),
             "manufacturer" to Build.MANUFACTURER, "model" to Build.MODEL, "sdkInt" to Build.VERSION.SDK_INT,
             "xiaomiAppIdConfigured" to try {
                 val info = activity.packageManager.getApplicationInfo(activity.packageName, PackageManager.GET_META_DATA)
@@ -118,8 +122,7 @@ internal class SystemBridge(private val activity: MainActivity, messenger: Binar
                 activity.getSystemService(NotificationManager::class.java).activeNotifications
                     .count { it.tag?.startsWith("orialis:") == true }
             } else 0
-            base["widgetCount"] = AppWidgetManager.getInstance(activity)
-                .getAppWidgetIds(ComponentName(activity, TodayWidgetProvider::class.java)).size
+            base["widgetCount"] = TodayWidgetProvider.widgetCount(activity)
             base["focusProtocolVersion"] = try { Settings.System.getInt(activity.contentResolver, "notification_focus_protocol", 0) }
                 catch (_: Exception) { 0 }
             base["focusPermission"] = XiaomiFocusAdapter.hasPermission(activity)

@@ -43,6 +43,8 @@ class DesktopShell extends StatefulWidget {
 
 class _DesktopShellState extends State<DesktopShell> {
   ModalRoute<dynamic>? _route;
+  bool _collapsed = false;
+  bool _insightsVisible = true;
   static final _destinations = {
     LogicalKeyboardKey.digit1: 0,
     LogicalKeyboardKey.digit2: 1,
@@ -88,12 +90,16 @@ class _DesktopShellState extends State<DesktopShell> {
       return false;
     }
     final index = _destinations[event.logicalKey];
-    if (index == null) return false;
     final focused = FocusManager.instance.primaryFocus?.context;
     if (focused?.widget is EditableText ||
         focused?.findAncestorWidgetOfExactType<EditableText>() != null) {
       return false;
     }
+    if (event.logicalKey == LogicalKeyboardKey.keyB) {
+      setState(() => _collapsed = !_collapsed);
+      return true;
+    }
+    if (index == null) return false;
     widget.navigationShell.goBranch(index);
     return true;
   }
@@ -125,7 +131,7 @@ class _DesktopShellState extends State<DesktopShell> {
               onTap: () => widget.navigationShell.goBranch(index),
               padding: EdgeInsets.symmetric(
                 horizontal: compact ? 6 : 12,
-                vertical: 12,
+                vertical: compact ? 8 : 10,
               ),
               child: compact
                   ? Column(
@@ -174,71 +180,85 @@ class _DesktopShellState extends State<DesktopShell> {
     );
   }
 
-  Widget _sidebar() {
+  Widget _sidebar({required bool compact}) {
     final theme = LuminaTheme.of(context);
+    Widget group(String title, List<int> indices) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 18, 10, 8),
+          child: Text(title, style: theme.textTheme.bodySmall,
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+        for (final index in indices)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: _destination(index, compact: compact),
+          ),
+      ],
+    );
     return Container(
       key: const ValueKey('desktop-sidebar'),
       decoration: BoxDecoration(
         color: theme.colors.raisedSurface,
-        border: Border(
-          right: BorderSide(color: theme.colors.outline.withValues(alpha: .35)),
-        ),
+        border: Border(right: BorderSide(
+          color: theme.colors.outline.withValues(alpha: .35))),
       ),
-      padding: const EdgeInsets.fromLTRB(16, 26, 16, 18),
+      padding: EdgeInsets.fromLTRB(compact ? 6 : 14, 18, compact ? 6 : 14, 12),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Row(
-              children: [
-                Image.asset(
-                  'assets/branding/orialis-neumorphic.png',
-                  width: 26,
-                  height: 26,
-                  excludeFromSemantics: true,
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Image.asset('assets/branding/orialis-neumorphic-transparent.png',
+                  width: 28, height: 28, excludeFromSemantics: true),
+              if (!compact) ...[
                 const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Orialis',
-                    style: theme.textTheme.titleMedium,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
+                Expanded(child: Text('Orialis', style: theme.textTheme.titleMedium)),
               ],
-            ),
+            ]),
           ),
-          const SizedBox(height: 38),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-            child: Text('工作空间', style: theme.textTheme.bodySmall),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  for (var i = 0; i < 4; i++) ...[
-                    _destination(i),
-                    const SizedBox(height: 4),
-                  ],
-                  for (var i = 5; i < DesktopShell.labels.length; i++) ...[
-                    _destination(i),
-                    const SizedBox(height: 4),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          Container(
-            height: 1,
-            color: theme.colors.outline.withValues(alpha: .35),
-          ),
-          const SizedBox(height: 12),
-          _destination(4),
+          Expanded(child: SingleChildScrollView(child: Column(children: [
+            group('工作', [0, 1, 2, 3]),
+            group('助手', [9, 10]),
+            group('发现', [5, 6, 7, 8]),
+          ]))),
+          Container(height: 1, color: theme.colors.outline.withValues(alpha: .35)),
+          const SizedBox(height: 8),
+          _destination(4, compact: compact),
         ],
       ),
+    );
+  }
+
+  Widget _toolbar({required bool canExpand, required bool canShowInsights}) {
+    final theme = LuminaTheme.of(context);
+    final modifier = defaultTargetPlatform == TargetPlatform.macOS ? '⌘' : 'Ctrl+';
+    return Container(
+      key: const ValueKey('desktop-workspace-toolbar'),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(
+        color: theme.colors.outline.withValues(alpha: .25)))),
+      child: Row(children: [
+        if (canExpand) ...[
+          LuminaIconButton(
+            key: const ValueKey('desktop-toggle-sidebar'),
+            tooltip: '${_collapsed ? '展开' : '收起'}侧栏 · ${modifier}B',
+            onPressed: () => setState(() => _collapsed = !_collapsed),
+            icon: LuminaIcon(_collapsed ? LuminaIcons.arrowRight : LuminaIcons.arrowLeft),
+          ),
+          const SizedBox(width: 12),
+        ],
+        Expanded(child: Text('${DesktopShell.labels[widget.navigationShell.currentIndex]} / 工作区',
+            style: theme.textTheme.bodyMedium, maxLines: 1, overflow: TextOverflow.ellipsis)),
+        if (canShowInsights)
+          LuminaButton(
+            key: const ValueKey('desktop-toggle-insights'),
+            child: Text(_insightsVisible ? '收起概览' : '显示概览'),
+            onPressed: () => setState(() => _insightsVisible = !_insightsVisible),
+          ),
+      ]),
     );
   }
 
@@ -252,14 +272,16 @@ class _DesktopShellState extends State<DesktopShell> {
           color: theme.colors.paper,
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final wide = constraints.maxWidth >= 900;
-              final showInsights =
-                  constraints.maxWidth >= 1440 &&
+              final wide = constraints.maxWidth >= 600;
+              final compact = constraints.maxWidth < 1000 || _collapsed;
+              final canShowInsights = constraints.maxWidth >= 1440 &&
                   widget.navigationShell.currentIndex != 9;
-              const sidebarWidth = 224.0;
+              final showInsights =
+                  canShowInsights && _insightsVisible;
+              final sidebarWidth = compact ? 88.0 : 224.0;
               const insightsWidth = 280.0;
               final navigation = wide
-                  ? _sidebar()
+                  ? _sidebar(compact: compact)
                   : Padding(
                       padding: const EdgeInsets.all(12),
                       child: LuminaSurface(
@@ -295,7 +317,12 @@ class _DesktopShellState extends State<DesktopShell> {
                           left: wide ? sidebarWidth : 0,
                           right: showInsights ? insightsWidth : 0,
                         ),
-                        child: widget.navigationShell,
+                        child: Column(children: [
+                          if (wide) _toolbar(
+                            canExpand: constraints.maxWidth >= 1000,
+                            canShowInsights: canShowInsights),
+                          Expanded(child: widget.navigationShell),
+                        ]),
                       ),
                     ),
                     // Keep navigation above branch Navigator semantics and hit testing.

@@ -1,0 +1,14 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="horizontal" android:padding="6dp" android:background="@drawable/widget_background">
+    <TextView android:id="@+id/widget_today_action" android:layout_width="0dp" android:layout_weight="1"
+        android:layout_height="match_parent" android:minHeight="48dp" android:layout_marginHorizontal="2dp"
+        android:background="@drawable/widget_control_background" android:gravity="center"
+        android:text="今日" android:contentDescription="打开今日" android:textSize="14sp"
+        android:fontFamily="sans-serif-medium" android:textColor="@color/widget_on_accent" />
+    <TextView android:id="@+id/widget_tasks_action" android:layout_width="0dp" android:layout_weight="1"
+        android:layout_height="match_parent" android:minHeight="48dp" android:layout_marginHorizontal="2dp"
+        android:background="@drawable/widget_control_background" android:gravity="center"
+        android:text="任务" android:contentDescription="打开任务" android:textSize="14sp"
+        android:fontFamily="sans-serif-medium" android:textColor="@color/widget_on_accent" />
+</LinearLayout>

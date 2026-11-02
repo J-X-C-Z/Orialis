@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/app.dart';
+import 'package:orialis_mobile/app/design/mobile_motion.dart';
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show DesktopLayoutScope;
 import 'package:orialis_mobile/core/config/app_config.dart';
@@ -105,6 +106,165 @@ Future<void> _select(WidgetTester tester, String view) async {
 }
 
 void main() {
+  testWidgets(
+    'day and month keep deadline and all-day categories in their scroll flow',
+    (tester) async {
+      _size(tester, const Size(390, 844));
+      final database = await _database();
+      await tester.pumpWidget(_calendar(database));
+      await tester.pumpAndSettle();
+      await _select(tester, '日');
+      final due = find.byKey(const ValueKey('calendar-due-2026-10-15'));
+      final schedules = find.byKey(
+        const ValueKey('calendar-schedules-2026-10-15'),
+      );
+      expect(tester.getRect(due).top, lessThan(tester.getRect(schedules).top));
+      expect(
+        find.descendant(
+          of: due,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is LuminaIcon && widget.icon == LuminaIcons.tasks,
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: schedules,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is LuminaIcon && widget.icon == LuminaIcons.calendar,
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('全天研讨会'), findsOneWidget);
+      await _select(tester, '月');
+      final agenda = find.byKey(const ValueKey('calendar-month-agenda'));
+      await tester.ensureVisible(agenda);
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: agenda,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is LuminaIcon && widget.icon == LuminaIcons.tasks,
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: agenda,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is LuminaIcon && widget.icon == LuminaIcons.calendar,
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('全天研讨会'), findsOneWidget);
+      expect(find.text('提交实验报告'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await _close(tester, database);
+    },
+  );
+
+  testWidgets(
+    'calendar scrolls behind navigation with internal bottom clearance',
+    (tester) async {
+      _size(tester, const Size(390, 844));
+      final database = await _database();
+      await tester.pumpWidget(
+        LuminaNavigationInset(bottom: 100, child: _calendar(database)),
+      );
+      await tester.pumpAndSettle();
+      final month = tester.widget<ListView>(
+        find.byKey(const PageStorageKey('calendar-month-scroll')),
+      );
+      expect((month.padding! as EdgeInsets).bottom, 124);
+      await _select(tester, '周');
+      final hours = find.byKey(const PageStorageKey('calendar-week-hours'));
+      expect(tester.getRect(hours).bottom, closeTo(844, .1));
+      expect(
+        (tester.widget<SingleChildScrollView>(hours).padding! as EdgeInsets)
+            .bottom,
+        192,
+      );
+      expect(
+        (tester.widget<SingleChildScrollView>(hours).padding! as EdgeInsets)
+            .top,
+        greaterThan(0),
+      );
+      await tester.drag(hours, const Offset(0, -3000));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .getRect(find.byKey(const ValueKey('calendar-week-time-24')))
+            .bottom,
+        lessThanOrEqualTo(744),
+      );
+      expect(tester.takeException(), isNull);
+      await _close(tester, database);
+    },
+  );
+
+  testWidgets(
+    'selecting another date in the same week does not slide the page',
+    (tester) async {
+      _size(tester, const Size(390, 844));
+      final database = await _database();
+      await tester.pumpWidget(_calendar(database));
+      await tester.pumpAndSettle();
+      await _select(tester, '周');
+      await tester.tap(
+        find.byKey(const ValueKey('calendar-week-date-2026-10-16')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 40));
+      final transition = tester.widget<SlideTransition>(
+        find
+            .descendant(
+              of: find.byType(OrialisContentTransition),
+              matching: find.byType(SlideTransition),
+            )
+            .first,
+      );
+      expect(transition.position.value, Offset.zero);
+      expect(tester.takeException(), isNull);
+      await _close(tester, database);
+    },
+  );
+
+  testWidgets(
+    'selecting another date in the same month does not slide the page',
+    (tester) async {
+      _size(tester, const Size(390, 844));
+      final database = await _database();
+      await tester.pumpWidget(_calendar(database));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('calendar-date-month-2026-10-16')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 40));
+      final transition = tester.widget<SlideTransition>(
+        find
+            .descendant(
+              of: find.byType(OrialisContentTransition),
+              matching: find.byType(SlideTransition),
+            )
+            .first,
+      );
+      expect(transition.position.value, Offset.zero);
+      expect(find.text('10月16日 · 日程'), findsOneWidget);
+      expect(find.text('周五课程'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await _close(tester, database);
+    },
+  );
+
   testWidgets('day week and month show distinct content and retain selection', (
     tester,
   ) async {
@@ -251,14 +411,28 @@ void main() {
     await tester.pumpWidget(_calendar(database));
     await tester.pumpAndSettle();
     await _select(tester, '周');
+    final controller = tester
+        .widget<SingleChildScrollView>(
+          find.byKey(const PageStorageKey('calendar-week-hours')),
+        )
+        .controller!;
+    controller.jumpTo(
+      8 * 72 +
+          tester
+              .getSize(
+                find.byKey(const ValueKey('calendar-week-information-flow')),
+              )
+              .height,
+    );
+    await tester.pumpAndSettle();
     final friday = tester.getRect(
       find.byKey(const ValueKey('calendar-week-date-2026-10-16')),
     );
-    final hours = tester.getRect(
-      find.byKey(const PageStorageKey('calendar-week-hours')),
+    final nine = tester.getRect(
+      find.byKey(const ValueKey('calendar-week-time-9')),
     );
-    // The week initially opens at 08:00; one hour below it selects 09:00.
-    await tester.tapAt(Offset(friday.center.dx, hours.top + 73));
+    // The hour axis scrolls behind its floating header; use the visible 09:00 line.
+    await tester.tapAt(Offset(friday.center.dx, nine.top + 1));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(LuminaButton, '09:00'), findsOneWidget);
     expect(find.widgetWithText(LuminaButton, '10:00'), findsOneWidget);

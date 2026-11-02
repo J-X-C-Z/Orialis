@@ -17,6 +17,7 @@ import '../../features/events/presentation/task_children.dart';
 import '../../features/events/presentation/long_press_orderable.dart';
 import '../../features/events/presentation/quick_event_button.dart';
 import '../shared/page_parts.dart';
+import '../shared/adaptive_layout.dart';
 
 class TodayPage extends ConsumerStatefulWidget {
   const TodayPage({super.key});
@@ -245,14 +246,24 @@ class _TodayPageState extends ConsumerState<TodayPage>
               ];
               return LayoutBuilder(
                 builder: (context, constraints) {
-                  final desktop =
-                      ref.watch(desktopModeProvider) &&
+                  final columns =
                       LuminaNavigationInset.of(context) == 0 &&
-                      constraints.maxWidth >= 840;
-                  if (desktop) {
+                      ((ref.watch(desktopModeProvider) &&
+                              constraints.maxWidth >= 840) ||
+                          ((OrialisAdaptiveLayout.maybeOf(context)?.wide ??
+                                  false) &&
+                              constraints.maxWidth >=
+                                  560 *
+                                      MediaQuery.textScalerOf(context)
+                                          .scale(14) /
+                                      14));
+                  if (columns) {
+                    final compactColumns = constraints.maxWidth < 840;
                     final theme = LuminaTheme.of(context);
                     return Padding(
-                      padding: const EdgeInsets.fromLTRB(28, 24, 28, 24),
+                      padding: compactColumns
+                          ? const EdgeInsets.all(12)
+                          : const EdgeInsets.fromLTRB(28, 24, 28, 24),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -264,7 +275,9 @@ class _TodayPageState extends ConsumerState<TodayPage>
                                   children: [
                                     Text(
                                       '专注当下，从容安排',
-                                      style: theme.textTheme.headlineSmall,
+                                      style: compactColumns
+                                          ? theme.textTheme.titleMedium
+                                          : theme.textTheme.headlineSmall,
                                     ),
                                     const SizedBox(height: 8),
                                     Text(
@@ -285,14 +298,14 @@ class _TodayPageState extends ConsumerState<TodayPage>
                               ),
                             ],
                           ),
-                          const SizedBox(height: 28),
+                          SizedBox(height: compactColumns ? 12 : 28),
                           Expanded(
                             child: Row(
                               key: const ValueKey('desktop-today-columns'),
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Expanded(
-                                  flex: 3,
+                                  flex: compactColumns ? 1 : 3,
                                   child: ListView(
                                     padding: const EdgeInsets.only(bottom: 80),
                                     key: const PageStorageKey(
@@ -305,9 +318,9 @@ class _TodayPageState extends ConsumerState<TodayPage>
                                     ],
                                   ),
                                 ),
-                                const SizedBox(width: 24),
+                                SizedBox(width: compactColumns ? 12 : 24),
                                 Expanded(
-                                  flex: 2,
+                                  flex: compactColumns ? 1 : 2,
                                   child: ListView(
                                     padding: const EdgeInsets.only(bottom: 80),
                                     key: const PageStorageKey(

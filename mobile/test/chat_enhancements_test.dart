@@ -1,6 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:orialis_mobile/app/app.dart';
+import 'package:orialis_mobile/pages/chat/chat_page.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/features/chat/data/recent_hermes_models.dart';
@@ -14,6 +17,53 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     FlutterSecureStorage.setMockInitialValues({});
   });
+  testWidgets('chat cards inherit raised material without glass composer', (
+    tester,
+  ) async {
+    for (final dark in [false, true]) {
+      final h = await openChat(tester, largeDark: dark);
+      final composer = tester.widget<LuminaSurface>(
+        find.byKey(const ValueKey('chat-composer')),
+      );
+      expect(composer.depth, LuminaSurfaceDepth.raised);
+      expect(composer.glass, isFalse);
+      expect(composer.frosted, isFalse);
+      expect(composer.liquidGlass, isFalse);
+      final write = h.repo.applyRemoteMessage({
+        'conversationId': h.id,
+        'id': 'material-user',
+        'role': 'user',
+        'content': '检查聊天卡片厚度',
+        'createdAt': '2026-11-01T00:00:00Z',
+        'version': 1,
+      });
+      await tester.pumpAndSettle();
+      await write;
+      await tester.pumpAndSettle();
+      final bubble = tester.widget<LuminaSurface>(
+        find
+            .descendant(
+              of: find.byType(LuminaChatBubble),
+              matching: find.byType(LuminaSurface),
+            )
+            .first,
+      );
+      expect(bubble.depth, LuminaSurfaceDepth.raised);
+      expect(bubble.glass, isFalse);
+      await tester.tap(iconAction('返回会话列表'));
+      await tester.pumpAndSettle();
+      final rowFinder = find.byKey(ValueKey('conversation-row-${h.id}'));
+      final row = tester.widget<LuminaSurface>(rowFinder);
+      expect(row.depth, LuminaSurfaceDepth.raised);
+      final rect = tester.getRect(rowFinder);
+      expect(rect.left, greaterThanOrEqualTo(16));
+      expect(rect.right, lessThanOrEqualTo(432 - 16));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    }
+  });
+
   testWidgets(
     'swipe reply keeps quote on saved message and supports original jump',
     (tester) async {
@@ -230,7 +280,12 @@ void main() {
           .primary,
       isTrue,
     );
-    final models = await tester.runAsync(() => RecentHermesModels().load());
+    final config = ProviderScope.containerOf(
+      tester.element(find.byType(ChatPage)),
+    ).read(appConfigProvider);
+    final models = await tester.runAsync(
+      () => RecentHermesModels(accountScope: config.desktopDatabaseName).load(),
+    );
     expect(models, contains('openai/gpt-4.1'));
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();

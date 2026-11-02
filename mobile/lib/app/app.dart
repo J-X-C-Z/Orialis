@@ -17,6 +17,7 @@ import '../features/devices/application/device_center_controller.dart';
 import '../features/devices/data/device_data_source.dart';
 import '../core/database/app_database.dart';
 import '../features/events/data/event_repository.dart';
+import '../features/events/data/urgency_coordinator.dart';
 import '../features/events/data/task_repository.dart';
 import '../features/events/data/schedule_repository.dart';
 import '../features/projects/data/project_repository.dart';
@@ -102,6 +103,21 @@ final databaseProvider = Provider<AppDatabase>((ref) {
 });
 
 final appConfigProvider = Provider<AppConfig>((ref) => AppConfig());
+
+final urgencyCoordinatorProvider = Provider<UrgencyCoordinator>((ref) {
+  final config = ref.watch(appConfigProvider);
+  final databaseName = ref.watch(desktopDatabaseNameProvider);
+  final coordinator = UrgencyCoordinator(
+    database: ref.watch(databaseProvider),
+    repository: ref.watch(eventRepositoryProvider),
+    agents: ref.watch(agentChatServiceProvider),
+    ownsDatabase: () async =>
+        await config.desktopDatabaseName() == databaseName,
+  );
+  ref.onDispose(coordinator.dispose);
+  coordinator.start();
+  return coordinator;
+});
 
 final memoryRepositoryProvider = Provider<MemoryRepository>((ref) {
   final repository = MemoryRepository();
@@ -409,6 +425,9 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
         .read(syncCoordinatorProvider)
         .setForeground(state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.resumed) {
+      unawaited(
+        ref.read(urgencyCoordinatorProvider).refresh(timeChanged: true),
+      );
       unawaited(ref.read(realtimeClientProvider).connect().catchError((_) {}));
       unawaited(ref.read(syncCoordinatorProvider).requestSync());
       final system = ref.read(systemIntegrationProvider);
@@ -433,6 +452,7 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(urgencyCoordinatorProvider);
     ref.watch(nodeHeartbeatLifecycleProvider);
     ref.watch(desktopWidgetSyncProvider);
     ref.watch(calendarSyncProvider.notifier);
@@ -482,9 +502,7 @@ class _OrialisAppState extends ConsumerState<OrialisApp>
                                 : SystemUiOverlayStyle.dark)
                             .copyWith(
                               statusBarColor: const Color(0x00000000),
-                              systemNavigationBarColor: LuminaTheme.of(context)
-                                  .colors
-                                  .paper,
+                              systemNavigationBarColor: const Color(0x00000000),
                               systemNavigationBarDividerColor: const Color(
                                 0x00000000,
                               ),

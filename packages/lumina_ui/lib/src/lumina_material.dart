@@ -792,31 +792,51 @@ class _LuminaMaterial extends CustomPainter {
     )!;
     // Keep the two blur masks fixed and blend their strengths. Animating the
     // blur radius would allocate a new cached texture on every frame.
-    final raisedDistance = math.min(rect.shortestSide * .075, 4.0);
+    final raisedCard = depth == LuminaSurfaceDepth.raised;
+    final raisedDistance = math.min(
+      rect.shortestSide * (raisedCard ? .095 : .075),
+      raisedCard ? 5.0 : 4.0,
+    );
     final insetDistance = math.min(rect.shortestSide * .055, 3.0);
-    final raisedOffset = Offset(raisedDistance, raisedDistance);
+    final raisedOffset = raisedCard
+        ? Offset(1, raisedDistance)
+        : Offset(raisedDistance, raisedDistance);
     final insetOffset = Offset(insetDistance, insetDistance);
     if (inset < 1 && !contrast) {
-      final light = raisedLight.withValues(alpha: .38 * (1 - inset));
-      final shade = raisedShade.withValues(alpha: .24 * (1 - inset));
+      final light = raisedLight.withValues(
+        alpha: raisedCard ? 0 : .38 * (1 - inset),
+      );
+      final shade = raisedShade.withValues(
+        alpha: (raisedCard ? .31 : .24) * (1 - inset),
+      );
       if (cheapShadow) {
         final mask = _LuminaShadowMask.forShape(
           rect.size,
           radius,
-          raisedDistance * 1.35,
+          raisedDistance * (raisedCard ? 1.1 : 1.35),
           false,
         );
-        mask.paint(canvas, rect, -raisedOffset, light);
+        if (!raisedCard) mask.paint(canvas, rect, -raisedOffset, light);
         mask.paint(canvas, rect, raisedOffset, shade);
       } else {
         final paint = Paint()
           ..maskFilter = MaskFilter.blur(
             BlurStyle.normal,
-            raisedDistance * 1.35,
+            raisedDistance * (raisedCard ? 1.1 : 1.35),
           );
-        canvas.drawPath(path.shift(-raisedOffset), paint..color = light);
+        if (!raisedCard) {
+          canvas.drawPath(path.shift(-raisedOffset), paint..color = light);
+        }
         canvas.drawPath(path.shift(raisedOffset), paint..color = shade);
       }
+    }
+    if (raisedCard && !contrast) {
+      // A short lower lip adds thickness without restoring the white top-left
+      // bloom that dominated large project cards.
+      canvas.drawPath(
+        path.shift(const Offset(0, 2)),
+        Paint()..color = Color.lerp(base, raisedShade, .18)!,
+      );
     }
     canvas.drawPath(
       path,

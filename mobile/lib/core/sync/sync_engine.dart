@@ -266,6 +266,7 @@ class SyncEngine {
               'goal': project.goal,
               'description': project.description,
               'color': project.color,
+              'category': project.category,
               'status': project.status,
               'startDate': project.startDate,
               'due': project.due,
@@ -287,6 +288,7 @@ class SyncEngine {
       try {
         final payload =
             jsonDecode(mutation.payloadJson) as Map<String, dynamic>;
+        payload.putIfAbsent('category', () => project.category);
         Map<String, dynamic> result = {};
         if (mutation.operation == 'create') {
           result = await api.createProject(payload, mutation.mutationId);
@@ -981,7 +983,8 @@ class SyncEngine {
     final version = event['entityVersion'] as int;
     final existing = await database
         .customSelect(
-          'SELECT remote_version, sync_status FROM ${table.actualTableName} WHERE id = ?',
+          'SELECT remote_version, sync_status${isProject ? ', category' : ''} '
+          'FROM ${table.actualTableName} WHERE id = ?',
           variables: [Variable<String>(id)],
           readsFrom: {table},
         )
@@ -1026,10 +1029,23 @@ class SyncEngine {
     final value =
         jsonDecode(event['payloadJson'] as String) as Map<String, dynamic>;
     if (isProject) {
-      final status = value['status'] as String;
-      if (!const {'active', 'completed', 'archived'}.contains(status)) {
+      final status = value['status'];
+      if (status is! String ||
+          !const {
+            'not_started',
+            'active',
+            'completed',
+            'archived',
+          }.contains(status)) {
         throw const FormatException('invalid project status');
       }
+      final previousCategory =
+          existing?.read<String?>('category') ?? 'general';
+      final remoteCategory = value['category'];
+      final category =
+          remoteCategory is String && remoteCategory.trim().isNotEmpty
+          ? remoteCategory
+          : previousCategory;
       await database
           .into(database.projects)
           .insertOnConflictUpdate(
@@ -1040,6 +1056,7 @@ class SyncEngine {
               goal: Value(value['goal'] as String?),
               description: Value(value['description'] as String?),
               color: Value(value['color'] as String?),
+              category: Value(category),
               status: Value(status),
               startDate: Value(value['startDate'] as String?),
               due: Value(value['due'] as String?),

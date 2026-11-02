@@ -48,7 +48,10 @@ Widget luminaOverlayTransition(
             child: child,
           )
         : ScaleTransition(
-            scale: Tween<double>(begin: .96, end: 1).animate(progress),
+            scale: Tween<double>(
+              begin: 1 - .04 * LuminaTheme.of(context).data.motionScale,
+              end: 1,
+            ).animate(progress),
             child: child,
           ),
   );
@@ -66,10 +69,10 @@ class LuminaSpring extends AnimationController {
       target,
       reducedMotion: reducedMotion,
       description: distance >= 3
-          ? const SpringDescription(mass: 1, stiffness: 165, damping: 25)
+          ? const SpringDescription(mass: 1, stiffness: 165, damping: 26)
           : distance >= 1.6
-          ? const SpringDescription(mass: 1, stiffness: 260, damping: 28)
-          : const SpringDescription(mass: 1, stiffness: 380, damping: 29),
+          ? const SpringDescription(mass: 1, stiffness: 260, damping: 33)
+          : const SpringDescription(mass: 1, stiffness: 300, damping: 35),
     );
   }
 
@@ -122,7 +125,9 @@ class _LuminaBranchTransitionState extends State<LuminaBranchTransition>
     duration: const Duration(milliseconds: 220),
     value: 1,
   );
-  late final progress = controller.drive(CurveTween(curve: luminaEaseOut));
+  late final progress = controller.drive(
+    CurveTween(curve: Curves.easeInOutCubic),
+  );
   Animation<Offset> position = const AlwaysStoppedAnimation(Offset.zero);
   Animation<double> opacity = const AlwaysStoppedAnimation(1);
 
@@ -141,7 +146,7 @@ class _LuminaBranchTransitionState extends State<LuminaBranchTransition>
     final direction = widget.index > oldWidget.index ? 1.0 : -1.0;
     final start = controller.isAnimating
         ? position.value
-        : Offset(direction * .025, 0);
+        : Offset(direction * .018, 0);
     final opacityStart = controller.isAnimating ? opacity.value : .96;
     position = reduced
         ? const AlwaysStoppedAnimation(Offset.zero)

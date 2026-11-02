@@ -1,7 +1,7 @@
 name: orialis_mobile
 description: Orialis local-first mobile client.
 publish_to: "none"
-version: 1.4.0+55
+version: 1.5.0+79
 
 environment:
   sdk: ">=3.13.0 <4.0.0"
@@ -54,9 +54,12 @@ flutter:
   config:
     enable-swift-package-manager: false
   uses-material-design: true
+  shaders:
+    - shaders/navigation_lens.frag
   assets:
     - assets/config/web_services.json
     - assets/branding/orialis-schedule.png
     - assets/branding/orialis-neumorphic.png
+    - assets/branding/orialis-neumorphic-transparent.png
     - assets/branding/orialis-news.png
     - assets/chat_symbols/

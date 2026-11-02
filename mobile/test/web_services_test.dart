@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:orialis_mobile/core/config/app_config.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:orialis_mobile/app/app.dart';
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
@@ -7,6 +8,11 @@ import 'package:orialis_mobile/features/web_services/web_service_launcher.dart';
 import 'package:orialis_mobile/features/web_services/web_services_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+class _ServicesTestConfig extends AppConfig {
+  @override
+  Future<String> desktopDatabaseName() async => 'test-account';
+}
+
 Future<void> _showServices(WidgetTester tester) async {
   tester.view.physicalSize = const Size(1180, 1000);
   tester.view.devicePixelRatio = 1;
@@ -14,7 +20,10 @@ Future<void> _showServices(WidgetTester tester) async {
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [desktopModeProvider.overrideWithValue(true)],
+      overrides: [
+        desktopModeProvider.overrideWithValue(true),
+        appConfigProvider.overrideWithValue(_ServicesTestConfig()),
+      ],
       child: WidgetsApp(
         color: const Color(0xFFFFFFFF),
         pageRouteBuilder: <T>(settings, builder) => PageRouteBuilder<T>(
@@ -220,11 +229,37 @@ void main() {
       expect(find.text('http://127.0.0.1:9988'), findsOneWidget);
       expect(
         (await SharedPreferences.getInstance()).getString(
-          WebServiceStore.key('server-monitor'),
+          WebServiceStore.key('server-monitor', scope: 'test-account'),
         ),
         'http://127.0.0.1:9988',
       );
       expect(tester.takeException(), isNull);
+    },
+  );
+  test(
+    'personal service URLs are isolated and do not inherit legacy URLs',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        WebServiceStore.key('server-monitor'),
+        'https://legacy-private.example',
+      );
+      final a = WebServiceStore(prefs, scope: 'account-a');
+      final b = WebServiceStore(prefs, scope: 'account-b');
+      await a.saveUrl('server-monitor', 'https://a-private.example');
+      expect(
+        (await b.load(desktop: true))
+            .singleWhere((s) => s.id == 'server-monitor')
+            .url,
+        'http://127.0.0.1:8876',
+      );
+      await b.saveUrl('server-monitor', 'https://b-private.example');
+      expect(
+        (await a.load(desktop: true))
+            .singleWhere((s) => s.id == 'server-monitor')
+            .url,
+        'https://a-private.example',
+      );
     },
   );
 }

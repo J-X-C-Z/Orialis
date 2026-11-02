@@ -1,0 +1,4 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:width="250dp" android:height="48dp" android:drawable="@drawable/widget_background" />
+    <item android:left="16dp" android:top="16dp" android:right="16dp" android:bottom="12dp" android:drawable="@drawable/widget_accent_background" />
+</layer-list>

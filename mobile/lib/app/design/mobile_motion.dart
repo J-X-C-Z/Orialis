@@ -50,10 +50,12 @@ class _OrialisContentTransitionState extends State<OrialisContentTransition>
     with SingleTickerProviderStateMixin {
   late final _controller = AnimationController(
     vsync: this,
-    duration: LuminaMotion.fast,
+    duration: LuminaMotion.standard,
     value: 1,
   );
-  late final _progress = _controller.drive(CurveTween(curve: luminaEaseOut));
+  late final _progress = _controller.drive<double>(
+    CurveTween(curve: Curves.easeInOutCubic),
+  );
   Animation<Offset> _position = const AlwaysStoppedAnimation(Offset.zero);
   Animation<double> _opacity = const AlwaysStoppedAnimation(1);
 
@@ -62,14 +64,17 @@ class _OrialisContentTransitionState extends State<OrialisContentTransition>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.changeKey == widget.changeKey) return;
     final reduced = LuminaTheme.motionReducedOf(context);
+    final direction = widget.direction.sign;
     final start = _controller.isAnimating
         ? _position.value
-        : Offset(widget.direction * .025, 0);
-    final opacity = _controller.isAnimating ? _opacity.value : .92;
+        : Offset(direction * .018, 0);
+    final opacityStart = _controller.isAnimating ? _opacity.value : .97;
     _position = reduced
         ? const AlwaysStoppedAnimation(Offset.zero)
         : Tween<Offset>(begin: start, end: Offset.zero).animate(_progress);
-    _opacity = Tween<double>(begin: opacity, end: 1).animate(_progress);
+    _opacity = reduced
+        ? const AlwaysStoppedAnimation(1)
+        : Tween<double>(begin: opacityStart, end: 1).animate(_progress);
     _controller.forward(from: 0);
   }
 

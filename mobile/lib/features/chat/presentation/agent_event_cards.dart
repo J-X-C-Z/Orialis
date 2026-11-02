@@ -214,6 +214,7 @@ class _EventCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: LuminaSpacing.item),
       child: LuminaSurface(
+        depth: LuminaSurfaceDepth.raised,
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

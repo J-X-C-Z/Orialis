@@ -2,7 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:lumina_ui/lumina_ui.dart';
 
-/// A raised glass housing surrounding a separate recessed track.
+/// A frosted glass housing, without a raised clay bevel.
 class OrialisNavigationGlassFrame extends StatelessWidget {
   const OrialisNavigationGlassFrame({required this.child, super.key});
 
@@ -19,11 +19,8 @@ class OrialisNavigationGlassFrame extends StatelessWidget {
     return ListenableBuilder(
       listenable: LuminaBlurPolicy.instance.chromeListenable,
       builder: (context, _) {
-        final blur = LuminaBlurFilters.forConfig(
-          theme.highPerformanceMode
-              ? LuminaBlurConfig.highPerformanceChrome
-              : LuminaBlurPolicy.instance.chrome,
-        );
+        final sigma = theme.highPerformanceMode ? 3.5 : 5.5;
+        final blur = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma);
         return Stack(
           fit: StackFit.passthrough,
           clipBehavior: Clip.none,
@@ -34,33 +31,10 @@ class OrialisNavigationGlassFrame extends StatelessWidget {
                   borderRadius: BorderRadius.circular(1000),
                   child: opaque
                       ? ColoredBox(color: theme.colors.surface)
-                      : blur == null
-                      ? DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                Color.lerp(
-                                  theme.colors.surface,
-                                  const Color(0xFFFFFFFF),
-                                  theme.colors.toneValue(.13, .035),
-                                )!,
-                                theme.colors.surface,
-                                Color.lerp(
-                                  theme.colors.surface,
-                                  theme.colors.accent,
-                                  theme.colors.toneValue(.07, .10),
-                                )!,
-                              ],
-                              stops: const [0, .54, 1],
-                            ),
-                          ),
-                        )
                       : BackdropFilter(
                           filter: blur,
                           child: ColoredBox(
-                            color: theme.colors.surface.withValues(alpha: .62),
+                            color: theme.colors.surface.withValues(alpha: .48),
                           ),
                         ),
                 ),
@@ -81,18 +55,60 @@ class OrialisNavigationGlassFrame extends StatelessWidget {
   }
 }
 
-/// Paint-only glass cover: no offscreen image filter over text or icons.
-/// This keeps the native labels upright across Skia and Impeller backends.
-class OrialisNavigationGlassLens extends StatelessWidget {
+/// Refraction samples the live navigation labels, never a screenshot.
+class OrialisNavigationGlassLens extends StatefulWidget {
   const OrialisNavigationGlassLens({
     required this.child,
     required this.position,
     required this.count,
+    this.shaderRefraction = true,
     super.key,
   });
   final Widget child;
   final double position;
   final int count;
+  final bool shaderRefraction;
+
+  @override
+  State<OrialisNavigationGlassLens> createState() =>
+      _NavigationGlassLensState();
+}
+
+class _NavigationGlassLensState extends State<OrialisNavigationGlassLens> {
+  static Future<ui.FragmentProgram>? _program;
+  ui.FragmentShader? _shader;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.shaderRefraction && ui.ImageFilter.isShaderFilterSupported) {
+      _loadShader();
+    }
+  }
+
+  @override
+  void didUpdateWidget(OrialisNavigationGlassLens oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.shaderRefraction &&
+        widget.shaderRefraction &&
+        _shader == null &&
+        ui.ImageFilter.isShaderFilterSupported) {
+      _loadShader();
+    }
+  }
+
+  Future<void> _loadShader() async {
+    final program = await (_program ??= ui.FragmentProgram.fromAsset(
+      'shaders/navigation_lens.frag',
+    ));
+    if (mounted) setState(() => _shader = program.fragmentShader());
+  }
+
+  @override
+  void dispose() {
+    _shader?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -101,21 +117,50 @@ class OrialisNavigationGlassLens extends StatelessWidget {
         theme.reduceTransparency || MediaQuery.highContrastOf(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final index = position.clamp(0.0, count - 1.0);
+        final count = widget.count;
+        final index = widget.position.clamp(0.0, count - 1.0);
         final physical = Directionality.of(context) == TextDirection.rtl
             ? count - 1 - index
             : index;
         final trackPadding = 3 * theme.data.spacingScale;
+        final slotWidth = (constraints.maxWidth - 2 * trackPadding) / count;
+        // Nonzero fill preserves the full sampling bounds; padding alone does not.
+        final content = ColoredBox(
+          key: const ValueKey('nav-glass-sampling-region'),
+          color: theme.colors.surface.withValues(alpha: 1 / 255),
+          child: Padding(
+            padding: EdgeInsets.all(trackPadding),
+            child: widget.child,
+          ),
+        );
+        final shader = opaque || !widget.shaderRefraction ? null : _shader;
+        if (shader != null) {
+          shader
+            ..setFloat(2, MediaQuery.devicePixelRatioOf(context))
+            ..setFloat(3, theme.highPerformanceMode ? 1 : 0)
+            ..setFloat(4, (physical + .5) / count)
+            ..setFloat(5, count.toDouble())
+            ..setFloat(
+              6,
+              trackPadding * MediaQuery.devicePixelRatioOf(context),
+            );
+        }
         return Stack(
           fit: StackFit.passthrough,
           clipBehavior: Clip.none,
           children: [
-            child,
+            if (shader != null)
+              ImageFiltered(
+                imageFilter: ui.ImageFilter.shader(shader),
+                child: content,
+              )
+            else
+              content,
             Positioned(
-              left: physical * constraints.maxWidth / count - trackPadding,
-              width: constraints.maxWidth / count + 2 * trackPadding,
-              top: -trackPadding,
-              bottom: -trackPadding,
+              left: physical * slotWidth,
+              width: slotWidth + 2 * trackPadding,
+              top: 0,
+              bottom: 0,
               child: IgnorePointer(
                 child: ExcludeSemantics(
                   child: SizedBox(
@@ -188,6 +233,19 @@ class _NavigationGlassPaint extends CustomPainter {
       return;
     }
     const light = Color(0xFFFFFFFF);
+    if (frame) {
+      canvas.drawRRect(
+        outer,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = .8
+          ..shader = ui.Gradient.linear(rect.topLeft, rect.bottomRight, [
+            light.withValues(alpha: colors.toneValue(.46, .25)),
+            colors.muted.withValues(alpha: .12),
+          ]),
+      );
+      return;
+    }
     final glass = Color.lerp(colors.surface, colors.accent, .16)!;
     final shade = Color.lerp(colors.surface, const Color(0xFF101D2B), .65)!;
     final depth = OrialisNavigationGlassFrame.surfaceDepth;

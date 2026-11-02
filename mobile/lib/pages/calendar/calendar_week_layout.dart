@@ -1,5 +1,90 @@
 import '../../core/database/app_database.dart';
 
+/// Shared time coordinates for all seven columns; only wholly free hours fold.
+class CalendarWeekAxis {
+  CalendarWeekAxis(
+    Iterable<CalendarWeekEntry> entries, {
+    bool collapsed = false,
+    double? collapseProgress,
+    double hourHeight = 72,
+    double gapHeight = 28,
+  }) {
+    final progress = (collapseProgress ?? (collapsed ? 1.0 : 0.0)).clamp(
+      0.0,
+      1.0,
+    );
+    final busy = List.filled(24, false);
+    for (final entry in entries) {
+      for (var hour = 0; hour < 24; hour++) {
+        if (entry.startMinute < (hour + 1) * 60 &&
+            entry.endMinute > hour * 60) {
+          busy[hour] = true;
+        }
+      }
+    }
+    for (var hour = 0; hour < 24;) {
+      final start = hour;
+      final folded = progress > 0 && !busy[hour];
+      hour++;
+      if (folded) {
+        while (hour < 24 && !busy[hour]) {
+          hour++;
+        }
+      }
+      final fullHeight = (hour - start) * hourHeight;
+      final height = folded
+          ? fullHeight + (gapHeight - fullHeight) * progress
+          : fullHeight;
+      segments.add((
+        startMinute: start * 60.0,
+        endMinute: hour * 60.0,
+        top: extent,
+        height: height,
+        collapsed: folded,
+      ));
+      extent += height;
+    }
+  }
+
+  final segments =
+      <
+        ({
+          double startMinute,
+          double endMinute,
+          double top,
+          double height,
+          bool collapsed,
+        })
+      >[];
+  double extent = 0;
+
+  double offsetForMinute(double minute) {
+    final value = minute.clamp(0.0, 1440.0);
+    for (final segment in segments) {
+      if (value <= segment.endMinute) {
+        return segment.top +
+            (value - segment.startMinute) /
+                (segment.endMinute - segment.startMinute) *
+                segment.height;
+      }
+    }
+    return extent;
+  }
+
+  double minuteForOffset(double offset) {
+    final value = offset.clamp(0.0, extent);
+    for (final segment in segments) {
+      if (value <= segment.top + segment.height) {
+        return segment.startMinute +
+            (value - segment.top) /
+                segment.height *
+                (segment.endMinute - segment.startMinute);
+      }
+    }
+    return 1440;
+  }
+}
+
 /// A local-day slice. End minutes are exclusive, including 1440 at midnight.
 class CalendarWeekEntry {
   CalendarWeekEntry(this.event, this.startMinute, this.endMinute);

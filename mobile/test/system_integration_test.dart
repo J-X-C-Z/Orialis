@@ -283,7 +283,11 @@ void main() {
     'cold anonymous shortcut works before opt in but not a detail route',
     () async {
       SharedPreferences.setMockInitialValues({});
-      for (final route in ['/calendar', '/calendar/schedule/private']) {
+      for (final route in [
+        '/calendar',
+        '/system',
+        '/calendar/schedule/private',
+      ]) {
         final db = AppDatabase(executor: AppDatabase.inMemoryExecutor());
         final config = FakeConfig()..token = null;
         final opened = <String>[];
@@ -303,7 +307,10 @@ void main() {
           onRoute: opened.add,
         );
         await Future.wait([controller.start(), controller.start()]);
-        expect(opened, route == '/calendar' ? ['/calendar'] : isEmpty);
+        expect(
+          opened,
+          route == '/calendar/schedule/private' ? isEmpty : [route],
+        );
         await controller.dispose();
         await db.close();
       }

@@ -218,26 +218,34 @@ class _LuminaRevealState extends State<LuminaReveal>
   }
 
   @override
-  Widget build(BuildContext context) => IgnorePointer(
-    ignoring: !widget.visible,
-    child: ExcludeFocus(
-      excluding: !widget.visible,
-      child: ExcludeSemantics(
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: !widget.visible,
+      child: ExcludeFocus(
         excluding: !widget.visible,
-        child: SizeTransition(
-          sizeFactor: controller,
-          alignment: Alignment.topCenter,
-          child: FadeTransition(
-            opacity: controller,
+        child: ExcludeSemantics(
+          excluding: !widget.visible,
+          child: AnimatedBuilder(
+            animation: controller,
             child: Offstage(
               offstage: !contentActive,
               child: TickerMode(enabled: contentActive, child: widget.child),
             ),
+            builder: (context, child) => ClipRect(
+              clipBehavior: widget.visible && controller.value == 1
+                  ? Clip.none
+                  : Clip.hardEdge,
+              child: Align(
+                alignment: Alignment.topCenter,
+                heightFactor: controller.value,
+                child: FadeTransition(opacity: controller, child: child),
+              ),
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class LuminaEngravedDivider extends StatelessWidget {

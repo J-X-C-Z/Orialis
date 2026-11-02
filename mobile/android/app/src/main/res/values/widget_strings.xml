@@ -1,0 +1,24 @@
+<resources>
+    <string name="widget_today_name">Orialis · 今日安排 4×2</string>
+    <string name="widget_today_description">今日安排，支持调整大小，点击打开 Orialis</string>
+    <string name="widget_today_compact_name">Orialis · 今日概览 2×2</string>
+    <string name="widget_today_compact_description">今日概览，支持调整大小，点击打开 Orialis</string>
+    <string name="widget_today_expanded_name">Orialis · 今日总览 4×4</string>
+    <string name="widget_today_expanded_description">今日总览，支持调整大小，点击打开 Orialis</string>
+    <string name="widget_tasks_compact_name">Orialis · 待办速览 2×2</string>
+    <string name="widget_tasks_compact_description">待办速览，支持调整大小，点击打开 Orialis</string>
+    <string name="widget_tasks_name">Orialis · 任务列表 4×2</string>
+    <string name="widget_tasks_description">任务列表，支持调整大小，点击打开 Orialis</string>
+    <string name="widget_tasks_expanded_name">Orialis · 任务清单 4×4</string>
+    <string name="widget_tasks_expanded_description">任务清单，支持调整大小，点击打开 Orialis</string>
+    <string name="widget_agenda_name">Orialis · 接下来 4×2</string>
+    <string name="widget_agenda_description">接下来，支持调整大小，点击打开 Orialis</string>
+    <string name="widget_agenda_expanded_name">Orialis · 日程列表 4×4</string>
+    <string name="widget_agenda_expanded_description">日程列表，支持调整大小，点击打开 Orialis</string>
+    <string name="widget_month_name">Orialis · 月历 4×4</string>
+    <string name="widget_month_description">月历，支持调整大小，点击打开 Orialis</string>
+    <string name="widget_shortcuts_compact_name">Orialis · 快捷入口 2×1</string>
+    <string name="widget_shortcuts_compact_description">快捷入口，支持调整大小，点击打开 Orialis</string>
+    <string name="widget_shortcuts_name">Orialis · 快捷入口 4×1</string>
+    <string name="widget_shortcuts_description">快捷入口，支持调整大小，点击打开 Orialis</string>
+</resources>

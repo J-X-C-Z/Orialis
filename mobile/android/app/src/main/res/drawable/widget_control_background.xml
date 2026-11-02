@@ -1,0 +1,17 @@
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true" android:drawable="@drawable/widget_row_background" />
+    <item>
+        <layer-list>
+            <item android:top="1dp">
+                <shape><solid android:color="@color/widget_shadow" /><corners android:radius="@dimen/widget_radius_control" /></shape>
+            </item>
+            <item android:bottom="1dp">
+                <shape>
+                    <gradient android:angle="315" android:startColor="@color/widget_surface_high" android:endColor="@color/widget_surface_low" />
+                    <stroke android:width="0.5dp" android:color="@color/widget_highlight" />
+                    <corners android:radius="@dimen/widget_radius_control" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+</selector>

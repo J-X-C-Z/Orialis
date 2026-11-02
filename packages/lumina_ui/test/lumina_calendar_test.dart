@@ -29,6 +29,30 @@ void main() {
     expect(tester.getTopLeft(find.text('固定胶囊')), header);
     expect(tester.getTopLeft(find.text('内容 0')).dy, lessThan(header.dy));
   });
+  testWidgets('compact floating header reserves its requested content gap', (
+    tester,
+  ) async {
+    double? inset;
+    await tester.pumpWidget(
+      harness(
+        LuminaFloatingHeader(
+          headerExtent: 52,
+          contentGap: 8,
+          header: const SizedBox(key: ValueKey('compact-calendar-header')),
+          bodyBuilder: (_, topInset) {
+            inset = topInset;
+            return const SizedBox();
+          },
+        ),
+      ),
+    );
+    final header = tester.getRect(
+      find.byKey(const ValueKey('compact-calendar-header')),
+    );
+    expect(inset, closeTo(header.bottom + 8, .1));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('empty cards retain titles and date controls fit large text', (
     tester,
   ) async {

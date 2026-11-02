@@ -325,6 +325,7 @@ class _ResponseInteractiveBlockState extends State<ResponseInteractiveBlock> {
   }
 
   Widget _panel(Widget child) => LuminaSurface(
+    depth: LuminaSurfaceDepth.raised,
     radius: 16,
     padding: const EdgeInsets.all(12),
     child: child,

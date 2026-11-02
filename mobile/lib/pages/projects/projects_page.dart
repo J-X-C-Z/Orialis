@@ -1,37 +1,50 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../app/app.dart';
+
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 import 'package:orialis_mobile/app/design/lumina_compat.dart'
     show LuminaCardMemory, OrialisPageScaffold;
+
 import '../../core/database/app_database.dart';
+import '../../features/categories/item_category.dart';
 import '../../features/projects/data/project_repository.dart';
 import '../../features/events/presentation/task_editor.dart';
 import '../../features/events/presentation/long_press_orderable.dart';
 import '../shared/page_parts.dart';
+import '../shared/adaptive_layout.dart';
 
 /// Maps the stored project status onto the product wording.
 String _projectStatusLabel(String status) => switch (status) {
+  'not_started' => '未开始',
   'completed' => '已完成',
   'archived' => '已归档',
   _ => '进行中',
 };
+
+bool _matchesProjectStatus(Project project, String? statusFilter) =>
+    statusFilter == null || project.status == statusFilter;
 
 class ProjectsPage extends ConsumerStatefulWidget {
   const ProjectsPage({
     this.embedded = false,
     this.active = true,
     this.topInset = 0,
+    this.statusFilter,
     super.key,
   });
   final bool embedded;
   final bool active;
   final double topInset;
+  final String? statusFilter;
   @override
   ConsumerState<ProjectsPage> createState() => _ProjectsPageState();
 }
 
 class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   String? _selected = LuminaCardMemory.selectedProject;
+  bool _showCompletedMilestones = false;
   ProjectRepository? _streamRepository;
   Stream<List<Project>>? _projectsStream;
   final Map<String, Stream<List<ProjectMilestone>>> _milestoneStreams = {};
@@ -41,6 +54,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     if (identical(_streamRepository, repository)) return;
     _streamRepository = repository;
     _projectsStream = repository.watchProjects();
+    _showCompletedMilestones = false;
     _milestoneStreams.clear();
     _taskStreams.clear();
   }
@@ -60,22 +74,31 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   Future<void> _editProject([Project? project]) async {
     await showLuminaSheet<void>(
       context: context,
-      builder: (_) => _NameEditor(
+      builder: (_) => _ProjectEditor(
         title: project == null ? '新建项目' : '编辑项目',
-        name: project?.name,
-        detail: project?.goal,
-        onSave: (name, detail) async {
+        project: project,
+        onSave: (draft) async {
           final r = ref.read(projectRepositoryProvider);
           if (project == null) {
             await r.createProject(
-              name: name,
-              goal: detail.isEmpty ? null : detail,
+              name: draft.name,
+              goal: draft.goal,
+              category: draft.category,
+              status: draft.status ?? 'not_started',
+              description: draft.description,
+              startDate: draft.startDate,
+              due: draft.due,
             );
           } else {
             await r.updateProject(
               project,
-              name: name,
-              goal: detail.isEmpty ? null : detail,
+              name: draft.name,
+              goal: draft.goal,
+              category: draft.category,
+              status: draft.status,
+              description: Value(draft.description),
+              startDate: Value(draft.startDate),
+              due: Value(draft.due),
             );
           }
         },
@@ -121,12 +144,18 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     if (_selected != p.id && _projectDetailScroll.hasClients) {
       _projectDetailScroll.jumpTo(0);
     }
-    setState(() => _selected = p.id);
+    setState(() {
+      if (_selected != p.id) _showCompletedMilestones = false;
+      _selected = p.id;
+    });
     LuminaCardMemory.selectProject(p.id);
   }
 
   void _closeProject() {
-    setState(() => _selected = null);
+    setState(() {
+      _selected = null;
+      _showCompletedMilestones = false;
+    });
     LuminaCardMemory.selectProject(null);
   }
 
@@ -148,7 +177,11 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
       builder: (context, snapshot) {
         if (snapshot.hasError) return const PageFailure();
         if (!snapshot.hasData) return const Center(child: LuminaProgress());
-        final projects = snapshot.data!;
+        final projects = snapshot.data!
+            .where(
+              (project) => _matchesProjectStatus(project, widget.statusFilter),
+            )
+            .toList(growable: false);
         final selected = projects.where((p) => p.id == _selected).firstOrNull;
         return BackButtonListener(
           onBackButtonPressed: () async {
@@ -170,8 +203,10 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
             },
             child: LayoutBuilder(
               builder: (context, constraints) {
-                if (desktop &&
-                    constraints.maxWidth >= 840 &&
+                if ((desktop ||
+                        (OrialisAdaptiveLayout.maybeOf(context)?.wide ??
+                            false)) &&
+                    constraints.maxWidth >= 720 &&
                     LuminaNavigationInset.of(context) == 0) {
                   return _desktopProjects(projects, selected);
                 }
@@ -195,11 +230,18 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                       child: Row(
                         children: [
                           Expanded(
-                            child: Text(
-                              '把想法，逐步实现',
-                              style: LuminaTheme.of(
-                                context,
-                              ).textTheme.titleLarge,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '把想法，逐步实现',
+                                  style: LuminaTheme.of(context)
+                                      .textTheme
+                                      .titleLarge,
+                                ),
+                                const SizedBox(height: 4),
+                                QuietLabel(_projectListScopeLabel()),
+                              ],
                             ),
                           ),
                           LuminaIconButton(
@@ -218,7 +260,11 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                       ),
                     ),
                     if (projects.isEmpty)
-                      const LuminaEmptyState(text: '为一个稍长的目标建立项目，再拆成可完成的里程碑。'),
+                      LuminaEmptyState(
+                        text: widget.statusFilter == null
+                            ? '为一个稍长的目标建立项目，再拆成可完成的里程碑。'
+                            : '这个状态还没有项目。再点顶栏当前状态即可查看全部。',
+                      ),
                     for (final p in projects)
                       LongPressOrderable<Project>(
                         key: ValueKey('order:projects:${p.id}'),
@@ -282,14 +328,8 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                               summary: LuminaStack(
                                 gap: 6,
                                 children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: QuietLabel(p.goal ?? '还没有设置目标'),
-                                      ),
-                                      QuietLabel(_projectStatusLabel(p.status)),
-                                    ],
-                                  ),
+                                  QuietLabel(p.goal ?? '还没有设置目标'),
+                                  _projectBadges(p),
                                   StreamBuilder<List<ProjectMilestone>>(
                                     stream: _watchMilestones(p.id),
                                     builder: (_, snapshot) {
@@ -376,7 +416,9 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                   children: [
                     Text('项目工作区', style: theme.textTheme.titleLarge),
                     const SizedBox(height: 4),
-                    QuietLabel('${projects.length} 个项目，逐步推进每一个目标'),
+                    QuietLabel(
+                      '${_projectListScopeLabel()} · ${projects.length} 个',
+                    ),
                   ],
                 ),
               ),
@@ -401,7 +443,9 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                         padding: const EdgeInsets.only(left: 12, bottom: 8),
                         child: Row(
                           children: [
-                            const Expanded(child: QuietLabel('全部项目')),
+                            Expanded(
+                              child: QuietLabel(_projectListScopeLabel()),
+                            ),
                             LuminaIconButton(
                               tooltip: '恢复项目默认排序',
                               icon: const LuminaIcon(LuminaIcons.sync),
@@ -414,9 +458,13 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                       ),
                       Expanded(
                         child: projects.isEmpty
-                            ? const Padding(
-                                padding: EdgeInsets.all(12),
-                                child: QuietLabel('新建一个项目，把目标拆成具体步骤。'),
+                            ? Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: QuietLabel(
+                                  widget.statusFilter == null
+                                      ? '新建一个项目，把目标拆成具体步骤。'
+                                      : '这个状态还没有项目。',
+                                ),
                               )
                             : ListView.separated(
                                 key: const ValueKey('desktop-project-list'),
@@ -483,11 +531,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                                               style: theme.textTheme.bodySmall,
                                             ),
                                             const SizedBox(height: 8),
-                                            QuietLabel(
-                                              _projectStatusLabel(
-                                                project.status,
-                                              ),
-                                            ),
+                                            _projectBadges(project),
                                           ],
                                         ),
                                       ),
@@ -519,7 +563,9 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                                   const SizedBox(height: 12),
                                   Text(
                                     projects.isEmpty
-                                        ? '建立项目，再用里程碑和关联事件把想法变成进展。'
+                                        ? widget.statusFilter == null
+                                              ? '建立项目，再用里程碑和关联事件把想法变成进展。'
+                                              : '切换顶部状态，或再次点按当前状态查看全部。'
                                         : '在左侧选择项目，查看目标、里程碑和下一行动。',
                                     textAlign: TextAlign.center,
                                   ),
@@ -551,11 +597,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
                                             style: theme.textTheme.titleLarge,
                                           ),
                                           const SizedBox(height: 6),
-                                          QuietLabel(
-                                            _projectStatusLabel(
-                                              selected.status,
-                                            ),
-                                          ),
+                                          _projectBadges(selected),
                                         ],
                                       ),
                                     ),
@@ -619,6 +661,25 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     );
   }
 
+  String _projectListScopeLabel() => widget.statusFilter == null
+      ? '全部项目 · 点按右侧当前状态可取消筛选'
+      : '${_projectStatusLabel(widget.statusFilter!)}项目 · 再次点按可查看全部';
+
+  Widget _projectBadges(Project project) => Wrap(
+    spacing: 6,
+    runSpacing: 6,
+    children: [
+      KeyedSubtree(
+        key: ValueKey('project-status-${project.id}'),
+        child: _ProjectStatusBadge(status: project.status),
+      ),
+      KeyedSubtree(
+        key: ValueKey('project-category-${project.id}'),
+        child: CategoryBadge(value: project.category),
+      ),
+    ],
+  );
+
   Future<void> _reorderProjects(
     List<Project> current,
     Project dragged,
@@ -659,39 +720,47 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         stream: _watchMilestones(project.id),
         builder: (_, snapshot) {
           if (snapshot.hasError) return const PageFailure();
-          return LuminaCompletionList(
-            empty: const QuietLabel('还没有里程碑。'),
+          final milestones = snapshot.data ?? const <ProjectMilestone>[];
+          final pending = milestones.where((m) => !m.completed).toList();
+          final completed = milestones.where((m) => m.completed).toList();
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              for (final m in snapshot.data ?? const <ProjectMilestone>[])
-                LuminaListRow(
-                  key: ValueKey(m.id),
-                  depth: LuminaSurfaceDepth.recessed,
-                  title: m.title,
-                  subtitle: m.due ?? '无截止日期',
-                  leading: LuminaCheck(
-                    value: m.completed,
-                    onChanged: (value) => ref
-                        .read(projectRepositoryProvider)
-                        .completeMilestone(m, value),
-                  ),
-                  trailing: LuminaIconButton(
-                    tooltip: '管理里程碑',
-                    icon: const LuminaIcon(LuminaIcons.more),
-                    onPressed: () async {
-                      final action = await chooseRecordAction(context);
-                      if (!mounted) return;
-                      if (action == 'edit') await _milestone(project, m);
-                      if (action == 'delete' &&
-                          mounted &&
-                          await confirmDelete(context, m.title)) {
-                        await ref
-                            .read(projectRepositoryProvider)
-                            .deleteMilestone(m);
-                      }
-                    },
-                  ),
-                  onTap: () => _milestone(project, m),
+              if (pending.isNotEmpty || completed.isEmpty)
+                LuminaCompletionList(
+                  empty: const QuietLabel('还没有里程碑。'),
+                  children: [
+                    for (final m in pending) _milestoneRow(project, m),
+                  ],
                 ),
+              if (completed.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Semantics(
+                  expanded: _showCompletedMilestones,
+                  child: LuminaListRow(
+                    key: const ValueKey('completed-milestones-toggle'),
+                    title: '已完成 · ${completed.length}',
+                    trailing: LuminaIcon(
+                      _showCompletedMilestones
+                          ? LuminaIcons.chevronDown
+                          : LuminaIcons.chevronRight,
+                    ),
+                    onTap: () => setState(
+                      () =>
+                          _showCompletedMilestones = !_showCompletedMilestones,
+                    ),
+                  ),
+                ),
+                LuminaReveal(
+                  visible: _showCompletedMilestones,
+                  child: LuminaCompletionList(
+                    children: [
+                      for (final m in completed) _milestoneRow(project, m),
+                    ],
+                  ),
+                ),
+              ],
             ],
           );
         },
@@ -748,6 +817,263 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
             ],
           );
         },
+      ),
+    ],
+  );
+
+  Widget _milestoneRow(Project project, ProjectMilestone milestone) =>
+      LuminaListRow(
+        key: ValueKey(milestone.id),
+        depth: LuminaSurfaceDepth.recessed,
+        title: milestone.title,
+        subtitle: milestone.due ?? '无截止日期',
+        leading: LuminaCheck(
+          value: milestone.completed,
+          onChanged: (value) async {
+            await ref
+                .read(projectRepositoryProvider)
+                .completeMilestone(milestone, value);
+            if (value && mounted) {
+              setState(() => _showCompletedMilestones = false);
+            }
+          },
+        ),
+        trailing: LuminaIconButton(
+          tooltip: '管理里程碑',
+          icon: const LuminaIcon(LuminaIcons.more),
+          onPressed: () async {
+            final action = await chooseRecordAction(context);
+            if (!mounted) return;
+            if (action == 'edit') await _milestone(project, milestone);
+            if (action == 'delete' &&
+                mounted &&
+                await confirmDelete(context, milestone.title)) {
+              await ref
+                  .read(projectRepositoryProvider)
+                  .deleteMilestone(milestone);
+            }
+          },
+        ),
+        onTap: () => _milestone(project, milestone),
+      );
+}
+
+class _ProjectStatusBadge extends StatelessWidget {
+  const _ProjectStatusBadge({required this.status});
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = LuminaTheme.of(context);
+    final color = switch (status) {
+      'not_started' => theme.colors.muted,
+      'completed' => theme.colors.accent,
+      'archived' => theme.colors.outline,
+      _ => theme.colors.accent,
+    };
+    return LuminaSurface(
+      color: color.withValues(alpha: .13),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      radius: LuminaRadius.attachment,
+      child: Text(
+        _projectStatusLabel(status),
+        style: theme.textTheme.labelSmall.copyWith(color: color),
+      ),
+    );
+  }
+}
+
+class _ProjectDraft {
+  const _ProjectDraft({
+    required this.name,
+    required this.goal,
+    required this.category,
+    required this.status,
+    required this.description,
+    required this.startDate,
+    required this.due,
+  });
+
+  final String name;
+  final String? goal;
+  final String category;
+  final String? status;
+  final String? description;
+  final String? startDate;
+  final String? due;
+}
+
+class _ProjectEditor extends StatefulWidget {
+  const _ProjectEditor({
+    required this.title,
+    required this.project,
+    required this.onSave,
+  });
+
+  final String title;
+  final Project? project;
+  final Future<void> Function(_ProjectDraft draft) onSave;
+
+  @override
+  State<_ProjectEditor> createState() => _ProjectEditorState();
+}
+
+class _ProjectEditorState extends State<_ProjectEditor> {
+  late final _name = TextEditingController(text: widget.project?.name);
+  late final _goal = TextEditingController(text: widget.project?.goal);
+  late final _description = TextEditingController(
+    text: widget.project?.description,
+  );
+  late String _category =
+      widget.project?.category ?? ItemCategory.general.value;
+  late String? _status = switch (widget.project?.status) {
+    'not_started' || 'active' || 'completed' => widget.project!.status,
+    _ => widget.project == null ? 'not_started' : null,
+  };
+  late String? _startDate = widget.project?.startDate;
+  late String? _due = widget.project?.due;
+  String? _error;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _goal.dispose();
+    _description.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate({required bool start}) async {
+    final current = DateTime.tryParse((start ? _startDate : _due) ?? '');
+    final selected = await showLuminaDatePicker(
+      context: context,
+      initialDate: current ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      if (start) {
+        _startDate = dateKey(selected);
+      } else {
+        _due = dateKey(selected);
+      }
+    });
+  }
+
+  Widget _dateRow({required bool start}) {
+    final value = start ? _startDate : _due;
+    return LuminaListRow(
+      key: ValueKey(
+        start ? 'project-editor-start-date' : 'project-editor-due-date',
+      ),
+      title: start ? '开始日期' : '截止日期',
+      subtitle: value ?? '未设置',
+      onTap: () => _pickDate(start: start),
+      trailing: value == null
+          ? null
+          : LuminaIconButton(
+              tooltip: '清除${start ? '开始日期' : '截止日期'}',
+              icon: const LuminaIcon(LuminaIcons.close, size: 18),
+              onPressed: () => setState(() {
+                if (start) {
+                  _startDate = null;
+                } else {
+                  _due = null;
+                }
+              }),
+            ),
+    );
+  }
+
+  String? _optional(TextEditingController controller) {
+    final value = controller.text.trim();
+    return value.isEmpty ? null : value;
+  }
+
+  @override
+  Widget build(BuildContext context) => ContentStack(
+    gap: 16,
+    children: [
+      Text(widget.title, style: LuminaTheme.of(context).textTheme.titleLarge),
+      LuminaTextField(
+        key: const ValueKey('project-editor-name'),
+        controller: _name,
+        label: '名称',
+        autofocus: true,
+      ),
+      LuminaTextField(
+        key: const ValueKey('project-editor-goal'),
+        controller: _goal,
+        label: '目标',
+        maxLines: 2,
+      ),
+      KeyedSubtree(
+        key: const ValueKey('project-editor-category'),
+        child: CategoryField(
+          value: _category,
+          onChanged: (value) => setState(() => _category = value),
+        ),
+      ),
+      if (_status != null)
+        LuminaSegmented<String>(
+          key: const ValueKey('project-editor-status'),
+          transparent: true,
+          items: const {
+            'not_started': '未开始',
+            'active': '进行中',
+            'completed': '已完成',
+          },
+          value: _status!,
+          onChanged: (value) => setState(() => _status = value),
+        )
+      else
+        const QuietLabel('这是旧归档项目；保存时保留归档状态。'),
+      _dateRow(start: true),
+      _dateRow(start: false),
+      LuminaTextField(
+        key: const ValueKey('project-editor-description'),
+        controller: _description,
+        label: '描述',
+        maxLines: 3,
+      ),
+      if (_error != null) Text(_error!),
+      LuminaButton(
+        key: const ValueKey('project-editor-save'),
+        onPressed: _saving
+            ? null
+            : () async {
+                if (_name.text.trim().isEmpty) {
+                  setState(() => _error = '请填写名称。');
+                  return;
+                }
+                setState(() {
+                  _saving = true;
+                  _error = null;
+                });
+                try {
+                  await widget.onSave(
+                    _ProjectDraft(
+                      name: _name.text.trim(),
+                      goal: _optional(_goal),
+                      category: _category,
+                      status: _status,
+                      description: _optional(_description),
+                      startDate: _startDate,
+                      due: _due,
+                    ),
+                  );
+                  if (context.mounted) Navigator.pop(context);
+                } catch (_) {
+                  if (mounted) {
+                    setState(() {
+                      _saving = false;
+                      _error = '保存失败，内容已保留，请重试。';
+                    });
+                  }
+                }
+              },
+        child: Text(_saving ? '保存中…' : '保存'),
       ),
     ],
   );

@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart' show NavigationDestination;
 import 'package:lumina_ui/lumina_ui.dart' hide LuminaCardMemory;
 
 import 'navigation_glass.dart';
+import 'adaptive_layout.dart';
 
 /// Shared phone chrome for the schedule and news applications.
 class OrialisMobileNavigationOverlay extends StatelessWidget {
@@ -45,14 +47,40 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
             (label.height ?? 1.2);
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _rail(BuildContext context, Widget bar, double width) {
+    final theme = LuminaTheme.of(context);
+    final label = theme.textTheme.labelSmall;
+    final labelHeight =
+        MediaQuery.textScalerOf(context).scale(label.fontSize!) *
+        (label.height ?? 1.2);
+    final slot = math.max(64.0, labelHeight + 42);
+    return SafeArea(
+      left: false,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+        child: SingleChildScrollView(
+          key: const ValueKey('adaptive-navigation-rail'),
+          child: RotatedBox(
+            quarterTurns: 1,
+            child: SizedBox(
+              width: destinations.length * slot + 24,
+              height: width - 12,
+              child: bar,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _navigationBar(BuildContext context, {bool vertical = false}) {
     final theme = LuminaTheme.of(context);
     final neumorphic = theme.data.neumorphic;
     final neumorphicGlass = neumorphic && theme.data.neumorphicGlass;
-    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
-    final showNavigation = visible && keyboardInset == 0;
     Widget itemsAt(Animation<double> position) => Row(
+      crossAxisAlignment: vertical
+          ? CrossAxisAlignment.stretch
+          : CrossAxisAlignment.center,
       children: [
         for (var i = 0; i < destinations.length; i++)
           Expanded(
@@ -95,75 +123,81 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
                             horizontal: 2,
                           ) *
                           theme.data.spacingScale,
-                      child: _EtchedNavigationLabel(
-                        index: i,
-                        position: position,
-                        enabled: neumorphicGlass,
-                        child: TweenAnimationBuilder<Color?>(
-                          tween: ColorTween(
-                            end: selectedIndex == i
-                                ? theme.colors.accent
-                                : theme.colors.muted,
-                          ),
-                          duration: LuminaTheme.motionReducedOf(context)
-                              ? Duration.zero
-                              : LuminaMotion.fast,
-                          curve: luminaEaseOut,
-                          builder: (context, color, _) => Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconTheme(
-                                data: IconThemeData(color: color),
-                                child: AnimatedSwitcher(
-                                  duration: LuminaTheme.motionReducedOf(context)
-                                      ? Duration.zero
-                                      : LuminaMotion.fast,
-                                  switchInCurve: luminaEaseOut,
-                                  switchOutCurve: luminaEaseOut,
-                                  child: KeyedSubtree(
-                                    key: ValueKey(
-                                      selectedIndex == i &&
-                                          destinations[i].selectedIcon != null,
+                      child: RotatedBox(
+                        quarterTurns: vertical ? -1 : 0,
+                        child: _EtchedNavigationLabel(
+                          index: i,
+                          position: position,
+                          enabled: neumorphicGlass,
+                          shaderRefraction: !vertical,
+                          child: TweenAnimationBuilder<Color?>(
+                            tween: ColorTween(
+                              end: selectedIndex == i
+                                  ? theme.colors.accent
+                                  : theme.colors.muted,
+                            ),
+                            duration: LuminaTheme.motionReducedOf(context)
+                                ? Duration.zero
+                                : LuminaMotion.fast,
+                            curve: luminaEaseOut,
+                            builder: (context, color, _) => Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconTheme(
+                                  data: IconThemeData(color: color),
+                                  child: AnimatedSwitcher(
+                                    duration:
+                                        LuminaTheme.motionReducedOf(context)
+                                        ? Duration.zero
+                                        : LuminaMotion.fast,
+                                    switchInCurve: luminaEaseOut,
+                                    switchOutCurve: luminaEaseOut,
+                                    child: KeyedSubtree(
+                                      key: ValueKey(
+                                        selectedIndex == i &&
+                                            destinations[i].selectedIcon !=
+                                                null,
+                                      ),
+                                      child: selectedIndex == i
+                                          ? destinations[i].selectedIcon ??
+                                                destinations[i].icon
+                                          : destinations[i].icon,
                                     ),
-                                    child: selectedIndex == i
-                                        ? destinations[i].selectedIcon ??
-                                              destinations[i].icon
-                                        : destinations[i].icon,
                                   ),
                                 ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                destinations[i].label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.labelSmall.copyWith(
-                                  color: color,
-                                  shadows:
-                                      neumorphicGlass &&
-                                          !MediaQuery.highContrastOf(context)
-                                      ? [
-                                          Shadow(
-                                            color: theme.colors.tone(
-                                              const Color(0xE6FFFFFF),
-                                              const Color(0x88596775),
+                                const SizedBox(height: 4),
+                                Text(
+                                  destinations[i].label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.labelSmall.copyWith(
+                                    color: color,
+                                    shadows:
+                                        neumorphicGlass &&
+                                            !MediaQuery.highContrastOf(context)
+                                        ? [
+                                            Shadow(
+                                              color: theme.colors.tone(
+                                                const Color(0xE6FFFFFF),
+                                                const Color(0x88596775),
+                                              ),
+                                              offset: const Offset(.65, 1),
+                                              blurRadius: .45,
                                             ),
-                                            offset: const Offset(.65, 1),
-                                            blurRadius: .45,
-                                          ),
-                                          Shadow(
-                                            color: theme.colors.tone(
-                                              const Color(0x55536370),
-                                              const Color(0xCC070D15),
+                                            Shadow(
+                                              color: theme.colors.tone(
+                                                const Color(0x55536370),
+                                                const Color(0xCC070D15),
+                                              ),
+                                              offset: const Offset(-.4, -.55),
+                                              blurRadius: .35,
                                             ),
-                                            offset: const Offset(-.4, -.55),
-                                            blurRadius: .35,
-                                          ),
-                                        ]
-                                      : null,
+                                          ]
+                                        : null,
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -182,7 +216,7 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
       glass: !neumorphic,
       backdrop: !neumorphic,
       radius: LuminaControlSize.capsuleRadius,
-      padding: const EdgeInsets.all(3),
+      padding: neumorphicGlass ? EdgeInsets.zero : const EdgeInsets.all(3),
       child: neumorphic
           ? OrialisNavigationSelection(
               index: selectedIndex,
@@ -190,6 +224,8 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
                 for (final destination in destinations) destination.enabled,
               ],
               glass: neumorphicGlass,
+              // Keep rotated glyphs out of image-filter sampling coordinates.
+              shaderRefraction: !vertical,
               onSelectionChanged: (index) => _select(index, fromDrag: true),
               builder: itemsAt,
             )
@@ -202,52 +238,103 @@ class OrialisMobileNavigationOverlay extends StatelessWidget {
               child: itemsAt(AlwaysStoppedAnimation(selectedIndex.toDouble())),
             ),
     );
-    final navigationBar = RepaintBoundary(
+    return RepaintBoundary(
       child: neumorphicGlass
           ? OrialisNavigationGlassFrame(child: innerBar)
           : innerBar,
     );
-    return LuminaNavigationInset(
-      bottom: showNavigation ? navigationInset(context) : 0,
-      child: ColoredBox(
-        color: theme.colors.paper,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: Padding(
-                padding: EdgeInsets.only(bottom: keyboardInset),
-                child: MediaQuery.removeViewInsets(
-                  context: context,
-                  removeBottom: true,
-                  child: child,
-                ),
-              ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: LuminaReveal(
-                visible: showNavigation,
-                child: SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
-                    child: neumorphic
-                        ? navigationBar
-                        : ListenableBuilder(
-                            listenable:
-                                LuminaBlurPolicy.instance.chromeListenable,
-                            builder: (context, _) => navigationBar,
-                          ),
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = LuminaTheme.of(context);
+    final neumorphic = theme.data.neumorphic;
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    final showNavigation = visible && keyboardInset == 0;
+    final navigationBar = _navigationBar(context);
+    final labelWidth =
+        MediaQuery.textScalerOf(context)
+            .scale(theme.textTheme.labelSmall.fontSize ?? 13) *
+        2;
+    final railContentWidth = math.max(88.0, labelWidth + 40);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tablet =
+            math.min(constraints.maxWidth, constraints.maxHeight) >= 600;
+        final wide =
+            constraints.maxWidth >= 600 &&
+            (constraints.maxWidth > constraints.maxHeight || tablet);
+        final railWidth = wide && showNavigation
+            ? railContentWidth + MediaQuery.paddingOf(context).right
+            : 0.0;
+        return OrialisAdaptiveLayout(
+          wide: wide,
+          tablet: tablet,
+          navigationWidth: railWidth,
+          child: LuminaNavigationInset(
+            bottom: showNavigation && !wide ? navigationInset(context) : 0,
+            child: ColoredBox(
+              color: theme.colors.paper,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Positioned.fill(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        right: railWidth,
+                        bottom: keyboardInset,
+                      ),
+                      child: MediaQuery(
+                        data: MediaQuery.of(context)
+                            .removeViewInsets(removeBottom: true)
+                            .removePadding(removeRight: wide && showNavigation),
+                        child: child,
+                      ),
+                    ),
                   ),
-                ),
+                  if (wide)
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      bottom: keyboardInset,
+                      width: railWidth,
+                      child: showNavigation
+                          ? _rail(
+                              context,
+                              _navigationBar(context, vertical: true),
+                              railContentWidth,
+                            )
+                          : const SizedBox.shrink(),
+                    )
+                  else
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: LuminaReveal(
+                        visible: showNavigation,
+                        child: SafeArea(
+                          top: false,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+                            child: neumorphic
+                                ? navigationBar
+                                : ListenableBuilder(
+                                    listenable: LuminaBlurPolicy
+                                        .instance
+                                        .chromeListenable,
+                                    builder: (context, _) => navigationBar,
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
@@ -260,11 +347,13 @@ class OrialisNavigationSelection extends StatefulWidget {
     required this.glass,
     required this.onSelectionChanged,
     required this.builder,
+    this.shaderRefraction = true,
   });
 
   final int index;
   final List<bool> enabled;
   final bool glass;
+  final bool shaderRefraction;
   final ValueChanged<int> onSelectionChanged;
   final Widget Function(Animation<double> position) builder;
 
@@ -284,12 +373,19 @@ class _OrialisNavigationSelectionState extends State<OrialisNavigationSelection>
 
   int get _count => widget.enabled.length;
 
-  double get _slotWidth => (context.size?.width ?? 0) / _count;
+  double get _trackPadding =>
+      widget.glass ? 3 * LuminaTheme.of(context).data.spacingScale : 0;
+
+  double get _slotWidth =>
+      ((context.size?.width ?? 0) - 2 * _trackPadding) / _count;
 
   int _logicalIndexAt(Offset position) {
     final width = _slotWidth;
     if (width <= 0) return widget.index;
-    final physicalIndex = (position.dx / width).floor().clamp(0, _count - 1);
+    final physicalIndex = ((position.dx - _trackPadding) / width).floor().clamp(
+      0,
+      _count - 1,
+    );
     return Directionality.of(context) == TextDirection.rtl
         ? _count - 1 - physicalIndex
         : physicalIndex;
@@ -308,7 +404,10 @@ class _OrialisNavigationSelectionState extends State<OrialisNavigationSelection>
     _dragging = true;
     unawaited(LuminaHaptics.dragStart());
     _position.stop();
-    _grabOffset = details.localPosition.dx - (_physicalPosition + .5) * width;
+    _grabOffset =
+        details.localPosition.dx -
+        _trackPadding -
+        (_physicalPosition + .5) * width;
   }
 
   bool _enabled(int index) =>
@@ -319,9 +418,10 @@ class _OrialisNavigationSelectionState extends State<OrialisNavigationSelection>
     final width = _slotWidth;
     if (width <= 0) return;
     final last = (_count - 1).toDouble();
-    final physical = ((localPosition.dx - _grabOffset) / width - .5)
-        .clamp(0.0, last)
-        .toDouble();
+    final physical =
+        ((localPosition.dx - _trackPadding - _grabOffset) / width - .5)
+            .clamp(0.0, last)
+            .toDouble();
     final logical = Directionality.of(context) == TextDirection.rtl
         ? (last - physical).round()
         : physical.round();
@@ -394,6 +494,7 @@ class _OrialisNavigationSelectionState extends State<OrialisNavigationSelection>
         return OrialisNavigationGlassLens(
           position: _position.value,
           count: _count,
+          shaderRefraction: widget.shaderRefraction,
           child: content!,
         );
       },
@@ -407,23 +508,30 @@ class _OrialisNavigationSelectionState extends State<OrialisNavigationSelection>
   }
 }
 
-/// Engraving belongs to the soft bed; the glass only refracts its image.
+/// Tracks without shader sampling magnify the original labels directly.
 class _EtchedNavigationLabel extends StatelessWidget {
   const _EtchedNavigationLabel({
     required this.index,
     required this.position,
     required this.enabled,
     required this.child,
+    this.shaderRefraction = true,
   });
   final int index;
   final Animation<double> position;
   final bool enabled;
   final Widget child;
+  final bool shaderRefraction;
 
   @override
   Widget build(BuildContext context) {
     final reduced = LuminaTheme.motionReducedOf(context);
-    final active = enabled && !reduced && !MediaQuery.highContrastOf(context);
+    final active =
+        enabled &&
+        !reduced &&
+        !LuminaTheme.of(context).reduceTransparency &&
+        !MediaQuery.highContrastOf(context) &&
+        (!shaderRefraction || !ui.ImageFilter.isShaderFilterSupported);
     return AnimatedBuilder(
       animation: position,
       child: child,
@@ -432,9 +540,7 @@ class _EtchedNavigationLabel extends StatelessWidget {
         final weight = active ? math.max(0.0, 1 - distance.abs()) : 0.0;
         final depth = weight * weight * (3 - 2 * weight);
         final transform = Matrix4.identity()
-          ..setEntry(0, 1, distance.clamp(-1.0, 1.0) * depth * .035)
-          ..translateByDouble(0, depth * 1.8, 0, 1)
-          ..scaleByDouble(1 - depth * .045, 1 - depth * .065, 1, 1);
+          ..scaleByDouble(1 + depth * .035, 1 + depth * .035, 1, 1);
         return Transform(
           key: ValueKey('nav-engraving-$index'),
           alignment: Alignment.center,

@@ -58,6 +58,7 @@ class WearAccountSnapshotSource {
           if (value['deletedAt'] != null) continue;
           rows.add({
             for (final field in _fields[entry.key]!) field: value[field],
+
           });
         }
         collections[entry.key] = rows;

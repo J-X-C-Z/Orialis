@@ -33,5 +33,15 @@
         <receiver
             android:name=".TodayWidgetProvider"
             tools:node="remove" />
+        <receiver android:name=".TodayCompactWidgetProvider" tools:node="remove" />
+        <receiver android:name=".TodayExpandedWidgetProvider" tools:node="remove" />
+        <receiver android:name=".TasksCompactWidgetProvider" tools:node="remove" />
+        <receiver android:name=".TasksWidgetProvider" tools:node="remove" />
+        <receiver android:name=".TasksExpandedWidgetProvider" tools:node="remove" />
+        <receiver android:name=".AgendaWidgetProvider" tools:node="remove" />
+        <receiver android:name=".AgendaExpandedWidgetProvider" tools:node="remove" />
+        <receiver android:name=".MonthWidgetProvider" tools:node="remove" />
+        <receiver android:name=".ShortcutsCompactWidgetProvider" tools:node="remove" />
+        <receiver android:name=".ShortcutsWidgetProvider" tools:node="remove" />
     </application>
 </manifest>
