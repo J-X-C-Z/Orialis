@@ -293,8 +293,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
   final _attachmentBridge = AttachmentBridge();
   final List<AttachmentRecord> _attachments = [];
   final Map<String, AgentEventStore> _conversationEvents = {};
+  // Same per-account scope as drafts. desktopDatabaseNameProvider is only
+  // kept current on desktop; on phones it stays 'orialis' for every account.
   late final _recentModels = RecentHermesModels(
-    accountScope: () async => ref.read(desktopDatabaseNameProvider),
+    accountScope: () => ref.read(appConfigProvider).desktopDatabaseName(),
   );
   final Map<String, Completer<CommandResult?>> _commandWaiters = {};
   final Map<String, String> _pendingModelSwitches = {};
@@ -1001,13 +1003,6 @@ class _ChatPageState extends ConsumerState<ChatPage>
           : () => _chooseChatDevice(useDefault: true),
     ),
     padding: EdgeInsets.zero,
-    actions: [
-      LuminaIconButton(
-        onPressed: _startingDeviceChat ? null : _chooseChatDevice,
-        icon: const LuminaIcon(LuminaIcons.devices),
-        tooltip: '与设备对话',
-      ),
-    ],
     body: StreamBuilder<List<Conversation>>(
       stream: _conversationsStream,
       initialData: _emittedConversations,
@@ -1029,6 +1024,14 @@ class _ChatPageState extends ConsumerState<ChatPage>
                 LuminaButton(
                   onPressed: _createConversation,
                   child: const Text('新建会话'),
+                ),
+                const SizedBox(height: 8),
+                LuminaButton(
+                  key: const ValueKey('conversation-empty-device-chat'),
+                  primary: false,
+                  onPressed: _startingDeviceChat ? null : _chooseChatDevice,
+                  icon: const LuminaIcon(LuminaIcons.devices, size: 18),
+                  child: const Text('与设备对话'),
                 ),
               ],
             ),
@@ -1096,6 +1099,15 @@ class _ChatPageState extends ConsumerState<ChatPage>
                         ? '筛选'
                         : '筛选 ${(_conversationDeviceFilter != null ? 1 : 0) + (_conversationStateFilter != null ? 1 : 0)}',
                   ),
+                ),
+                // Main pages carry no header actions, so choosing a device
+                // lives with the list's own controls.
+                const SizedBox(width: 4),
+                LuminaIconButton(
+                  key: const ValueKey('conversation-device-chat'),
+                  onPressed: _startingDeviceChat ? null : _chooseChatDevice,
+                  icon: const LuminaIcon(LuminaIcons.devices),
+                  tooltip: '与设备对话',
                 ),
               ],
             ),
