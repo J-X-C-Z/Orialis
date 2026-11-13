@@ -43,6 +43,9 @@ enum LuminaIcons {
   chevronDown,
   checkCircle,
   branch,
+
+  /// Restore default ordering (distinct from [sync], which means network sync).
+  sortReset,
 }
 
 class LuminaIcon extends StatelessWidget {
@@ -286,6 +289,17 @@ class _IconPainter extends CustomPainter {
         for (final x in [2.0, 22.0]) {
           line(x, 10, x, 14);
         }
+        break;
+      case LuminaIcons.sortReset:
+        line(3, 6, 14, 6);
+        line(3, 12, 11, 12);
+        line(3, 18, 8, 18);
+        line(18, 5, 18, 19);
+        path([
+          const Offset(14.5, 15.5),
+          const Offset(18, 19),
+          const Offset(21.5, 15.5),
+        ]);
         break;
       case LuminaIcons.sync:
         c.drawArc(const Rect.fromLTWH(4, 4, 16, 16), .3, 4.8, false, p);

@@ -73,10 +73,13 @@ void main() {
       await tester.tap(find.text('事件').last);
       await tester.pumpAndSettle();
       expect(find.text('四象限'), findsOneWidget);
+      // Phone main pages carry no header actions; each quadrant has its own.
       await tester.tap(
-        find.byWidgetPredicate(
-          (w) => w is LuminaIconButton && w.tooltip == '新增事件',
-        ),
+        find
+            .byWidgetPredicate(
+              (w) => w is LuminaIconButton && w.tooltip == '在此象限新增事件',
+            )
+            .first,
       );
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(EditableText).first, '离线完成界面验收');
@@ -84,10 +87,11 @@ void main() {
       await tester.ensureVisible(save);
       await tester.tap(save);
       await tester.pumpAndSettle();
-      expect(
-        (await database.select(database.tasks).get()).single.title,
-        '离线完成界面验收',
-      );
+      final created = (await database.select(database.tasks).get()).single;
+      expect(created.title, '离线完成界面验收');
+      // Created from the first quadrant, so it lands there.
+      expect(created.important, isTrue);
+      expect(created.urgent, isTrue);
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('日历').last);
       await tester.pumpAndSettle();

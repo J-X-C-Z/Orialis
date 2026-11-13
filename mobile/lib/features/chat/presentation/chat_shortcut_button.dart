@@ -9,11 +9,13 @@ class ChatShortcutButton extends StatelessWidget {
     required this.onPressed,
     required this.onDefaultChat,
     required this.tooltip,
+    this.icon = LuminaIcons.add,
     super.key,
   });
 
   final VoidCallback? onPressed, onDefaultChat;
   final String tooltip;
+  final LuminaIcons icon;
 
   @override
   Widget build(BuildContext context) => LuminaTooltip(
@@ -29,7 +31,7 @@ class ChatShortcutButton extends StatelessWidget {
               },
         child: LuminaFloatingActionButton(
           frosted: true,
-          icon: const LuminaIcon(LuminaIcons.add),
+          icon: LuminaIcon(icon),
           onPressed: onPressed,
         ),
       ),

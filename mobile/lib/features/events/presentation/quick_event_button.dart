@@ -54,7 +54,8 @@ class _QuickEventButtonState extends ConsumerState<QuickEventButton> {
 
   @override
   Widget build(BuildContext context) => ChatShortcutButton(
-    tooltip: '快捷添加事件；长按与默认设备聊天',
+    tooltip: '用一句话让 Hermes 添加事件；长按与默认设备聊天',
+    icon: LuminaIcons.sparkles,
     onDefaultChat: _opening ? null : _openDefaultChat,
     onPressed: _opening
         ? null
@@ -62,14 +63,24 @@ class _QuickEventButtonState extends ConsumerState<QuickEventButton> {
             context: context,
             builder: (_) => QuickEventEditor(
               submit: ref.read(quickEventServiceProvider).submit,
+              checkAvailable: ref
+                  .read(quickEventServiceProvider)
+                  .unavailableReason,
             ),
           ),
   );
 }
 
 class QuickEventEditor extends StatefulWidget {
-  const QuickEventEditor({required this.submit, super.key});
+  const QuickEventEditor({
+    required this.submit,
+    this.checkAvailable,
+    super.key,
+  });
   final Future<void> Function(QuickEventRequest) submit;
+
+  /// Optional pre-flight so an offline backend is visible before typing.
+  final Future<String?> Function()? checkAvailable;
 
   @override
   State<QuickEventEditor> createState() => _QuickEventEditorState();
@@ -79,7 +90,17 @@ class _QuickEventEditorState extends State<QuickEventEditor> {
   final _text = TextEditingController();
   QuickEventRequest? _request;
   bool _sending = false, _submitted = false;
-  String? _error;
+  String? _error, _notice;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.checkAvailable?.call().then((notice) {
+      if (mounted && notice != null && !_submitted) {
+        setState(() => _notice = notice);
+      }
+    }, onError: (_) {});
+  }
 
   @override
   void dispose() {
@@ -101,7 +122,12 @@ class _QuickEventEditorState extends State<QuickEventEditor> {
     });
     try {
       await widget.submit(_request!);
-      if (mounted) setState(() => _submitted = true);
+      if (mounted) {
+        setState(() {
+          _submitted = true;
+          _notice = null;
+        });
+      }
     } catch (error) {
       if (mounted) {
         setState(
@@ -136,7 +162,9 @@ class _QuickEventEditorState extends State<QuickEventEditor> {
           maxLength: 10000,
           enabled: !_sending && !_submitted,
         ),
-        if (_error != null) Text(_error!),
+        if (_notice != null && _error == null)
+          _EditorNotice(_notice!, tone: _NoticeTone.warning),
+        if (_error != null) _EditorNotice(_error!, tone: _NoticeTone.danger),
         LuminaButton(
           onPressed: _sending
               ? null
@@ -154,4 +182,45 @@ class _QuickEventEditorState extends State<QuickEventEditor> {
       ],
     ),
   );
+}
+
+enum _NoticeTone { warning, danger }
+
+/// Icon plus text so the state never depends on colour alone.
+class _EditorNotice extends StatelessWidget {
+  const _EditorNotice(this.text, {required this.tone});
+  final String text;
+  final _NoticeTone tone;
+  @override
+  Widget build(BuildContext context) {
+    final theme = LuminaTheme.of(context);
+    final color = tone == _NoticeTone.danger
+        ? theme.colors.danger
+        : theme.colors.muted;
+    return Semantics(
+      liveRegion: true,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: LuminaIcon(
+              tone == _NoticeTone.danger
+                  ? LuminaIcons.error
+                  : LuminaIcons.warning,
+              size: 16,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodySmall.copyWith(color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

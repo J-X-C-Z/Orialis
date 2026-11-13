@@ -46,15 +46,30 @@ Future<void> showTaskEditor(
   required Future<void> Function(TaskEditorDraft) onSave,
   Task? task,
   String? sourceLabel,
+  // Pre-selects a quadrant when creating from inside one.
+  bool? initialImportant,
+  bool? initialUrgent,
 }) => showLuminaSheet<void>(
   context: context,
-  builder: (_) =>
-      _TaskEditor(task: task, onSave: onSave, sourceLabel: sourceLabel),
+  builder: (_) => _TaskEditor(
+    task: task,
+    onSave: onSave,
+    sourceLabel: sourceLabel,
+    initialImportant: initialImportant,
+    initialUrgent: initialUrgent,
+  ),
 );
 
 class _TaskEditor extends ConsumerStatefulWidget {
-  const _TaskEditor({required this.onSave, this.task, this.sourceLabel});
+  const _TaskEditor({
+    required this.onSave,
+    this.task,
+    this.sourceLabel,
+    this.initialImportant,
+    this.initialUrgent,
+  });
   final Task? task;
+  final bool? initialImportant, initialUrgent;
   final String? sourceLabel;
   final Future<void> Function(TaskEditorDraft) onSave;
   @override
@@ -70,8 +85,12 @@ class _TaskEditorState extends ConsumerState<_TaskEditor> {
   late DateTime? _due = DateTime.tryParse(widget.task?.due ?? '');
   late String? _time = widget.task?.dueTime;
   late String? _project = widget.task?.projectId;
-  late TriStateChoice _important = triStateChoice(widget.task?.important);
-  late TriStateChoice _urgent = triStateChoice(widget.task?.urgent);
+  late TriStateChoice _important = triStateChoice(
+    widget.task == null ? widget.initialImportant : widget.task!.important,
+  );
+  late TriStateChoice _urgent = triStateChoice(
+    widget.task == null ? widget.initialUrgent : widget.task!.urgent,
+  );
   bool _saving = false;
   String? _error;
   @override

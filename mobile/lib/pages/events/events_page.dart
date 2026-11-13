@@ -16,6 +16,7 @@ import '../../features/events/presentation/task_quadrant_sliver.dart';
 import '../../features/events/presentation/long_press_orderable.dart';
 import '../../features/events/presentation/quick_event_button.dart';
 import '../projects/projects_page.dart';
+import '../shared/due_label.dart';
 import '../shared/page_parts.dart';
 import '../shared/adaptive_layout.dart';
 import '../shared/glass_segmented.dart';
@@ -72,9 +73,19 @@ class _EventsPageState extends ConsumerState<EventsPage> {
     }
   }
 
-  Future<void> _edit([Task? task]) => showTaskEditor(
+  Future<void> _edit([Task? task, TaskQuadrant? into]) => showTaskEditor(
     context,
     task: task,
+    initialImportant: switch (into) {
+      TaskQuadrant.urgentImportant || TaskQuadrant.importantOnly => true,
+      TaskQuadrant.urgentOnly || TaskQuadrant.neither => false,
+      _ => null,
+    },
+    initialUrgent: switch (into) {
+      TaskQuadrant.urgentImportant || TaskQuadrant.urgentOnly => true,
+      TaskQuadrant.importantOnly || TaskQuadrant.neither => false,
+      _ => null,
+    },
     onSave: (d) {
       final r = ref.read(taskRepositoryProvider);
       return task == null
@@ -113,18 +124,6 @@ class _EventsPageState extends ConsumerState<EventsPage> {
     padding: EdgeInsets.zero,
     floatingActionButton: const QuickEventButton(),
     actions: [
-      if (_page == 0 && !ref.watch(desktopModeProvider))
-        LuminaIconButton(
-          tooltip: '恢复事件默认排序',
-          icon: const LuminaIcon(LuminaIcons.sync),
-          onPressed: () async {
-            final repository = ref.read(taskRepositoryProvider);
-            final tasks = await repository.watchTasks().first;
-            await repository.resetTaskOrder(
-              tasks.map((task) => task.id).toList(),
-            );
-          },
-        ),
       if (_page == 0)
         LuminaIconButton(
           tooltip: '新增事件',
@@ -308,7 +307,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
           if (tasks.isEmpty)
             const Padding(
               padding: EdgeInsets.only(top: 16),
-              child: QuietLabel('从右上角记下一件事，再为它选择轻重缓急。'),
+              child: QuietLabel('点象限标题旁的 + 记下一件事，它会直接归入该象限。'),
             ),
         ],
       );
@@ -340,13 +339,42 @@ class _EventsPageState extends ConsumerState<EventsPage> {
       const SizedBox(width: 8),
       LuminaIconButton(
         tooltip: '恢复事件默认排序',
-        icon: const LuminaIcon(LuminaIcons.sync),
-        onPressed: () => ref
-            .read(taskRepositoryProvider)
-            .resetTaskOrder(allTasks.map((task) => task.id).toList()),
+        icon: const LuminaIcon(LuminaIcons.sortReset),
+        onPressed: () async {
+          if (!allTasks.any((task) => task.manualPosition != null)) {
+            showLuminaToast(context, '当前已是默认排序');
+            return;
+          }
+          if (!await _confirmResetOrder()) return;
+          await ref
+              .read(taskRepositoryProvider)
+              .resetTaskOrder(allTasks.map((task) => task.id).toList());
+        },
       ),
     ],
   );
+
+  /// Clearing every hand-made order is not undoable, so ask once.
+  Future<bool> _confirmResetOrder() async =>
+      await showLuminaDialog<bool>(
+        context: context,
+        builder: (context) => LuminaDialog(
+          title: '恢复默认排序？',
+          content: const Text('所有长按拖动调整过的顺序都会清除，按截止时间重新排列。'),
+          actions: [
+            LuminaButton(
+              primary: false,
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            LuminaButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('恢复'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
 
   Widget _mobileTasks(
     double topInset,
@@ -399,7 +427,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
                       const SliverToBoxAdapter(
                         child: Padding(
                           padding: EdgeInsets.only(top: 16),
-                          child: QuietLabel('从右上角记下一件事，再为它选择轻重缓急。'),
+                          child: QuietLabel('点象限标题旁的 + 记下一件事，它会直接归入该象限。'),
                         ),
                       ),
                   ],
@@ -471,9 +499,18 @@ class _EventsPageState extends ConsumerState<EventsPage> {
           },
         ),
       ),
-      if (tasks.isEmpty) const QuietLabel('从左侧记下一件事，再为它选择轻重缓急。'),
+      if (tasks.isEmpty) const QuietLabel('点象限标题旁的 + 记下一件事，它会直接归入该象限。'),
     ],
   );
+
+  /// Like Today's sections, a quadrant offers its own reset only once it has
+  /// a hand-made order.
+  VoidCallback? _resetQuadrantOrder(List<Task> tasks) =>
+      tasks.any((task) => task.manualPosition != null)
+      ? () => ref
+            .read(taskRepositoryProvider)
+            .resetTaskOrder(tasks.map((task) => task.id).toList())
+      : null;
 
   Widget _sliverQuadrant(
     TaskQuadrant q,
@@ -484,6 +521,8 @@ class _EventsPageState extends ConsumerState<EventsPage> {
     quadrant: q,
     tasks: tasks,
     onMove: (task) => _moveTaskToQuadrant(task, q),
+    onResetOrder: _resetQuadrantOrder(tasks),
+    onAdd: () => _edit(null, q),
     onCompletionActivityChanged: onCompletionActivityChanged,
     itemBuilder: (context, index) {
       final task = tasks[index];
@@ -505,7 +544,10 @@ class _EventsPageState extends ConsumerState<EventsPage> {
     ValueChanged<bool>? onCompletionActivityChanged,
   }) => DragTarget<OrderDrag<Task>>(
     onWillAcceptWithDetails: (details) => details.data.group != q,
-    onAcceptWithDetails: (details) => _moveTaskToQuadrant(details.data.item, q),
+    onAcceptWithDetails: (details) {
+      unawaited(LuminaHaptics.selection());
+      _moveTaskToQuadrant(details.data.item, q);
+    },
     builder: (context, candidates, rejected) => LuminaPalette(
       palette: switch (q) {
         TaskQuadrant.urgentImportant => LuminaCardPalette.rose,
@@ -517,7 +559,13 @@ class _EventsPageState extends ConsumerState<EventsPage> {
       child: LuminaCollapsibleCard(
         storageId: 'quadrant:${q.name}',
         title: quadrantLabel(q),
-        summary: tasks.isEmpty ? '暂无事项' : '事项已收起',
+        trailing: QuadrantHeaderTrailing(
+          count: tasks.length,
+          dropping: candidates.isNotEmpty,
+          onResetOrder: _resetQuadrantOrder(tasks),
+          onAdd: () => _edit(null, q),
+        ),
+        summary: quadrantCollapsedSummary(tasks.length),
         child: LuminaCompletionList(
           key: ValueKey(q),
           empty: const QuietLabel('暂时没有事项'),
@@ -599,10 +647,12 @@ class _EventsPageState extends ConsumerState<EventsPage> {
                     style: LuminaTheme.of(context).textTheme.recessedTitle,
                   ),
                   const SizedBox(height: 2),
-                  QuietLabel(
-                    t.due == null
+                  DueLabel(
+                    due: t.completed ? null : t.due,
+                    dueTime: t.dueTime,
+                    emptyText: t.due == null
                         ? '未设截止'
-                        : '${t.due}${t.dueTime == null ? '' : ' ${t.dueTime}'}',
+                        : '截止 ${t.due}${t.dueTime == null ? '' : ' ${t.dueTime}'}',
                   ),
                 ],
               ),
