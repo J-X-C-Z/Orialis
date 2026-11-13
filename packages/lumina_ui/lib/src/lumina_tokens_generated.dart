@@ -23,6 +23,29 @@ class LuminaTokenDark {
   static const outline = Color(0xFF344356);
 }
 
+class LuminaTokenPalette {
+  static const mist = Color(0xFF91A1B1);
+  static const ocean = Color(0xFF729BBF);
+  static const sage = Color(0xFF82A68D);
+  static const amber = Color(0xFFC79B56);
+  static const rose = Color(0xFFCB7972);
+  static const lavender = Color(0xFF9B8DB9);
+}
+
+class LuminaTokenBrandLight {
+  static const ice = Color(0xFF4D8FD6);
+  static const lilac = Color(0xFF8A7FE0);
+  static const sun = Color(0xFFD99A6C);
+  static const sunInk = Color(0xFF9C5B28);
+}
+
+class LuminaTokenBrandDark {
+  static const ice = Color(0xFFACD7F7);
+  static const lilac = Color(0xFFAAA1EE);
+  static const sun = Color(0xFFEDC7A4);
+  static const sunInk = Color(0xFFEDC7A4);
+}
+
 class LuminaTokenSpacing {
   static const page = 20.0;
   static const pageTop = 12.0;

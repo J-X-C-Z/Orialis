@@ -35,12 +35,12 @@ class LuminaThemeData {
 /// Complete tonal families: raised body, recess, glass accent and text are
 /// derived together by LuminaColors, including the dark-mode counterpart.
 enum LuminaCardPalette {
-  mist(Color(0xFF91A1B1)),
-  ocean(Color(0xFF729BBF)),
-  sage(Color(0xFF82A68D)),
-  amber(Color(0xFFC79B56)),
-  rose(Color(0xFFCB7972)),
-  lavender(Color(0xFF9B8DB9));
+  mist(LuminaTokenPalette.mist),
+  ocean(LuminaTokenPalette.ocean),
+  sage(LuminaTokenPalette.sage),
+  amber(LuminaTokenPalette.amber),
+  rose(LuminaTokenPalette.rose),
+  lavender(LuminaTokenPalette.lavender);
 
   const LuminaCardPalette(this.tint);
   final Color tint;
