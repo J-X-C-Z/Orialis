@@ -25,6 +25,9 @@ export function LuminaProvider({ children, initialMode }: { children: React.Reac
   useEffect(() => { window.localStorage.setItem('lumina-theme', mode); }, [mode]);
   const theme = mode === 'system' ? (prefersDark ? 'dark' : 'light') : mode;
   const variables = Object.fromEntries(Object.entries(tokens.color[theme]).map(([key, value]) => [`--${key.replace(/[A-Z]/g, char => `-${char.toLowerCase()}`)}`, value])) as React.CSSProperties;
+  const kebab = (key: string) => key.replace(/[A-Z]/g, char => `-${char.toLowerCase()}`);
+  for (const [key, value] of Object.entries(tokens.palette)) Object.assign(variables, { [`--palette-${key}`]: value });
+  for (const [key, value] of Object.entries(tokens.brand[theme])) Object.assign(variables, { [`--brand-${kebab(key)}`]: value });
   Object.assign(variables, { '--radius-control': `${tokens.radius.control}px`, '--radius-card': `${tokens.radius.card}px`, '--minimum-control': `${tokens.size.minimumControl}px`, '--glass-blur': '7px' });
   return <ThemeContext.Provider value={{ mode, setMode }}><div ref={root} style={variables} className="lumina-root" data-theme={theme}>{children}</div></ThemeContext.Provider>;
 }

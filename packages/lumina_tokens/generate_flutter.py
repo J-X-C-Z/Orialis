@@ -14,11 +14,17 @@ def render() -> str:
         "import 'package:flutter/widgets.dart';",
         '',
     ]
-    for mode in ('light', 'dark'):
-        lines.append(f'class LuminaToken{mode.title()} {{')
-        for name, value in data['color'][mode].items():
+    def colors(cls: str, values: dict) -> None:
+        lines.append(f'class {cls} {{')
+        for name, value in values.items():
             lines.append(f'  static const {name} = Color(0xFF{value[1:].upper()});')
         lines.extend(['}', ''])
+
+    for mode in ('light', 'dark'):
+        colors(f'LuminaToken{mode.title()}', data['color'][mode])
+    colors('LuminaTokenPalette', data['palette'])
+    for mode in ('light', 'dark'):
+        colors(f'LuminaTokenBrand{mode.title()}', data['brand'][mode])
     for group, key in [('Spacing', 'spacing'), ('Radius', 'radius'), ('Size', 'size'), ('Motion', 'motionMs'), ('Glass', 'glass')]:
         lines.append(f'class LuminaToken{group} {{')
         for name, value in data[key].items():
