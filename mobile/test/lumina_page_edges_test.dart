@@ -375,7 +375,15 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('选中日程'), findsOneWidget);
-    expect(find.text('1 项截止 · 选中截止'), findsOneWidget);
+    // 1.5.0 leads the agenda with a labelled icon instead of "N 项截止 · …".
+    expect(
+      find.descendant(of: agenda, matching: find.text('选中截止')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: agenda, matching: _semanticsLabel('当天截止')),
+      findsOneWidget,
+    );
     final openDay = find.widgetWithText(LuminaButton, '查看当天全部安排');
     await tester.ensureVisible(openDay);
     await tester.tap(openDay);
@@ -483,7 +491,9 @@ void main() {
           .first,
     );
     await tester.pumpAndSettle();
-    expect(find.byType(LuminaTitledContentCard), findsNWidgets(2));
+    // Deadlines now sit in an icon-led surface; schedules keep the titled card.
+    expect(find.byType(LuminaTitledContentCard), findsOneWidget);
+    expect(find.byKey(ValueKey('calendar-due-$dateKey')), findsOneWidget);
     final row = tester.widget<LuminaListRow>(
       find.widgetWithText(LuminaListRow, '周视图凹陷日程'),
     );
@@ -495,7 +505,13 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('当天截止'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(ValueKey('calendar-due-$dateKey')),
+        matching: _semanticsLabel('当天截止'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('这一天没有截止事项。'), findsOneWidget);
     expect(find.text('附属事件'), findsNothing);
     await tester.tap(find.widgetWithText(LuminaListRow, '周视图凹陷日程'));
@@ -584,3 +600,7 @@ void main() {
     await db.close();
   });
 }
+
+Finder _semanticsLabel(String label) => find.byWidgetPredicate(
+  (widget) => widget is Semantics && widget.properties.label == label,
+);

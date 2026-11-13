@@ -286,7 +286,9 @@ void main() {
       final h = await openChat(tester);
       await _resize(tester, 1400);
       await tester.enterText(_composer, '跨宽度保留的草稿');
-      await _resize(tester, 1049);
+      // Since 1.5.0 tablet-wide windows split from 900dp of content, so a
+      // 1049dp tablet already splits; go below that to reach the narrow flow.
+      await _resize(tester, 880);
       expect(find.byKey(const ValueKey('chat-narrow-layout')), findsOneWidget);
       expect(_sidebar, findsNothing);
       await _resize(tester, 1050);

@@ -138,7 +138,11 @@ void main() {
               for (final label in labels.evaluate()) {
                 final finder = find.byWidget(label.widget);
                 final text = tester.widget<Text>(finder);
-                final paragraph = tester.renderObject<RenderParagraph>(finder);
+                // Vertical labels carry a whole-word semanticsLabel, so the
+                // Text wraps its RichText in Semantics; measure the paragraph.
+                final paragraph = tester.renderObject<RenderParagraph>(
+                  find.descendant(of: finder, matching: find.byType(RichText)),
+                );
                 expect(text.maxLines, isNull);
                 expect(paragraph.didExceedMaxLines, isFalse);
                 for (final box in paragraph.getBoxesForSelection(

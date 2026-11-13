@@ -194,48 +194,188 @@ Future<T?> showLuminaSheet<T>({
   );
 }
 
-void showLuminaMessage(BuildContext context, String text) {
+OverlayEntry? _luminaMessageEntry;
+_LuminaMessageState? _luminaMessageState;
+
+/// Transient feedback above the floating navigation. A newer message replaces
+/// the current one; an optional action (e.g. 撤销) keeps it tappable.
+void showLuminaMessage(
+  BuildContext context,
+  String text, {
+  String? actionLabel,
+  VoidCallback? onAction,
+  Duration? duration,
+}) {
   final overlay = Overlay.of(context);
   final theme = LuminaTheme.of(context);
   final media = MediaQuery.of(context);
+  // Sit above the floating tab bar instead of on top of it.
+  final navigation = LuminaNavigationInset.of(context);
+  _luminaMessageState?.dismiss(immediate: true);
   late OverlayEntry entry;
   entry = OverlayEntry(
     builder: (c) => Positioned(
       left: 24,
       right: 24,
-      bottom: MediaQuery.paddingOf(c).bottom + 28,
-      child: IgnorePointer(
-        child: MediaQuery(
-          data: media,
-          child: LuminaTheme(
-            brightness: theme.brightness,
-            reduceTransparency: theme.reduceTransparency,
-            highPerformanceMode: theme.highPerformanceMode,
-            tint: theme.tint,
-            data: theme.data,
-            child: Center(
-              child: Semantics(
-                liveRegion: true,
-                child: DefaultTextStyle(
-                  style: theme.textTheme.bodyMedium,
-                  child: LuminaSurface(glass: true, child: Text(text)),
-                ),
-              ),
-            ),
+      bottom: MediaQuery.paddingOf(c).bottom + navigation + 16,
+      child: MediaQuery(
+        data: media,
+        child: LuminaTheme(
+          brightness: theme.brightness,
+          reduceTransparency: theme.reduceTransparency,
+          highPerformanceMode: theme.highPerformanceMode,
+          tint: theme.tint,
+          data: theme.data,
+          child: _LuminaMessage(
+            text: text,
+            actionLabel: actionLabel,
+            onAction: onAction,
+            duration:
+                duration ??
+                (actionLabel == null
+                    ? const Duration(seconds: 3)
+                    : const Duration(seconds: 5)),
+            onDone: () {
+              if (identical(_luminaMessageEntry, entry)) {
+                _luminaMessageEntry = null;
+              }
+              entry.remove();
+              entry.dispose();
+            },
           ),
         ),
       ),
     ),
   );
+  _luminaMessageEntry = entry;
   overlay.insert(entry);
-  Future<void>.delayed(const Duration(seconds: 3), () {
-    entry.remove();
-    entry.dispose();
-  });
 }
 
-void showLuminaToast(BuildContext context, String text) =>
-    showLuminaMessage(context, text);
+class _LuminaMessage extends StatefulWidget {
+  const _LuminaMessage({
+    required this.text,
+    required this.duration,
+    required this.onDone,
+    this.actionLabel,
+    this.onAction,
+  });
+  final String text;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  final Duration duration;
+  final VoidCallback onDone;
+  @override
+  State<_LuminaMessage> createState() => _LuminaMessageState();
+}
+
+class _LuminaMessageState extends State<_LuminaMessage>
+    with SingleTickerProviderStateMixin {
+  late final _controller = AnimationController(
+    vsync: this,
+    duration: LuminaMotion.fast,
+  );
+  Timer? _timer;
+  bool _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _luminaMessageState = this;
+    _controller.forward();
+    _timer = Timer(widget.duration, dismiss);
+  }
+
+  void dismiss({bool immediate = false}) {
+    if (_closing) return;
+    _closing = true;
+    _timer?.cancel();
+    if (identical(_luminaMessageState, this)) _luminaMessageState = null;
+    if (immediate || !mounted || LuminaTheme.motionReducedOf(context)) {
+      widget.onDone();
+      return;
+    }
+    _controller.reverse().whenComplete(widget.onDone);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    if (identical(_luminaMessageState, this)) _luminaMessageState = null;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = LuminaTheme.of(context);
+    final reduced = LuminaTheme.motionReducedOf(context);
+    final curved = CurvedAnimation(parent: _controller, curve: luminaEaseOut);
+    final action = widget.actionLabel;
+    Widget body = LuminaSurface(
+      glass: true,
+      padding: EdgeInsets.fromLTRB(16, 10, action == null ? 16 : 6, 10),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(child: Text(widget.text)),
+          if (action != null) ...[
+            const SizedBox(width: 8),
+            LuminaButton(
+              primary: false,
+              onPressed: () {
+                widget.onAction?.call();
+                dismiss();
+              },
+              child: Text(
+                action,
+                style: theme.textTheme.bodyMedium.copyWith(
+                  color: theme.colors.accent,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+    if (action == null) body = IgnorePointer(child: body);
+    return Center(
+      child: Semantics(
+        liveRegion: true,
+        child: DefaultTextStyle(
+          style: theme.textTheme.bodyMedium,
+          child: FadeTransition(
+            opacity: curved,
+            child: reduced
+                ? body
+                : SlideTransition(
+                    position: Tween(
+                      begin: const Offset(0, .35),
+                      end: Offset.zero,
+                    ).animate(curved),
+                    child: ScaleTransition(
+                      scale: Tween(begin: .96, end: 1.0).animate(curved),
+                      child: body,
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+void showLuminaToast(
+  BuildContext context,
+  String text, {
+  String? actionLabel,
+  VoidCallback? onAction,
+}) => showLuminaMessage(
+  context,
+  text,
+  actionLabel: actionLabel,
+  onAction: onAction,
+);
 Future<DateTime?> showLuminaDatePicker({
   required BuildContext context,
   required DateTime initialDate,

@@ -16,6 +16,7 @@ import '../../features/events/presentation/task_editor.dart';
 import '../../features/events/presentation/task_children.dart';
 import '../../features/events/presentation/long_press_orderable.dart';
 import '../../features/events/presentation/quick_event_button.dart';
+import '../shared/due_label.dart';
 import '../shared/page_parts.dart';
 import '../shared/adaptive_layout.dart';
 
@@ -98,11 +99,13 @@ class _TodayPageState extends ConsumerState<TodayPage>
       title: '今日',
       padding: EdgeInsets.zero,
       floatingActionButton: const QuickEventButton(),
+      // Phones show the date in the overview line instead.
       actions: [
-        Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: QuietLabel('${now.month}月${now.day}日'),
-        ),
+        if (ref.watch(desktopModeProvider))
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: QuietLabel('${now.month}月${now.day}日'),
+          ),
       ],
       body: StreamBuilder<List<Task>>(
         stream: _tasksStream,
@@ -160,15 +163,19 @@ class _TodayPageState extends ConsumerState<TodayPage>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         QuietLabel('${focus.length} 项'),
-                        LuminaIconButton(
-                          tooltip: '恢复此列表默认排序',
-                          icon: const LuminaIcon(LuminaIcons.sync, size: 16),
-                          onPressed: () => ref
-                              .read(taskRepositoryProvider)
-                              .resetTaskOrder(
-                                focus.map((task) => task.id).toList(),
-                              ),
-                        ),
+                        if (focus.any((t) => t.manualPosition != null))
+                          LuminaIconButton(
+                            tooltip: '恢复此列表默认排序',
+                            icon: const LuminaIcon(
+                              LuminaIcons.sortReset,
+                              size: 16,
+                            ),
+                            onPressed: () => ref
+                                .read(taskRepositoryProvider)
+                                .resetTaskOrder(
+                                  focus.map((task) => task.id).toList(),
+                                ),
+                          ),
                       ],
                     ),
                     child: LuminaCompletionList(
@@ -201,7 +208,7 @@ class _TodayPageState extends ConsumerState<TodayPage>
                     ),
                     child: next == null
                         ? _empty('今天没有接下来的安排。')
-                        : _schedule(next),
+                        : _schedule(next, now: now),
                   ),
                 ),
                 paletteSection(
@@ -210,15 +217,24 @@ class _TodayPageState extends ConsumerState<TodayPage>
                     title: '最近截止',
                     raised: true,
                     glassTitle: glassTitle,
-                    trailing: LuminaIconButton(
-                      tooltip: '恢复此列表默认排序',
-                      icon: const LuminaIcon(LuminaIcons.sync, size: 16),
-                      onPressed: () => ref
-                          .read(taskRepositoryProvider)
-                          .resetTaskOrder(
-                            deadlines.take(3).map((task) => task.id).toList(),
+                    trailing:
+                        !deadlines.take(3).any((t) => t.manualPosition != null)
+                        ? null
+                        : LuminaIconButton(
+                            tooltip: '恢复此列表默认排序',
+                            icon: const LuminaIcon(
+                              LuminaIcons.sortReset,
+                              size: 16,
+                            ),
+                            onPressed: () => ref
+                                .read(taskRepositoryProvider)
+                                .resetTaskOrder(
+                                  deadlines
+                                      .take(3)
+                                      .map((task) => task.id)
+                                      .toList(),
+                                ),
                           ),
-                    ),
                     child: LuminaCompletionList(
                       empty: _empty('暂无未来的截止事项。'),
                       children: _orderedTasks(
@@ -258,7 +274,12 @@ class _TodayPageState extends ConsumerState<TodayPage>
                                           .scale(14) /
                                       14));
                   if (columns) {
-                    final compactColumns = constraints.maxWidth < 840;
+                    final tablet =
+                        OrialisAdaptiveLayout.maybeOf(context)?.tablet ?? false;
+                    // Phone landscape is short: keep the header to two lines.
+                    final short = constraints.maxHeight < 520;
+                    final compactColumns =
+                        constraints.maxWidth < 840 && !tablet;
                     final theme = LuminaTheme.of(context);
                     return Padding(
                       padding: compactColumns
@@ -273,15 +294,30 @@ class _TodayPageState extends ConsumerState<TodayPage>
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
+                                    if (!short) ...[
+                                      Text(
+                                        _dateLine(now),
+                                        style: theme.textTheme.bodySmall
+                                            .copyWith(
+                                              color: theme.colors.muted,
+                                            ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                    ],
                                     Text(
                                       '专注当下，从容安排',
                                       style: compactColumns
                                           ? theme.textTheme.titleMedium
                                           : theme.textTheme.headlineSmall,
                                     ),
-                                    const SizedBox(height: 8),
+                                    SizedBox(height: short ? 4 : 8),
                                     Text(
-                                      '${focus.length} 项需要关注，今天还有 ${remaining.length} 项安排',
+                                      short
+                                          ? '${now.month}月${now.day}日 ${weekdayLabel(now)} · ${_summary(focus.length, remaining.length)}'
+                                          : _summary(
+                                              focus.length,
+                                              remaining.length,
+                                            ),
                                       style: theme.textTheme.bodySmall,
                                     ),
                                   ],
@@ -349,13 +385,72 @@ class _TodayPageState extends ConsumerState<TodayPage>
                           LuminaNavigationInset.of(context) +
                           MediaQuery.paddingOf(context).bottom,
                     ),
-                    children: [ContentStack(gap: 24, children: sections)],
+                    children: [
+                      _overview(now, focus.length, remaining.length, next),
+                      const SizedBox(height: 20),
+                      ContentStack(gap: 24, children: sections),
+                    ],
                   );
                 },
               );
             },
           );
         },
+      ),
+    );
+  }
+
+  /// Date and greeting shown above both the phone overview and the wide
+  /// heading, since main pages hide their title bar in landscape.
+  String _dateLine(DateTime now) {
+    final greeting = switch (now.hour) {
+      < 5 => '夜深了',
+      < 11 => '早上好',
+      < 13 => '中午好',
+      < 18 => '下午好',
+      _ => '晚上好',
+    };
+    return '${now.month}月${now.day}日 ${weekdayLabel(now)} · $greeting';
+  }
+
+  String _summary(int focus, int remaining) => focus == 0 && remaining == 0
+      ? '今天很清爽，没有待赶的事项和安排。'
+      : [
+          if (focus > 0) '$focus 项需要关注',
+          if (remaining > 0) '今天还有 $remaining 项安排',
+        ].join('，');
+
+  /// Phone at-a-glance header; wide layouts use the same lines around their
+  /// own heading.
+  Widget _overview(
+    DateTime now,
+    int focus,
+    int remaining,
+    CalendarEvent? next,
+  ) {
+    final theme = LuminaTheme.of(context);
+    return Semantics(
+      container: true,
+      header: true,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          key: const ValueKey('today-overview'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _dateLine(now),
+              style: theme.textTheme.bodySmall.copyWith(
+                color: theme.colors.muted,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _summary(focus, remaining),
+              style: theme.textTheme.titleMedium,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -396,12 +491,22 @@ class _TodayPageState extends ConsumerState<TodayPage>
     key: ValueKey(t.id),
     depth: LuminaSurfaceDepth.recessed,
     title: t.title,
-    detail: TaskSourceLabel(task: t),
-    subtitle: [
-      if (t.due != null) t.due!,
-      if (t.dueTime != null) t.dueTime!,
-      if (t.syncStatus != 'synced') '本地已保存',
-    ].join(' · '),
+    // A blank subtitle used to add an empty line under undated, synced tasks.
+    detail: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (t.due != null || t.syncStatus != 'synced') ...[
+          const SizedBox(height: 4),
+          DueLabel(
+            due: t.due,
+            dueTime: t.dueTime,
+            extra: [if (t.syncStatus != 'synced') '本地已保存'],
+          ),
+        ],
+        TaskSourceLabel(task: t),
+      ],
+    ),
     trailing: LuminaCheck(
       value: t.completed,
       onChanged: (v) => ref.read(taskRepositoryProvider).complete(t, v),
@@ -428,15 +533,32 @@ class _TodayPageState extends ConsumerState<TodayPage>
           ),
     ),
   );
-  Widget _schedule(CalendarEvent s) => LuminaListRow(
-    depth: LuminaSurfaceDepth.recessed,
-    title: s.title,
-    leading: const LuminaIcon(LuminaIcons.clock),
-    subtitle: s.allDay
-        ? '全天'
-        : '${timeLabel(DateTime.parse(s.startAt).toLocal())} — ${timeLabel(DateTime.parse(s.endAt).toLocal())}',
-    onTap: () => context.push(
-      '/calendar/schedule/${Uri.encodeComponent(s.id)}?date=${dateKey(DateTime.parse(s.startAt).toLocal())}',
-    ),
-  );
+  Widget _schedule(CalendarEvent s, {DateTime? now}) {
+    final start = DateTime.parse(s.startAt).toLocal();
+    final end = DateTime.parse(s.endAt).toLocal();
+    final countdown = now == null || s.allDay
+        ? null
+        : scheduleCountdown(start, end, now);
+    return LuminaListRow(
+      depth: LuminaSurfaceDepth.recessed,
+      title: s.title,
+      leading: const LuminaIcon(LuminaIcons.clock),
+      subtitle: s.allDay ? '全天' : '${timeLabel(start)} — ${timeLabel(end)}',
+      detail: countdown == null
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                countdown,
+                style: LuminaTheme.of(context).textTheme.bodySmall.copyWith(
+                  color: LuminaTheme.of(context).colors.accent,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+      onTap: () => context.push(
+        '/calendar/schedule/${Uri.encodeComponent(s.id)}?date=${dateKey(start)}',
+      ),
+    );
+  }
 }

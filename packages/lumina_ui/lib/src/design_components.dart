@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter/gestures.dart' show kTouchSlop;
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 
 import 'lumina_services.dart';
@@ -663,52 +664,58 @@ class LuminaPageScaffold extends StatelessWidget {
           return Column(
             children: [
               Expanded(
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: LuminaPageHeaderInset(
-                        inset: showHeader ? headerHeight + 12 : 0,
-                        child: MediaQuery(
-                          data: MediaQuery.of(context).copyWith(
-                            padding: EdgeInsets.only(
-                              bottom:
-                                  LuminaNavigationInset.of(context) +
-                                  MediaQuery.paddingOf(context).bottom +
-                                  (floatingActionButton == null ? 0 : 80),
+                child: _FabScrollHost(
+                  enabled: floatingActionButton != null,
+                  builder: (fabVisible) => Stack(
+                    children: [
+                      Positioned.fill(
+                        child: LuminaPageHeaderInset(
+                          inset: showHeader ? headerHeight + 12 : 0,
+                          child: MediaQuery(
+                            data: MediaQuery.of(context).copyWith(
+                              padding: EdgeInsets.only(
+                                bottom:
+                                    LuminaNavigationInset.of(context) +
+                                    MediaQuery.paddingOf(context).bottom +
+                                    (floatingActionButton == null ? 0 : 80),
+                              ),
+                            ),
+                            child: Padding(
+                              padding: padding
+                                  .resolve(Directionality.of(context))
+                                  .copyWith(top: 0),
+                              child: body,
                             ),
                           ),
-                          child: Padding(
-                            padding: padding
-                                .resolve(Directionality.of(context))
-                                .copyWith(top: 0),
-                            child: body,
+                        ),
+                      ),
+                      if (showHeader)
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: headerHeight,
+                          child: LuminaTopBar(
+                            title: title,
+                            subtitle: subtitle,
+                            leading: leading,
+                            actions: actions,
                           ),
                         ),
-                      ),
-                    ),
-                    if (showHeader)
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: headerHeight,
-                        child: LuminaTopBar(
-                          title: title,
-                          subtitle: subtitle,
-                          leading: leading,
-                          actions: actions,
+                      if (floatingActionButton != null)
+                        Positioned(
+                          right: 20,
+                          bottom:
+                              20 +
+                              LuminaNavigationInset.of(context) +
+                              MediaQuery.paddingOf(context).bottom,
+                          child: _ScrollAwayFab(
+                            visible: fabVisible,
+                            child: floatingActionButton!,
+                          ),
                         ),
-                      ),
-                    if (floatingActionButton != null)
-                      Positioned(
-                        right: 20,
-                        bottom:
-                            20 +
-                            LuminaNavigationInset.of(context) +
-                            MediaQuery.paddingOf(context).bottom,
-                        child: floatingActionButton!,
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               ?bottomActions,
@@ -718,6 +725,79 @@ class LuminaPageScaffold extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// Hides a page's floating button while the reader scrolls down through
+/// content and brings it back on the way up or at the end of the list, so it
+/// never sits on top of the rows being read.
+class _FabScrollHost extends StatefulWidget {
+  const _FabScrollHost({required this.enabled, required this.builder});
+  final bool enabled;
+  final Widget Function(bool fabVisible) builder;
+  @override
+  State<_FabScrollHost> createState() => _FabScrollHostState();
+}
+
+class _FabScrollHostState extends State<_FabScrollHost> {
+  bool _visible = true;
+
+  void _set(bool visible) {
+    if (visible != _visible) setState(() => _visible = visible);
+  }
+
+  bool _onScroll(ScrollNotification notification) {
+    final metrics = notification.metrics;
+    if (!widget.enabled || metrics.axis != Axis.vertical) return false;
+    if (notification is UserScrollNotification) {
+      if (notification.direction == ScrollDirection.reverse) _set(false);
+      if (notification.direction == ScrollDirection.forward) _set(true);
+    } else if (notification is ScrollUpdateNotification &&
+        (metrics.extentAfter < 1 || metrics.extentBefore < 1)) {
+      _set(true);
+    }
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Screen-reader users move by focus, not scroll gestures; keep it put.
+    final keep =
+        !widget.enabled ||
+        (MediaQuery.maybeOf(context)?.accessibleNavigation ?? false);
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onScroll,
+      child: widget.builder(keep || _visible),
+    );
+  }
+}
+
+class _ScrollAwayFab extends StatelessWidget {
+  const _ScrollAwayFab({required this.visible, required this.child});
+  final bool visible;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) {
+    final reduced = LuminaTheme.motionReducedOf(context);
+    return IgnorePointer(
+      ignoring: !visible,
+      child: AnimatedSlide(
+        offset: visible || reduced ? Offset.zero : const Offset(0, .35),
+        duration: LuminaMotion.fast,
+        curve: luminaEaseOut,
+        child: AnimatedScale(
+          scale: visible || reduced ? 1 : .8,
+          duration: LuminaMotion.fast,
+          curve: luminaEaseOut,
+          child: AnimatedOpacity(
+            opacity: visible ? 1 : 0,
+            duration: LuminaMotion.fast,
+            curve: luminaEaseOut,
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// The space scrollables reserve initially for a page's floating title bar.

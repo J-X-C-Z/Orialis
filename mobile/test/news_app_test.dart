@@ -674,6 +674,8 @@ void main() {
   testWidgets('GitHub baseline ranking remains visible when AI brief fails', (
     tester,
   ) async {
+    // Phone feed: the default 800x600 surface is a landscape (rail) layout.
+    _phone(tester);
     final repository = _NewsRepositoryFake(githubBriefFails: true);
     await tester.pumpWidget(
       ProviderScope(
@@ -753,8 +755,10 @@ void main() {
   });
 
   testWidgets(
-    'news rows recess into the group without a standalone raised card',
+    'news rows sit flat in the group without a standalone raised card',
     (tester) async {
+      // Phone feed: the default 800x600 surface is a landscape (rail) layout.
+      _phone(tester);
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
@@ -779,7 +783,8 @@ void main() {
           ),
         );
         expect(surfaces, hasLength(1));
-        expect(surfaces.single.depth, LuminaSurfaceDepth.recessed);
+        // 1.5.0 moved every news row from recessed to the flat normal depth.
+        expect(surfaces.single.depth, LuminaSurfaceDepth.normal);
         expect(surfaces.single.onTap, isNotNull);
         expect(surfaces.single.liquidGlass, isFalse);
         expect(surfaces.single.color, isNull);
@@ -795,12 +800,14 @@ void main() {
           (group.decoration as LuminaCardDecoration).highPerformance,
           isTrue,
         );
+        // The group card hosts the row; a normal-depth row surface also
+        // hosts its own content, so there are two hosts since 1.5.0.
         expect(
           find.ancestor(
             of: find.text(title),
             matching: find.byType(LuminaCardHost),
           ),
-          findsOneWidget,
+          findsNWidgets(2),
         );
       }
 
@@ -830,6 +837,8 @@ void main() {
   testWidgets('news groups stretch while folding like standard cards', (
     tester,
   ) async {
+    // Phone feed: the default 800x600 surface is a landscape (rail) layout.
+    _phone(tester);
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -889,6 +898,8 @@ void main() {
   testWidgets('expanded 100 article feed builds only nearby rows', (
     tester,
   ) async {
+    // Phone feed: the default 800x600 surface is a landscape (rail) layout.
+    _phone(tester);
     final repository = _NewsRepositoryFake(articleCount: 100);
     await tester.pumpWidget(
       ProviderScope(
@@ -1343,4 +1354,10 @@ void main() {
       {'name': 'Example News', 'url': 'https://example.com/report'},
     ]);
   });
+}
+
+void _phone(WidgetTester tester) {
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = const Size(390, 844);
+  addTearDown(tester.view.reset);
 }

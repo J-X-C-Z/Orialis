@@ -86,7 +86,7 @@ void main() {
     expect(foldingExtent, lessThan(extent));
     expect(foldingExtent, greaterThan(100));
     await tester.pumpAndSettle();
-    expect(find.text('事项已收起'), findsOneWidget);
+    expect(find.textContaining('项已收起'), findsOneWidget);
     await tester.runAsync(
       () =>
           (database.update(database.tasks)
@@ -109,7 +109,7 @@ void main() {
     LuminaCardMemory.save('quadrant:urgentImportant', false);
     await mount(tester);
     expect(find.byType(LuminaLongPressOrderable<Task>), findsNothing);
-    expect(find.text('事项已收起'), findsOneWidget);
+    expect(find.textContaining('项已收起'), findsOneWidget);
     await tester.tap(find.text('重要且紧急'));
     await tester.pumpAndSettle();
     expect(

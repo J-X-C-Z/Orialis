@@ -27,6 +27,25 @@ class QuickEventService {
     });
   }
 
+  /// Why a submit would fail right now, or null when Azure Hermes is online.
+  /// Network errors return null: the submit path reports them precisely.
+  Future<String?> unavailableReason() async {
+    try {
+      final devices = await agents.devices();
+      final online = devices.any(
+        (device) =>
+            device.id == agents.azureDeviceId &&
+            device.online &&
+            agents.isAllowedTarget(device.id),
+      );
+      return online ? null : 'Azure Hermes 当前离线，可以先写好，连接后再发送。';
+    } on StateError catch (error) {
+      return error.message.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _submit(QuickEventRequest request) async {
     if (request.text.isEmpty || request.text.length > 10000) {
       throw StateError('请输入 1–10000 字的事件描述');

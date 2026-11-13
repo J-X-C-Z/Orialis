@@ -111,6 +111,12 @@ class _LuminaTextFieldState extends State<LuminaTextField> {
                       IgnorePointer(
                         child: Text(
                           widget.hintText ?? widget.hint ?? '',
+                          // A single-line field must not grow because its
+                          // hint wraps in a narrow column.
+                          maxLines: widget.maxLines == 1 ? 1 : null,
+                          overflow: widget.maxLines == 1
+                              ? TextOverflow.ellipsis
+                              : null,
                           style: LuminaTheme.of(context).textTheme.bodyMedium
                               .copyWith(color: colors.muted),
                         ),
