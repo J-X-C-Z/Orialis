@@ -1,0 +1,28 @@
+{
+  "mcp_servers": {
+    "hindsight_shared": {
+      "url": "http://127.0.0.1:8888/mcp/",
+      "tools": {
+        "include": [
+          "retain",
+          "recall",
+          "reflect"
+        ]
+      },
+      "connect_timeout": 30,
+      "timeout": 180,
+      "required": false
+    },
+    "local-message-hub": {
+      "command": "ssh",
+      "args": [
+        "-T",
+        "windows-mcp",
+        "C:\\Users\\Example\\.local\\bin\\local-message-hub-mcp.cmd"
+      ],
+      "connect_timeout": 30,
+      "timeout": 120,
+      "required": false
+    }
+  }
+}

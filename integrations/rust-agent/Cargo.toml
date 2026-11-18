@@ -1,0 +1,52 @@
+[package]
+name = "hermes-rust-core"
+version = "0.1.0"
+edition = "2024"
+description = "Orialis-compatible native Agent and portable memory/skills runtime"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip", "arbitrary_precision"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time", "fs", "io-util", "test-util", "signal", "process"] }
+
+base64 = "0.22"
+sha2 = "0.10"
+percent-encoding = "2"
+futures-util = "0.3"
+tokio-tungstenite = {version="0.28", features=["rustls-tls-webpki-roots"]}
+
+regex = "1"
+jsonschema = { version = "=0.61.2", default-features = false }
+unicode-normalization = "0.1"
+libc = "0.2"
+
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono-tz = "0.10"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+md-5 = "0.10"
+html-escape = "0.2"
+unicode-casefold = "0.2"
+qrcode = { version = "0.14", default-features = false }
+uuid = { version = "1", features = ["v4"] }
+
+roxmltree = "0.20"
+scraper = { version = "=0.29.0", default-features = false }
+encoding_rs = "=0.8.44"
+flate2 = { version = "=1.1.11", default-features = false, features = ["zlib-rs"] }
+zip = { version = "=9.5.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+quick-xml = { version = "=0.42.0", default-features = false }
+
+[dev-dependencies]
+axum = "0.8"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true
+
+# Standalone experiment, intentionally not a member of the host Orialis workspace.
+[workspace]

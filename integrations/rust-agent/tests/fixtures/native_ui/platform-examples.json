@@ -1,0 +1,295 @@
+[
+  {
+    "version": 1,
+    "title": "Options",
+    "fallback": "A costs 10 units; B costs 15 units.",
+    "blocks": [
+      {
+        "type": "chart",
+        "unit": "units",
+        "items": [
+          {
+            "label": "A",
+            "value": 10
+          },
+          {
+            "label": "B",
+            "value": 15
+          }
+        ]
+      },
+      {
+        "type": "choices",
+        "items": [
+          {
+            "label": "Compare details",
+            "prompt": "Compare A and B in more detail."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "version": 1,
+    "title": "同步事件示例",
+    "fallback": "示例：10:05 备份完成并保留 7 天；10:07 搜索索引更新失败，3 条记录待重试。",
+    "blocks": [
+      {
+        "type": "timeline",
+        "items": [
+          {
+            "label": "备份完成：保留 7 天",
+            "time": "2030-01-02T10:05:00+08:00",
+            "detail": "示例事件；备份任务成功。"
+          },
+          {
+            "label": "搜索索引更新失败：3 条待重试",
+            "time": "2030-01-02T10:07:00+08:00",
+            "detail": "示例事件；源数据仍保留，索引更新可重试。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "version": 1,
+    "title": "Draft plan",
+    "fallback": "First review the proposal, then prepare the draft. Neither step is marked complete.",
+    "blocks": [
+      {
+        "type": "checklist",
+        "items": [
+          {
+            "label": "Review proposal",
+            "checked": false
+          },
+          {
+            "label": "Prepare draft",
+            "checked": false
+          }
+        ]
+      },
+      {
+        "type": "tabs",
+        "items": [
+          {
+            "label": "Today",
+            "content": "Review the proposal."
+          },
+          {
+            "label": "Next",
+            "content": "Prepare a draft after review."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "version": 1,
+    "title": "Illustrative flow",
+    "fallback": "Two steps connected from left to right.",
+    "blocks": [
+      {
+        "type": "svg",
+        "items": [
+          {
+            "label": "Two steps connected from left to right (illustrative)",
+            "source": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 300 100\"><rect x=\"5\" y=\"20\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e0f2fe\"/><path d=\"M110 50H185m-10-10 10 10-10 10\" fill=\"none\" stroke=\"#475569\" stroke-width=\"2\"/><rect x=\"190\" y=\"20\" width=\"105\" height=\"60\" rx=\"8\" fill=\"#dcfce7\"/></svg>"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "version": 1,
+    "fallback": "先复习，再练习。正弦函数为 f(x)=A sin(ωx)。",
+    "blocks": [
+      {
+        "type": "diagram",
+        "title": "复习流程",
+        "layout": "flow",
+        "items": [
+          {
+            "id": "review",
+            "label": "复习概念",
+            "detail": "先回忆定义和适用条件。"
+          },
+          {
+            "id": "practice",
+            "label": "练习与反馈",
+            "detail": "根据错题调整下一轮复习。",
+            "parent": "review"
+          }
+        ],
+        "edges": [
+          {
+            "from": "review",
+            "to": "practice",
+            "label": "然后"
+          }
+        ]
+      },
+      {
+        "type": "math",
+        "items": [
+          {
+            "label": "正弦函数",
+            "source": "f(x)=A\\sin(\\omega x)"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "version": 1,
+    "fallback": "填写科目和时间后，结果填入草稿供发送。创建复习任务仍需打开卡片确认。",
+    "blocks": [
+      {
+        "type": "form",
+        "title": "补充学习偏好",
+        "prompt": "请根据下面的信息安排学习：",
+        "items": [
+          {
+            "id": "subject",
+            "label": "科目",
+            "kind": "text",
+            "required": true
+          },
+          {
+            "id": "date",
+            "label": "学习日期",
+            "kind": "date",
+            "value": "2030-01-02"
+          },
+          {
+            "id": "mode",
+            "label": "学习方式",
+            "kind": "select",
+            "options": [
+              "复习",
+              "练习"
+            ],
+            "value": "复习"
+          },
+          {
+            "id": "topics",
+            "label": "重点",
+            "kind": "multiselect",
+            "options": [
+              "公式",
+              "概念",
+              "错题"
+            ],
+            "value": [
+              "公式"
+            ]
+          },
+          {
+            "id": "minutes",
+            "label": "可用分钟",
+            "kind": "slider",
+            "min": 10,
+            "max": 120,
+            "value": 45
+          }
+        ]
+      },
+      {
+        "type": "actions",
+        "items": [
+          {
+            "id": "study-task",
+            "label": "添加复习任务",
+            "kind": "task",
+            "title": "复习傅里叶级数",
+            "notes": "演示草案，确认后才会保存。",
+            "due": "2030-01-02"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "version": 1,
+    "title": "学习安排示例",
+    "fallback": "示例数据：数学和英语各安排一段学习时间。先查看重点与步骤，再核对公式。日程仅为示例草案，需用户确认后才会本机保存并进入同步队列；示例日期不是用户的真实安排。",
+    "blocks": [
+      {
+        "type": "callout",
+        "items": [
+          {
+            "label": "安排说明",
+            "content": "以下内容仅演示协议结构，不代表已创建或已添加日程。",
+            "tone": "info"
+          }
+        ]
+      },
+      {
+        "type": "steps",
+        "items": [
+          {
+            "label": "复习导数",
+            "detail": "整理定义并完成练习。",
+            "status": "pending"
+          },
+          {
+            "label": "复习词汇",
+            "detail": "复习本周词汇。",
+            "status": "pending"
+          }
+        ]
+      },
+      {
+        "type": "comparison",
+        "columns": [
+          "数学",
+          "英语"
+        ],
+        "recommendedIndex": 0,
+        "items": [
+          {
+            "label": "学习时长",
+            "values": [
+              "60 分钟",
+              "30 分钟"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "facts",
+        "items": [
+          {
+            "label": "总时长",
+            "value": "90 分钟",
+            "detail": "按示例时长相加"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "items": [
+          {
+            "label": "时长合计",
+            "language": "text",
+            "source": "数学 60 分钟 + 英语 30 分钟 = 90 分钟"
+          }
+        ]
+      },
+      {
+        "type": "agenda",
+        "items": [
+          {
+            "id": "example-math-session",
+            "label": "数学学习（示例）",
+            "title": "复习导数",
+            "startAt": "2030-01-02T09:00:00+08:00",
+            "endAt": "2030-01-02T10:00:00+08:00",
+            "notes": "仅用于展示格式；须替换为用户确认的真实安排。",
+            "location": "自习室"
+          }
+        ]
+      }
+    ]
+  }
+]

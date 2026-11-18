@@ -1,0 +1,9 @@
+# Test-only dependencies; no Python dependency in the Rust runtime.
+aiohttp==3.14.4
+websockets==16.0
+psutil==7.2.2
+# Synthetic PDF/Office fixtures; not runtime dependencies.
+reportlab==4.4.9
+python-docx==1.2.0
+openpyxl==3.1.5
+python-pptx==1.0.2

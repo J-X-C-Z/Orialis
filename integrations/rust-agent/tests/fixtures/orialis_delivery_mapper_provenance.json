@@ -1,0 +1,24 @@
+{
+  "revision": "f9a064bf05b18265afd26905e7240777d4ce355c",
+  "source": "orialis-server/src/agent_gateway/protocol.rs",
+  "source_sha256": "2fe4e567e2a14be38270b9b823ea00632ea833882fcace091d71f4a563605d34",
+  "fixture_sha256": "58a817ea086465f51955de70d8734c4f1b2f82773fbda88768ba89e95924f989",
+  "excerpts": [
+    {
+      "start_line": 7,
+      "end_line": 7,
+      "sha256": "31e49240436e02e6c6558806285d70c74ea1adaa26b15bd9df392583d9bab75d"
+    },
+    {
+      "start_line": 834,
+      "end_line": 865,
+      "sha256": "f1a6bf0edd5fd3d6040d2590871d2c650c80ae1388e37c12ab073d832921bfca"
+    },
+    {
+      "start_line": 1444,
+      "end_line": 1762,
+      "sha256": "bb77e30b7b5eee7ab0276bd7736e95daeaa6e8bfffc1cf82344d37c8be440a03"
+    }
+  ],
+  "scope": "Exact extension parser and mobile mapper, with ProtocolError and PROTOCOL_VERSION dependencies. Original Server unchanged. Imports only are fixture scaffolding."
+}

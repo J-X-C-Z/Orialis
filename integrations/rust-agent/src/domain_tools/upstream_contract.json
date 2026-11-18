@@ -1,0 +1,1856 @@
+{
+  "source_commit": "f9a064bf05b18265afd26905e7240777d4ce355c",
+  "source_file": "integrations/hermes/orialis/tools.py",
+  "source_sha256": "9e4f041d7c691e88c0c27a18ca3c8ed8e901f0b3869a8e5418fd31264900eadd",
+  "schemas": {
+    "orialis_capabilities": {
+      "name": "orialis_capabilities",
+      "description": "Read Orialis server and plugin capabilities.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "news.publish": {
+      "name": "news.publish",
+      "description": "Publish an AIHOT, GitHub trending, or Orialis project report using the configured publisher identity.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "enum": [
+              "aihot.hot",
+              "aihot.items",
+              "aihot.events",
+              "aihot.reports.daily",
+              "aihot.reports.weekly",
+              "aihot.reports.monthly",
+              "github.daily",
+              "github.weekly",
+              "projects.daily",
+              "projects.weekly"
+            ]
+          },
+          "result": {
+            "type": [
+              "array",
+              "object"
+            ]
+          },
+          "projectId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "reportDate": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10
+          },
+          "generatedAt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "dataset",
+          "result"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "list_tasks": {
+      "name": "list_tasks",
+      "description": "List Orialis resources.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "list_projects": {
+      "name": "list_projects",
+      "description": "List Orialis resources.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "list_schedules": {
+      "name": "list_schedules",
+      "description": "List Orialis resources.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "list_calendar_events": {
+      "name": "list_calendar_events",
+      "description": "List Orialis resources.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "list_conversations": {
+      "name": "list_conversations",
+      "description": "List Orialis resources.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "list_milestones": {
+      "name": "list_milestones",
+      "description": "List milestones for a project.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_task": {
+      "name": "create_task",
+      "description": "Create a task in Orialis.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "important": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "urgent": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dueTime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reminderMinutes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "projectId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parentTaskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scheduleId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recurrence": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "manualPosition": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "update_task": {
+      "name": "update_task",
+      "description": "Update a task using optimistic concurrency.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "important": {
+            "type": "boolean"
+          },
+          "urgent": {
+            "type": "boolean"
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "completedAt": {
+            "type": "string"
+          },
+          "due": {
+            "type": "string"
+          },
+          "dueTime": {
+            "type": "string"
+          },
+          "reminderMinutes": {
+            "type": "integer"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "parentTaskId": {
+            "type": "string"
+          },
+          "scheduleId": {
+            "type": "string"
+          },
+          "recurrence": {
+            "type": "object"
+          },
+          "manualPosition": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "baseVersion"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "delete_task": {
+      "name": "delete_task",
+      "description": "Delete a task using optimistic concurrency.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "baseVersion"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_project": {
+      "name": "create_project",
+      "description": "Create a project in Orialis.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "goal": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "startDate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nextActionTaskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "manualPosition": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "update_project": {
+      "name": "update_project",
+      "description": "Update a project.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "startDate": {
+            "type": "string"
+          },
+          "due": {
+            "type": "string"
+          },
+          "nextActionTaskId": {
+            "type": "string"
+          },
+          "manualPosition": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "baseVersion"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "delete_project": {
+      "name": "delete_project",
+      "description": "Delete a project.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "baseVersion"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "get_project_summary": {
+      "name": "get_project_summary",
+      "description": "Read a project summary.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_milestone": {
+      "name": "create_milestone",
+      "description": "Create a project milestone.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "due": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "completed": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "projectId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "projectId",
+          "title"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "get_milestone": {
+      "name": "get_milestone",
+      "description": "Read a milestone.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "projectId",
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "update_milestone": {
+      "name": "update_milestone",
+      "description": "Update a milestone.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "due": {
+            "type": "string"
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "position": {
+            "type": "integer"
+          },
+          "projectId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "projectId",
+          "id",
+          "baseVersion"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "delete_milestone": {
+      "name": "delete_milestone",
+      "description": "Delete a milestone.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "projectId",
+          "id",
+          "baseVersion"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_schedule": {
+      "name": "create_schedule",
+      "description": "Create a Schedule in the user's Orialis calendar. One event per activity in each date/time slot, including separate activities on the same day. Before writing, split the source into individual occurrences with their own title, startAt, endAt and location. For example, morning West Lake photography, noon campus visit, outbound train and return train are separate events. Never create a trip-summary event spanning the first departure to the final return, or hide other dates/time slots in description. Description may contain only details for that event. A single continuous overnight train or other continuous activity may cross midnight. Missing times must be clarified or left pending, never invented or replaced by a multi-day/all-day placeholder. After writing, read back every saved event and report each title and time separately; do not report a summary event as successful splitting.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "One activity in one date/time slot; never a whole trip or daily agenda."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Notes for this activity only. Multiple dated or timed agenda entries are rejected with split_required."
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "startAt": {
+            "type": "string",
+            "description": "Start of this activity with timezone; never the start of the whole itinerary."
+          },
+          "endAt": {
+            "type": "string",
+            "description": "End of this activity with timezone; never the final return of the whole itinerary."
+          },
+          "allDay": {
+            "type": "boolean"
+          },
+          "important": {
+            "type": "boolean"
+          },
+          "reminderMinutes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "startAt",
+          "endAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "get_schedule": {
+      "name": "get_schedule",
+      "description": "Read a schedule.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "update_schedule": {
+      "name": "update_schedule",
+      "description": "Update a schedule. One event per activity in each date/time slot, including separate activities on the same day. Before writing, split the source into individual occurrences with their own title, startAt, endAt and location. For example, morning West Lake photography, noon campus visit, outbound train and return train are separate events. Never create a trip-summary event spanning the first departure to the final return, or hide other dates/time slots in description. Description may contain only details for that event. A single continuous overnight train or other continuous activity may cross midnight. Missing times must be clarified or left pending, never invented or replaced by a multi-day/all-day placeholder. After writing, read back every saved event and report each title and time separately; do not report a summary event as successful splitting.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "One activity in one date/time slot; never a whole trip or daily agenda."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Notes for this activity only. Multiple dated or timed agenda entries are rejected with split_required."
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "startAt": {
+            "type": "string",
+            "description": "Start of this activity with timezone; never the start of the whole itinerary."
+          },
+          "endAt": {
+            "type": "string",
+            "description": "End of this activity with timezone; never the final return of the whole itinerary."
+          },
+          "allDay": {
+            "type": "boolean"
+          },
+          "important": {
+            "type": "boolean"
+          },
+          "reminderMinutes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "baseVersion"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "delete_schedule": {
+      "name": "delete_schedule",
+      "description": "Delete a schedule.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "baseVersion"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_calendar_event": {
+      "name": "create_schedule",
+      "description": "Create a Schedule in the user's Orialis calendar. One event per activity in each date/time slot, including separate activities on the same day. Before writing, split the source into individual occurrences with their own title, startAt, endAt and location. For example, morning West Lake photography, noon campus visit, outbound train and return train are separate events. Never create a trip-summary event spanning the first departure to the final return, or hide other dates/time slots in description. Description may contain only details for that event. A single continuous overnight train or other continuous activity may cross midnight. Missing times must be clarified or left pending, never invented or replaced by a multi-day/all-day placeholder. After writing, read back every saved event and report each title and time separately; do not report a summary event as successful splitting.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "One activity in one date/time slot; never a whole trip or daily agenda."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Notes for this activity only. Multiple dated or timed agenda entries are rejected with split_required."
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "startAt": {
+            "type": "string",
+            "description": "Start of this activity with timezone; never the start of the whole itinerary."
+          },
+          "endAt": {
+            "type": "string",
+            "description": "End of this activity with timezone; never the final return of the whole itinerary."
+          },
+          "allDay": {
+            "type": "boolean"
+          },
+          "important": {
+            "type": "boolean"
+          },
+          "reminderMinutes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "startAt",
+          "endAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "get_calendar_event": {
+      "name": "get_calendar_event",
+      "description": "Read a calendar event.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "update_calendar_event": {
+      "name": "update_calendar_event",
+      "description": "Update a calendar event. One event per activity in each date/time slot, including separate activities on the same day. Before writing, split the source into individual occurrences with their own title, startAt, endAt and location. For example, morning West Lake photography, noon campus visit, outbound train and return train are separate events. Never create a trip-summary event spanning the first departure to the final return, or hide other dates/time slots in description. Description may contain only details for that event. A single continuous overnight train or other continuous activity may cross midnight. Missing times must be clarified or left pending, never invented or replaced by a multi-day/all-day placeholder. After writing, read back every saved event and report each title and time separately; do not report a summary event as successful splitting.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "One activity in one date/time slot; never a whole trip or daily agenda."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Notes for this activity only. Multiple dated or timed agenda entries are rejected with split_required."
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "startAt": {
+            "type": "string",
+            "description": "Start of this activity with timezone; never the start of the whole itinerary."
+          },
+          "endAt": {
+            "type": "string",
+            "description": "End of this activity with timezone; never the final return of the whole itinerary."
+          },
+          "allDay": {
+            "type": "boolean"
+          },
+          "important": {
+            "type": "boolean"
+          },
+          "reminderMinutes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "baseVersion"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "delete_calendar_event": {
+      "name": "delete_calendar_event",
+      "description": "Delete a calendar event.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "baseVersion"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_conversation": {
+      "name": "create_conversation",
+      "description": "Create a conversation.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "manualPosition": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "update_conversation": {
+      "name": "update_conversation",
+      "description": "Rename/update a conversation.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "manualPosition": {
+            "type": "integer"
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "baseVersion"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "delete_conversation": {
+      "name": "delete_conversation",
+      "description": "Delete a conversation.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "baseVersion"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "list_messages": {
+      "name": "list_messages",
+      "description": "List messages in a conversation.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "conversationId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_message": {
+      "name": "create_message",
+      "description": "Create a user message in a conversation.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "replyToMessageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attachments": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "conversationId",
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_schedules": {
+      "name": "create_schedules",
+      "description": "Create 1-200 Orialis resources sequentially. Validate all items first; returns per-item results. Not atomic. Never retry the entire batch; check outcomeUnknown writes before retrying. One event per activity in each date/time slot, including separate activities on the same day. Before writing, split the source into individual occurrences with their own title, startAt, endAt and location. For example, morning West Lake photography, noon campus visit, outbound train and return train are separate events. Never create a trip-summary event spanning the first departure to the final return, or hide other dates/time slots in description. Description may contain only details for that event. A single continuous overnight train or other continuous activity may cross midnight. Missing times must be clarified or left pending, never invented or replaced by a multi-day/all-day placeholder. After writing, read back every saved event and report each title and time separately; do not report a summary event as successful splitting.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "One activity in one date/time slot; never a whole trip or daily agenda."
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Notes for this activity only. Multiple dated or timed agenda entries are rejected with split_required."
+                },
+                "location": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "startAt": {
+                  "type": "string",
+                  "description": "Start of this activity with timezone; never the start of the whole itinerary."
+                },
+                "endAt": {
+                  "type": "string",
+                  "description": "End of this activity with timezone; never the final return of the whole itinerary."
+                },
+                "allDay": {
+                  "type": "boolean"
+                },
+                "important": {
+                  "type": "boolean"
+                },
+                "reminderMinutes": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "title",
+                "startAt",
+                "endAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_calendar_events": {
+      "name": "create_calendar_events",
+      "description": "Create 1-200 Orialis resources sequentially. Validate all items first; returns per-item results. Not atomic. Never retry the entire batch; check outcomeUnknown writes before retrying. One event per activity in each date/time slot, including separate activities on the same day. Before writing, split the source into individual occurrences with their own title, startAt, endAt and location. For example, morning West Lake photography, noon campus visit, outbound train and return train are separate events. Never create a trip-summary event spanning the first departure to the final return, or hide other dates/time slots in description. Description may contain only details for that event. A single continuous overnight train or other continuous activity may cross midnight. Missing times must be clarified or left pending, never invented or replaced by a multi-day/all-day placeholder. After writing, read back every saved event and report each title and time separately; do not report a summary event as successful splitting.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "One activity in one date/time slot; never a whole trip or daily agenda."
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Notes for this activity only. Multiple dated or timed agenda entries are rejected with split_required."
+                },
+                "location": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "startAt": {
+                  "type": "string",
+                  "description": "Start of this activity with timezone; never the start of the whole itinerary."
+                },
+                "endAt": {
+                  "type": "string",
+                  "description": "End of this activity with timezone; never the final return of the whole itinerary."
+                },
+                "allDay": {
+                  "type": "boolean"
+                },
+                "important": {
+                  "type": "boolean"
+                },
+                "reminderMinutes": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "title",
+                "startAt",
+                "endAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_tasks": {
+      "name": "create_tasks",
+      "description": "Create 1-200 Orialis resources sequentially. Validate all items first; returns per-item results. Not atomic. Never retry the entire batch; check outcomeUnknown writes before retrying.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "notes": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "important": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "urgent": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "completed": {
+                  "type": "boolean"
+                },
+                "completedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "due": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "dueTime": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reminderMinutes": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "projectId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "parentTaskId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "scheduleId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "recurrence": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "manualPosition": {
+                  "type": "integer"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_projects": {
+      "name": "create_projects",
+      "description": "Create 1-200 Orialis resources sequentially. Validate all items first; returns per-item results. Not atomic. Never retry the entire batch; check outcomeUnknown writes before retrying.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "goal": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "color": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "startDate": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "due": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "nextActionTaskId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "manualPosition": {
+                  "type": "integer"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_milestones": {
+      "name": "create_milestones",
+      "description": "Create 1-200 Orialis resources sequentially. Validate all items first; returns per-item results. Not atomic. Never retry the entire batch; check outcomeUnknown writes before retrying.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "due": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "completed": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "position": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "projectId",
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_conversations": {
+      "name": "create_conversations",
+      "description": "Create 1-200 Orialis resources sequentially. Validate all items first; returns per-item results. Not atomic. Never retry the entire batch; check outcomeUnknown writes before retrying.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "pinned": {
+                  "type": "boolean"
+                },
+                "manualPosition": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "create_messages": {
+      "name": "create_messages",
+      "description": "Create 1-200 Orialis resources sequentially. Validate all items first; returns per-item results. Not atomic. Never retry the entire batch; check outcomeUnknown writes before retrying.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "properties": {
+                "conversationId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "content": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "replyToMessageId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "attachments": {
+                  "type": "array"
+                }
+              },
+              "required": [
+                "conversationId",
+                "content"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "tool_names": [
+    "orialis_capabilities",
+    "news.publish",
+    "list_tasks",
+    "list_projects",
+    "list_schedules",
+    "list_calendar_events",
+    "list_conversations",
+    "list_milestones",
+    "create_task",
+    "update_task",
+    "delete_task",
+    "create_project",
+    "update_project",
+    "delete_project",
+    "get_project_summary",
+    "create_milestone",
+    "get_milestone",
+    "update_milestone",
+    "delete_milestone",
+    "create_schedule",
+    "get_schedule",
+    "update_schedule",
+    "delete_schedule",
+    "create_calendar_event",
+    "get_calendar_event",
+    "update_calendar_event",
+    "delete_calendar_event",
+    "create_conversation",
+    "update_conversation",
+    "delete_conversation",
+    "list_messages",
+    "create_message",
+    "create_schedules",
+    "create_calendar_events",
+    "create_tasks",
+    "create_projects",
+    "create_milestones",
+    "create_conversations",
+    "create_messages"
+  ],
+  "domain_contracts": {
+    "task": {
+      "domain": "Task",
+      "resource": "/api/v1/tasks",
+      "fields": [
+        "id",
+        "title",
+        "notes",
+        "important",
+        "urgent",
+        "completed",
+        "completedAt",
+        "due",
+        "dueTime",
+        "reminderMinutes",
+        "projectId",
+        "parentTaskId",
+        "scheduleId",
+        "recurrence",
+        "createdAt",
+        "updatedAt",
+        "version",
+        "deletedAt"
+      ],
+      "callable": true,
+      "tools": [
+        "list_tasks",
+        "create_task",
+        "update_task",
+        "delete_task",
+        "create_tasks"
+      ]
+    },
+    "project": {
+      "domain": "Project",
+      "resource": "/api/v1/projects",
+      "fields": [
+        "id",
+        "name",
+        "goal",
+        "description",
+        "color",
+        "status",
+        "startDate",
+        "due",
+        "nextActionTaskId",
+        "manualPosition",
+        "createdAt",
+        "updatedAt",
+        "version"
+      ],
+      "callable": true,
+      "tools": [
+        "list_projects",
+        "create_project",
+        "update_project",
+        "delete_project",
+        "get_project_summary",
+        "create_projects"
+      ]
+    },
+    "milestone": {
+      "domain": "Milestone",
+      "resource": "/api/v1/projects/{projectId}/milestones",
+      "fields": [
+        "id",
+        "projectId",
+        "title",
+        "due",
+        "completed",
+        "completedAt",
+        "position",
+        "createdAt",
+        "updatedAt",
+        "version",
+        "deletedAt"
+      ],
+      "callable": true,
+      "tools": [
+        "list_milestones",
+        "create_milestone",
+        "get_milestone",
+        "update_milestone",
+        "delete_milestone",
+        "create_milestones"
+      ]
+    },
+    "schedule": {
+      "domain": "Schedule",
+      "resource": "/api/v1/schedules",
+      "compatibility_resource": "/api/v1/calendar-events",
+      "wire_entity_type": "calendar_event",
+      "fields": [
+        "id",
+        "title",
+        "description",
+        "location",
+        "startAt",
+        "endAt",
+        "allDay",
+        "important",
+        "reminderMinutes",
+        "createdAt",
+        "updatedAt",
+        "version",
+        "deletedAt"
+      ],
+      "callable": true,
+      "tools": [
+        "list_schedules",
+        "create_schedule",
+        "get_schedule",
+        "update_schedule",
+        "delete_schedule",
+        "list_calendar_events",
+        "create_calendar_event",
+        "get_calendar_event",
+        "update_calendar_event",
+        "delete_calendar_event",
+        "create_schedules",
+        "create_calendar_events"
+      ]
+    },
+    "conversation": {
+      "domain": "Conversation",
+      "resource": "/api/v1/conversations",
+      "fields": [
+        "id",
+        "title",
+        "pinned",
+        "manualPosition",
+        "isDefault",
+        "type",
+        "createdAt",
+        "updatedAt",
+        "version"
+      ],
+      "callable": true,
+      "tools": [
+        "list_conversations",
+        "create_conversation",
+        "update_conversation",
+        "delete_conversation",
+        "create_conversations"
+      ]
+    },
+    "message": {
+      "domain": "Message",
+      "resource": "/api/v1/conversations/{conversationId}/messages",
+      "fields": [
+        "id",
+        "conversationId",
+        "role",
+        "content",
+        "createdAt",
+        "version",
+        "attachments",
+        "replyToMessageId",
+        "replyQuote",
+        "replyRole"
+      ],
+      "callable": true,
+      "tools": [
+        "list_messages",
+        "create_message",
+        "create_messages"
+      ]
+    }
+  },
+  "operations": [
+    {
+      "name": "receive_message",
+      "direction": "server_to_hermes",
+      "protocol": "message.send",
+      "description": "Receive an Orialis conversation message."
+    },
+    {
+      "name": "send_reply",
+      "direction": "hermes_to_server",
+      "protocol": "message.reply",
+      "description": "Send the Hermes response."
+    },
+    {
+      "name": "acknowledge_message",
+      "direction": "hermes_to_server",
+      "protocol": "message.ack",
+      "description": "Acknowledge receipt of an Orialis message."
+    }
+  ],
+  "response_ui": {
+    "format": "orialis-ui",
+    "version": 1,
+    "transport": "content_fence",
+    "block_types": [
+      "metrics",
+      "chart",
+      "tabs",
+      "checklist",
+      "choices",
+      "svg",
+      "diagram",
+      "math",
+      "plot",
+      "timeline",
+      "simulation",
+      "form",
+      "table",
+      "sources",
+      "diff",
+      "media",
+      "actions",
+      "progress",
+      "heatmap",
+      "accordion",
+      "callout",
+      "steps",
+      "comparison",
+      "facts",
+      "code",
+      "agenda"
+    ],
+    "plot_kinds": [
+      "line",
+      "scatter",
+      "pie",
+      "area",
+      "bar",
+      "radar"
+    ],
+    "limits": {
+      "json_bytes": 32768,
+      "blocks": 12,
+      "items": 12,
+      "title": 80,
+      "fallback": 4000,
+      "label": 120,
+      "value": 120,
+      "detail": 240,
+      "content": 4000,
+      "prompt": 1000,
+      "unit": 32,
+      "source": 16000,
+      "math_source": 4000,
+      "points": 120,
+      "edges": 24,
+      "columns": 8,
+      "comparison_columns": 4
+    }
+  },
+  "event_granularity_rules": "One event per activity in each date/time slot, including separate activities on the same day. Before writing, split the source into individual occurrences with their own title, startAt, endAt and location. For example, morning West Lake photography, noon campus visit, outbound train and return train are separate events. Never create a trip-summary event spanning the first departure to the final return, or hide other dates/time slots in description. Description may contain only details for that event. A single continuous overnight train or other continuous activity may cross midnight. Missing times must be clarified or left pending, never invented or replaced by a multi-day/all-day placeholder. After writing, read back every saved event and report each title and time separately; do not report a summary event as successful splitting."
+}

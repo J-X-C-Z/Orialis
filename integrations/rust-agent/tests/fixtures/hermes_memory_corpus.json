@@ -1,0 +1,308 @@
+{
+  "upstream_commit": "36b98bcced7f3c22d08dd1119240e726b3928e3d",
+  "matches": [
+    {
+      "entries": [
+        "tea",
+        "drinks tea daily"
+      ],
+      "old_text": "tea",
+      "index": 0,
+      "ambiguous": false
+    },
+    {
+      "entries": [
+        "tea",
+        "drinks tea daily"
+      ],
+      "old_text": "drinks",
+      "index": 1,
+      "ambiguous": false
+    },
+    {
+      "entries": [
+        "tea",
+        "drinks tea daily"
+      ],
+      "old_text": "te",
+      "index": null,
+      "ambiguous": true
+    },
+    {
+      "entries": [
+        "duplicate",
+        "duplicate"
+      ],
+      "old_text": "duplicate",
+      "index": 0,
+      "ambiguous": false
+    },
+    {
+      "entries": [
+        "prefers “green” tea — cold"
+      ],
+      "old_text": "'green' tea - cold",
+      "index": 0,
+      "ambiguous": false
+    },
+    {
+      "entries": [
+        "text with\nwhitespace"
+      ],
+      "old_text": "text with\\nwhitespace",
+      "index": 0,
+      "ambiguous": false
+    },
+    {
+      "entries": [
+        "first",
+        "second"
+      ],
+      "old_text": "absent",
+      "index": null,
+      "ambiguous": false
+    },
+    {
+      "entries": [
+        "a ’"
+      ],
+      "old_text": "'",
+      "index": null,
+      "ambiguous": false
+    },
+    {
+      "entries": [
+        "punctuation!"
+      ],
+      "old_text": "!",
+      "index": 0,
+      "ambiguous": false
+    }
+  ],
+  "batches": [
+    {
+      "entries": [
+        "tea"
+      ],
+      "operations": [
+        {
+          "action": "add",
+          "content": "tea"
+        }
+      ],
+      "limit": 1,
+      "success": true,
+      "final_entries": [
+        "tea"
+      ]
+    },
+    {
+      "entries": [
+        "12345"
+      ],
+      "operations": [
+        {
+          "action": "add",
+          "content": "6789"
+        },
+        {
+          "action": "remove",
+          "old_text": "123"
+        }
+      ],
+      "limit": 4,
+      "success": true,
+      "final_entries": [
+        "6789"
+      ]
+    },
+    {
+      "entries": [
+        "drinks tea daily"
+      ],
+      "operations": [
+        {
+          "action": "patch",
+          "old_text": "tea ",
+          "new_text": "coffee "
+        }
+      ],
+      "limit": 30,
+      "success": true,
+      "final_entries": [
+        "drinks coffee daily"
+      ]
+    },
+    {
+      "entries": [
+        "1000"
+      ],
+      "operations": [
+        {
+          "action": "patch",
+          "old_text": "00",
+          "content": "2"
+        }
+      ],
+      "limit": 30,
+      "success": false,
+      "final_entries": [
+        "1000"
+      ]
+    },
+    {
+      "entries": [
+        "one",
+        "two"
+      ],
+      "operations": [
+        {
+          "action": "remove",
+          "old_text": "one"
+        },
+        {
+          "action": "remove",
+          "old_text": "two"
+        }
+      ],
+      "limit": 30,
+      "success": false,
+      "final_entries": [
+        "one",
+        "two"
+      ]
+    },
+    {
+      "entries": [
+        "one"
+      ],
+      "operations": [
+        {
+          "action": "remove",
+          "old_text": "one"
+        }
+      ],
+      "limit": 0,
+      "success": true,
+      "final_entries": []
+    },
+    {
+      "entries": [
+        "one",
+        "much-too-long"
+      ],
+      "operations": [
+        {
+          "action": "remove",
+          "old_text": "one"
+        }
+      ],
+      "limit": 1,
+      "success": true,
+      "final_entries": [
+        "much-too-long"
+      ]
+    },
+    {
+      "entries": [
+        "one",
+        "two"
+      ],
+      "operations": [
+        {
+          "action": "remove",
+          "old_text": "one"
+        },
+        {
+          "action": "remove",
+          "old_text": "absent"
+        }
+      ],
+      "limit": 30,
+      "success": false,
+      "final_entries": [
+        "one",
+        "two"
+      ]
+    },
+    {
+      "entries": [
+        "old"
+      ],
+      "operations": [
+        {
+          "action": "replace",
+          "old_text": "old",
+          "content": "new",
+          "matched_entry": "stale"
+        }
+      ],
+      "limit": 30,
+      "success": false,
+      "final_entries": [
+        "old"
+      ]
+    },
+    {
+      "entries": [
+        "old"
+      ],
+      "operations": [
+        {
+          "action": "replace",
+          "old_text": "o",
+          "content": "new"
+        }
+      ],
+      "limit": 30,
+      "success": true,
+      "final_entries": [
+        "new"
+      ]
+    },
+    {
+      "entries": [
+        "a “quote”"
+      ],
+      "operations": [
+        {
+          "action": "patch",
+          "old_text": "\"quote\"",
+          "content": "word"
+        }
+      ],
+      "limit": 30,
+      "success": false,
+      "final_entries": [
+        "a “quote”"
+      ]
+    },
+    {
+      "entries": [
+        "one"
+      ],
+      "operations": [],
+      "limit": 30,
+      "success": false,
+      "final_entries": [
+        "one"
+      ]
+    },
+    {
+      "entries": [
+        "one"
+      ],
+      "operations": [
+        {
+          "action": "add",
+          "content": "too long"
+        }
+      ],
+      "limit": 5,
+      "success": false,
+      "final_entries": [
+        "one"
+      ]
+    }
+  ]
+}

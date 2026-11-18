@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh Windows message hub indexes for the Orialis morning report
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hermes
+ExecStart=/bin/bash /opt/orialis-agent/bin/hub-sync.sh
+TimeoutStartSec=7min

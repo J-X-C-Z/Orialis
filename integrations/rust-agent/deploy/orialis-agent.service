@@ -1,0 +1,35 @@
+[Unit]
+Description=Orialis native Rust Agent
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+WorkingDirectory=/var/lib/orialis-agent
+EnvironmentFile=/etc/orialis-agent.env
+ExecStart=/opt/orialis-agent/bin/orialis_agent \
+  --server ${ORIALIS_SERVER_URL} \
+  --device ${ORIALIS_DEVICE_ID} \
+  --db /var/lib/orialis-agent/agent.db \
+  --endpoint ${ORIALIS_MODEL_ENDPOINT} \
+  --model ${ORIALIS_MODEL_NAME} \
+  --verify-owner --session-context --stream-events --turn-updates \
+  --domain-tools --interactions \
+  --attachments --attachment-origin ${ORIALIS_ATTACHMENT_ORIGIN} \
+  --documents --pdf-program /usr/bin/pdftotext \
+  --scheduler --scheduler-timezone Asia/Shanghai \
+  --mcp-servers-json @/etc/orialis-agent-mcp.json \
+  --turn-timeout-secs 600
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/orialis-agent
+RestrictAddressFamilies=AF_INET AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,146 @@
+{
+  "upstream_commit": "36b98bcced7f3c22d08dd1119240e726b3928e3d",
+  "sources": {
+    "tools/file_operations.py": "5c1bfee828b2c89609ab07bcf647b8a15c7386da0433d0569df2feadb93e9f11",
+    "tools/file_operations_search.py": "63f362179d522b1def36847fc67214bbc5faeefcb0758152894f855a73657f86",
+    "tools/binary_extensions.py": "a2d59139f7bffa274738074f4d11ccd5b299a6ef7ad6542a65738e0760cd38da",
+    "tools/file_operations_common.py": "eaecbe6ce532e650efd260eda8d73bc2bb54fafb4a0c28a307573c835d7243d2",
+    "tools/tool_output_limits.py": "e7e101de344c8e8effb887d5f2235fde0b58e12654a593c022d931a3762f812a"
+  },
+  "scope": "Exact upstream methods with in-process terminal-snippet transport and default max_line_length=2000. No shell, converters, network or user files.",
+  "fixtures": [
+    {
+      "name": "utf-16-le-False.txt",
+      "base64": "QQBsAHAAaABhACAA5WUsZ56KIAA92ELeDQAKAEIAZQB0AGEADQAKAA==",
+      "encoding": "utf-16-le",
+      "strict_rust_accepts": true,
+      "upstream": {
+        "content": "1|Alpha 日本語 🙂\n2|Beta",
+        "total_lines": 3,
+        "file_size": 40,
+        "truncated": false,
+        "hint": "Transcoded from UTF-16-LE to UTF-8 for display. Text edits via patch/write_file would re-encode as UTF-8.",
+        "is_binary": false,
+        "is_image": false,
+        "not_found": false
+      }
+    },
+    {
+      "name": "utf-16-le-True.txt",
+      "base64": "//5BAGwAcABoAGEAIADlZSxnnoogAD3YAN4NAAoAQgBlAHQAYQANAAoA",
+      "encoding": "utf-16-le",
+      "strict_rust_accepts": true,
+      "upstream": {
+        "content": "1|Alpha 日本語 😀\n2|Beta",
+        "total_lines": 3,
+        "file_size": 42,
+        "truncated": false,
+        "hint": "Transcoded from UTF-16-LE to UTF-8 for display. Text edits via patch/write_file would re-encode as UTF-8.",
+        "is_binary": false,
+        "is_image": false,
+        "not_found": false
+      }
+    },
+    {
+      "name": "utf-16-be-False.txt",
+      "base64": "AEEAbABwAGgAYQAgZeVnLIqeACDYPd5CAA0ACgBCAGUAdABhAA0ACg==",
+      "encoding": "utf-16-be",
+      "strict_rust_accepts": true,
+      "upstream": {
+        "content": "1|Alpha 日本語 🙂\n2|Beta",
+        "total_lines": 3,
+        "file_size": 40,
+        "truncated": false,
+        "hint": "Transcoded from UTF-16-BE to UTF-8 for display. Text edits via patch/write_file would re-encode as UTF-8.",
+        "is_binary": false,
+        "is_image": false,
+        "not_found": false
+      }
+    },
+    {
+      "name": "utf-16-be-True.txt",
+      "base64": "/v8AQQBsAHAAaABhACBl5Wcsip4AINg93gAADQAKAEIAZQB0AGEADQAK",
+      "encoding": "utf-16-be",
+      "strict_rust_accepts": true,
+      "upstream": {
+        "content": "1|Alpha 日本語 😀\n2|Beta",
+        "total_lines": 3,
+        "file_size": 42,
+        "truncated": false,
+        "hint": "Transcoded from UTF-16-BE to UTF-8 for display. Text edits via patch/write_file would re-encode as UTF-8.",
+        "is_binary": false,
+        "is_image": false,
+        "not_found": false
+      }
+    },
+    {
+      "name": "trailing-blank.txt",
+      "base64": "//5vAG4AZQAKAAoA",
+      "encoding": "utf-16-le",
+      "strict_rust_accepts": true,
+      "upstream": {
+        "content": "1|one\n2|",
+        "total_lines": 3,
+        "file_size": 12,
+        "truncated": false,
+        "hint": "Transcoded from UTF-16-LE to UTF-8 for display. Text edits via patch/write_file would re-encode as UTF-8.",
+        "is_binary": false,
+        "is_image": false,
+        "not_found": false
+      }
+    },
+    {
+      "name": "malformed.txt",
+      "base64": "//4A2A==",
+      "encoding": "utf-16-le",
+      "strict_rust_accepts": false,
+      "upstream": {
+        "content": "1|�",
+        "total_lines": 1,
+        "file_size": 4,
+        "truncated": false,
+        "hint": "Transcoded from UTF-16-LE to UTF-8 for display. Text edits via patch/write_file would re-encode as UTF-8.",
+        "is_binary": false,
+        "is_image": false,
+        "not_found": false
+      }
+    },
+    {
+      "name": "odd.txt",
+      "base64": "//5h",
+      "encoding": "utf-16-le",
+      "strict_rust_accepts": false,
+      "upstream": {
+        "content": "1|�",
+        "total_lines": 1,
+        "file_size": 3,
+        "truncated": false,
+        "hint": "Transcoded from UTF-16-LE to UTF-8 for display. Text edits via patch/write_file would re-encode as UTF-8.",
+        "is_binary": false,
+        "is_image": false,
+        "not_found": false
+      }
+    },
+    {
+      "name": "known-binary.png",
+      "base64": "//5BAGwAcABoAGEA",
+      "encoding": null,
+      "strict_rust_accepts": false,
+      "upstream": null
+    },
+    {
+      "name": "one-zero.txt",
+      "base64": "YQA=",
+      "encoding": null,
+      "strict_rust_accepts": false,
+      "upstream": null
+    },
+    {
+      "name": "mixed-zero-parity.txt",
+      "base64": "QQBsAHAAaABhACAAPdgA3g==",
+      "encoding": null,
+      "strict_rust_accepts": false,
+      "upstream": null
+    }
+  ]
+}

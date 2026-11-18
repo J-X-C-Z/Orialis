@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh the message hub before the Orialis morning report
+
+[Timer]
+OnCalendar=*-*-* 06:50:00 Asia/Shanghai
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

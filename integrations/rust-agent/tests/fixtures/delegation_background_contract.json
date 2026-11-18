@@ -1,0 +1,38 @@
+{
+  "upstream_revision": "36b98bcced7f3c22d08dd1119240e726b3928e3d",
+  "contracts": [
+    {
+      "source": "tools/delegate_tool.py",
+      "start_line": 973,
+      "source_sha256": "3fe05db05b873ef866d854fcdd97fe6eff15019fa14dc7e113ec3bd60a1bf3b9",
+      "excerpt_sha256": "c9b7246f57e83dcbcb62ab76ea8a91018d1e9e03dfe6cd35f8f4bfbe45ce42da",
+      "contract": "Top-level model dispatch is background; nested dispatch is inline. Rust intentionally preserves opt-in explicit background=true."
+    },
+    {
+      "source": "tools/delegate_tool_dispatch.py",
+      "start_line": 403,
+      "source_sha256": "71aa356d2ea1c43c7d173e5a30fafa71599ecf7e99649c76fc065dcb75751299",
+      "excerpt_sha256": "f328eb6d024bbf211ae69fc355e4d1c53ac01ea4f1d2844014ac97c6c4740b1e",
+      "contract": "Accepted background work returns mode background, status dispatched, delegation_id and subagent_ids."
+    },
+    {
+      "source": "tools/delegate_tool_dispatch.py",
+      "start_line": 428,
+      "source_sha256": "71aa356d2ea1c43c7d173e5a30fafa71599ecf7e99649c76fc065dcb75751299",
+      "excerpt_sha256": "001fe5f16b1e6fc30dfbd497762f731f42743cc2114f61ec7dd583ece2ef95fa",
+      "contract": "Default batching reports one whole call; independent group completion is optional and not implemented in this increment."
+    }
+  ],
+  "additional_source": "tools/AGENTS.md:175-182 describes detached turn-stop survival and explicit /stop/reset cancellation",
+  "rust_extensions": [
+    "Durable immutable admission handle and completion record",
+    "Restart records interrupted/uncertain outcomes, never replays effects",
+    "Bounded explicit rejection instead of inline fallback on capacity exhaustion"
+  ],
+  "excluded": [
+    "Independent group notifications",
+    "Automatic parent model wake",
+    "ACP/profile routes",
+    "Live-provider production acceptance"
+  ]
+}

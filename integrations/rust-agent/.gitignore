@@ -1,0 +1,4 @@
+/target/
+*.sqlite*
+/.venv/
+__pycache__/

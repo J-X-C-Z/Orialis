@@ -1,0 +1,39 @@
+{
+  "upstream_commit": "36b98bcced7f3c22d08dd1119240e726b3928e3d",
+  "sources": {
+    "tools/read_extract.py": "8f145d85ae418e54e9339a9f71f9bd98f449a17cd2f3968e95d824061f5e1102",
+    "tools/ansi_strip.py": "d898da023e6ecb6693610de84dc13ffefe0cc2329196f411e46cd28d1e10a223"
+  },
+  "fixtures": [
+    {
+      "name": "notebook_0.ipynb",
+      "base64": "77u/eyJjZWxscyI6IFt7ImNlbGxfdHlwZSI6ICJtYXJrZG93biIsICJzb3VyY2UiOiBbIiMgT3ZlcnZpZXdcbiIsICLml6XmnKzoqp4iXX0sIHsiY2VsbF90eXBlIjogImNvZGUiLCAic291cmNlIjogWyJwcmludCgyKVxuIl0sICJvdXRwdXRzIjogW3sib3V0cHV0X3R5cGUiOiAic3RyZWFtIiwgInRleHQiOiBbIlx1MDAxYlszMW0yXHUwMDFiWzBtXG4iXX1dfV19",
+      "text": "# ── Markdown cell 1 ──\n# Overview\n日本語\n\n# ── Code cell 1 ──\nprint(2)\n\n# ── Output (cell 1) ──\n2\n",
+      "match": "exact"
+    },
+    {
+      "name": "notebook_1.ipynb",
+      "base64": "eyJ3b3Jrc2hlZXRzIjogW3siY2VsbHMiOiBbeyJjZWxsX3R5cGUiOiAiY29kZSIsICJzb3VyY2UiOiAieCA9IDEiLCAib3V0cHV0cyI6IFt7Im91dHB1dF90eXBlIjogInB5b3V0IiwgInRleHQiOiAiMSJ9XX0sIHsiY2VsbF90eXBlIjogInJhdyIsICJzb3VyY2UiOiAicmF3IHRleHQifV19XX0=",
+      "text": "# ── Code cell 1 ──\nx = 1\n\n# ── Output (cell 1) ──\n1\n\n# ── Raw cell ──\nraw text\n",
+      "match": "exact"
+    },
+    {
+      "name": "notebook_2.ipynb",
+      "base64": "eyJjZWxscyI6IFt7ImNlbGxfdHlwZSI6ICJjb2RlIiwgInNvdXJjZSI6ICJyYWlzZSBWYWx1ZUVycm9yKCkiLCAib3V0cHV0cyI6IFt7Im91dHB1dF90eXBlIjogImVycm9yIiwgImVuYW1lIjogIlZhbHVlRXJyb3IiLCAiZXZhbHVlIjogImJhZCIsICJ0cmFjZWJhY2siOiBbImZyYW1lIG9uZSIsICJWYWx1ZUVycm9yOiBiYWQiXX1dfV19",
+      "text": "# ── Code cell 1 ──\nraise ValueError()\n\n# ── Output (cell 1) ──\nError: ValueError: bad\nframe one\nValueError: bad\n",
+      "match": "exact"
+    },
+    {
+      "name": "notebook_3.ipynb",
+      "base64": "eyJjZWxscyI6IFt7ImNlbGxfdHlwZSI6ICJjb2RlIiwgInNvdXJjZSI6ICJwcm9ncmVzcygpIiwgIm91dHB1dHMiOiBbeyJvdXRwdXRfdHlwZSI6ICJzdHJlYW0iLCAidGV4dCI6ICIxMCVccjIwJVxyMTAwJVxuIn1dfV19",
+      "text": "# ── Code cell 1 ──\nprogress()\n\n# ── Output (cell 1) ──\n100%\n",
+      "match": "exact"
+    },
+    {
+      "name": "paragraphs.docx",
+      "base64": "UEsDBBQAAAAIAAAAIVxqT3xHlgAAANIAAAARAAAAd29yZC9kb2N1bWVudC54bWxtj0EKAjEMRa9S5gBmcOGi1Fm79wS1rTMDbRPSSvUkbsSdG/Fcg8dwKoggbl7I//l8ooq0aA7BxSyOwccky7oZciYJkMzggk4LJBdnb48cdJ5X7qEgW2I0LqUx9sHDsm1XEPQYm04VuUN7qpMquCJ3G+c9iul8my6P5/2qoIqV/Cb93m+dwWgFadY9axr+BODTBN8vuhdQSwECFAMUAAAACAAAACFcak98R5YAAADSAAAAEQAAAAAAAAAAAAAAgAEAAAAAd29yZC9kb2N1bWVudC54bWxQSwUGAAAAAAEAAQA/AAAAxQAAAAAA",
+      "text": "Hello 日本語\nSecond paragraph\n",
+      "match": "section_text"
+    }
+  ]
+}
