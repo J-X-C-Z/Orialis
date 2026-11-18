@@ -10,7 +10,7 @@ import psutil
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/"orialis-full-eval/harness"))
 from client import Client
 ROOT=Path(__file__).resolve().parents[2]
-PYTHON=Path(os.environ.get('HERMES_PYTHON','/tmp/hermes-full-env/gen-875da7f9ccb44ec6abe72396905579c3/venv/bin/python'))
+PYTHON=Path(os.environ.get('HERMES_PYTHON',sys.executable))
 
 def port():
     with socket.socket() as s:s.bind(('127.0.0.1',0));return s.getsockname()[1]

@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import os
+import sys
 from pathlib import Path
 import re
 import socket
@@ -235,4 +236,4 @@ async def main(args):
 
 
 if __name__=="__main__":
-    p=argparse.ArgumentParser();p.add_argument("--binary",type=Path,default=ROOT/"hermes-rust-core/results/stream-release/orialis_agent");p.add_argument("--server-binary",type=Path,default=ROOT/"orialis/target/release/orialis-server");p.add_argument("--out",type=Path,default=ROOT/"hermes-rust-core/results/transport-stage-probe");p.add_argument("--iterations",type=int,default=20);p.add_argument("--model-delay-ms",type=float,default=5);p.add_argument("--python-baseline",action="store_true");p.add_argument("--python",type=Path,default=Path("/tmp/hermes-full-env/gen-875da7f9ccb44ec6abe72396905579c3/venv/bin/python"));p.add_argument("--cases",nargs="*");asyncio.run(main(p.parse_args()))
+    p=argparse.ArgumentParser();p.add_argument("--binary",type=Path,default=ROOT/"hermes-rust-core/results/stream-release/orialis_agent");p.add_argument("--server-binary",type=Path,default=ROOT/"orialis/target/release/orialis-server");p.add_argument("--out",type=Path,default=ROOT/"hermes-rust-core/results/transport-stage-probe");p.add_argument("--iterations",type=int,default=20);p.add_argument("--model-delay-ms",type=float,default=5);p.add_argument("--python-baseline",action="store_true");p.add_argument("--python",type=Path,default=Path(sys.executable));p.add_argument("--cases",nargs="*");asyncio.run(main(p.parse_args()))
