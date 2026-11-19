@@ -2,7 +2,7 @@
   "revision": "f9a064bf05b18265afd26905e7240777d4ce355c",
   "source": "orialis-server/src/agent_gateway/protocol.rs",
   "source_sha256": "2fe4e567e2a14be38270b9b823ea00632ea833882fcace091d71f4a563605d34",
-  "fixture_sha256": "58a817ea086465f51955de70d8734c4f1b2f82773fbda88768ba89e95924f989",
+  "fixture_sha256": "79a3709633c19caebd8a8c572061459da9946f7c7fdcc58deedad5a46699d12a",
   "excerpts": [
     {
       "start_line": 7,
