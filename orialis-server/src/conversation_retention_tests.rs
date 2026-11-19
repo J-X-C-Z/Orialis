@@ -32,6 +32,7 @@ async fn expires_only_conversations_without_activity_for_seven_days() {
         .await
         .unwrap();
     }
+    let recent_message = now();
     for (id, conversation_id, created_at) in [
         (
             "old-message",
@@ -41,7 +42,7 @@ async fn expires_only_conversations_without_activity_for_seven_days() {
         (
             "recent-message",
             "old-with-recent-message",
-            "2026-10-24T00:00:00Z",
+            recent_message.as_str(),
         ),
     ] {
         sqlx::query(
