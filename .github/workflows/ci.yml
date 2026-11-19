@@ -272,8 +272,16 @@ jobs:
       - name: Package the Windows x64 application
         working-directory: mobile
         run: |
-          $version = (Select-String -Path pubspec.yaml -Pattern '^version: ([^+]+)').Matches[0].Groups[1].Value
-          Compress-Archive -Path 'build/windows/x64/runner/Release/*' -DestinationPath "$env:RUNNER_TEMP/Orialis-$version-windows-x64.zip"
+          $release = 'build/windows/x64/runner/Release'
+          $version = (Get-Item "$release/orialis_mobile.exe").VersionInfo.ProductVersion.Split('+')[0]
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $redist = (Get-Content "$vs/VC/Auxiliary/Build/Microsoft.VCRedistVersion.default.txt").Trim()
+          $crt = "$vs/VC/Redist/MSVC/$redist/x64/Microsoft.VC143.CRT"
+          foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+            Copy-Item -LiteralPath "$crt/$dll" -Destination $release
+          }
+          Compress-Archive -Path "$release/*" -DestinationPath "$env:RUNNER_TEMP/Orialis-$version-windows-x64.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: orialis-windows-x64
