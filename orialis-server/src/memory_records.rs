@@ -362,7 +362,7 @@ pub(crate) async fn put_image(
     tokio::fs::write(&temp, &bytes)
         .await
         .map_err(|_| AppError::ServiceUnavailable("memory image write failed".into()))?;
-    if let Err(_) = tokio::fs::rename(&temp, &path).await {
+    if tokio::fs::rename(&temp, &path).await.is_err() {
         let _ = tokio::fs::remove_file(&temp).await;
         return Err(AppError::ServiceUnavailable(
             "memory image commit failed".into(),

@@ -191,6 +191,51 @@ jobs:
       - working-directory: mobile
         run: flutter build apk --debug
 
+  ios-client:
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.4"
+          channel: stable
+          cache: true
+      - name: Select Xcode 27.2
+        run: sudo xcode-select --switch /Applications/Xcode_27.2.app/Contents/Developer
+      - working-directory: mobile
+        run: flutter pub get --enforce-lockfile
+      - working-directory: mobile
+        run: flutter build ios --release --no-codesign --no-pub
+      - name: Package the iOS app for personal signing
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/ios/iphoneos/Runner.app/Info.plist)"
+          mkdir "$RUNNER_TEMP/Payload"
+          ditto build/ios/iphoneos/Runner.app "$RUNNER_TEMP/Payload/Runner.app"
+          ditto -c -k --keepParent "$RUNNER_TEMP/Payload" "$RUNNER_TEMP/Orialis-$version-ios-self-sign.ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orialis-ios-self-sign
+          path: ${{ runner.temp }}/Orialis-*-ios-self-sign.ipa
+          if-no-files-found: error
+          retention-days: 7
+      - name: Launch Orialis on the iOS 27.2 simulator
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl list devices available -j | jq -er '
+            .devices["com.apple.CoreSimulator.SimRuntime.iOS-27-2"]
+            | map(select(.name | startswith("iPhone")))
+            | first.udid
+          ')"
+          flutter build ios --simulator --debug --no-pub
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl install "$device" build/ios/iphonesimulator/Runner.app
+          xcrun simctl launch "$device" top.jxcz.orialis
+
   macos-client:
     needs: changes
     if: needs.changes.outputs.macos_client == 'true'
@@ -208,6 +253,41 @@ jobs:
         run: flutter analyze --no-fatal-infos
       - working-directory: mobile
         run: flutter build macos --debug --target lib/main_desktop.dart
+
+  windows-client:
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.4"
+          channel: stable
+          cache: true
+      - working-directory: mobile
+        run: flutter pub get --enforce-lockfile
+      - working-directory: mobile
+        run: flutter build windows --release --no-pub --target lib/main_desktop.dart
+      - name: Package the Windows x64 application
+        working-directory: mobile
+        run: |
+          $release = 'build/windows/x64/runner/Release'
+          $version = (Get-Item "$release/orialis_mobile.exe").VersionInfo.ProductVersion.Split('+')[0]
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $redist = (Get-Content "$vs/VC/Auxiliary/Build/Microsoft.VCRedistVersion.default.txt").Trim()
+          $crt = "$vs/VC/Redist/MSVC/$redist/x64/Microsoft.VC143.CRT"
+          foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+            Copy-Item -LiteralPath "$crt/$dll" -Destination $release
+          }
+          Compress-Archive -Path "$release/*" -DestinationPath "$env:RUNNER_TEMP/Orialis-$version-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orialis-windows-x64
+          path: ${{ runner.temp }}/Orialis-*-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7
 
   website:
     needs: changes

@@ -4,14 +4,14 @@ mod auth;
 mod calendar;
 mod config;
 mod health;
-mod mobile_realtime;
 mod memory_analysis;
 mod memory_records;
-mod screen_memories;
+mod mobile_realtime;
 mod news;
 mod node_control;
 mod oidc;
 mod projects;
+mod screen_memories;
 mod sync;
 mod tasks;
 // Experimental platform storage helper. Compiled with the server crate, but
@@ -455,7 +455,8 @@ async fn main() {
         )
         .route(
             "/api/v1/memory/analyses/{id}",
-            get(memory_analysis::get_analysis).post(memory_analysis::start_analysis)
+            get(memory_analysis::get_analysis)
+                .post(memory_analysis::start_analysis)
                 .layer(DefaultBodyLimit::max(2_000_000)),
         )
         .route(

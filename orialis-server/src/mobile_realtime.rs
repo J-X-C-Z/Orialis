@@ -591,13 +591,23 @@ async fn handle_agent_event(
             return send_envelope(socket, protocol::mobile_event(payload)).await;
         }
         "session.status" => {
-            return match run_session_status(state, user_id, &conversation_id, &request_id, &session_id).await {
+            return match run_session_status(
+                state,
+                user_id,
+                &conversation_id,
+                &request_id,
+                &session_id,
+            )
+            .await
+            {
                 Ok(payload) => send_envelope(socket, protocol::mobile_event(payload)).await,
-                Err(error) => send_error(socket, Some(request_id), "agent_unavailable", &error).await,
+                Err(error) => {
+                    send_error(socket, Some(request_id), "agent_unavailable", &error).await
+                }
             };
         }
-        "session.create" | "session.reset" | "session.resume"
-        | "session.title" | "session.retry" | "session.stop" => {
+        "session.create" | "session.reset" | "session.resume" | "session.title"
+        | "session.retry" | "session.stop" => {
             let title = envelope
                 .payload
                 .get("title")
@@ -810,26 +820,55 @@ async fn run_session_status(
     session_id: &str,
 ) -> Result<Value, String> {
     let device = crate::conversation_agent_device(&state.pool, user_id, conversation_id)
-        .await.map_err(|_| "Unable to verify conversation ownership".to_owned())?
+        .await
+        .map_err(|_| "Unable to verify conversation ownership".to_owned())?
         .ok_or("Bind this conversation to an owned Hermes device first")?;
-    let (status, message) = if state.agent.supports_for_user(user_id, &device, "session.status").await {
+    let (status, message) = if state
+        .agent
+        .supports_for_user(user_id, &device, "session.status")
+        .await
+    {
         let wire_id = format!("status_{}", uuid::Uuid::now_v7());
-        let receiver = state.agent.send_request_for_user(user_id, Some(&device), protocol::GatewayMessage::SessionInfo {
-            version: PROTOCOL_VERSION, request_id: wire_id.clone(),
-            conversation_id: conversation_id.into(), session_id: conversation_id.into(),
-        }).await.map_err(registry_error_message)?;
+        let receiver = state
+            .agent
+            .send_request_for_user(
+                user_id,
+                Some(&device),
+                protocol::GatewayMessage::SessionInfo {
+                    version: PROTOCOL_VERSION,
+                    request_id: wire_id.clone(),
+                    conversation_id: conversation_id.into(),
+                    session_id: conversation_id.into(),
+                },
+            )
+            .await
+            .map_err(registry_error_message)?;
         let response = tokio::time::timeout(Duration::from_secs(10), receiver).await;
         state.agent.cancel_request(&wire_id).await;
         match response {
-            Ok(Ok(protocol::GatewayMessage::SessionReply { conversation_id: reply_chat, status, message, .. }))
-                if reply_chat == conversation_id && matches!(status.as_str(), "running" | "completed" | "error" | "cancelled" | "idle" | "unknown") => (status, message.unwrap_or_default()),
+            Ok(Ok(protocol::GatewayMessage::SessionReply {
+                conversation_id: reply_chat,
+                status,
+                message,
+                ..
+            })) if reply_chat == conversation_id
+                && matches!(
+                    status.as_str(),
+                    "running" | "completed" | "error" | "cancelled" | "idle" | "unknown"
+                ) =>
+            {
+                (status, message.unwrap_or_default())
+            }
             Ok(Ok(protocol::GatewayMessage::Error { message, .. })) => return Err(message),
             Ok(Ok(_)) => return Err("Invalid Hermes status response".into()),
             Ok(Err(_)) => return Err("Hermes disconnected".into()),
             Err(_) => return Err("Hermes status request timed out".into()),
         }
     } else {
-        ("unknown".into(), "当前设备尚未提供实时处理状态，请更新设备端插件。".into())
+        (
+            "unknown".into(),
+            "当前设备尚未提供实时处理状态，请更新设备端插件。".into(),
+        )
     };
     Ok(serde_json::json!({
         "kind": "session.status", "requestId": request_id, "conversationId": conversation_id,
@@ -927,20 +966,58 @@ mod mobile_connection_tests {
         let state = memory_state().await;
         let _ = bind(&state, "mac-chat", "mac").await.unwrap();
         let (tx, mut rx) = tokio::sync::mpsc::channel(4);
-        state.agent.register_connection("cm-status".into(), "u1".into(), "mac".into(), "macos".into(), tx).await;
-        state.agent.set_peer_capabilities("mac", vec!["session.status".into()]).await;
-        assert!(!state.agent.supports_for_user("u2", "mac", "session.status").await);
+        state
+            .agent
+            .register_connection(
+                "cm-status".into(),
+                "u1".into(),
+                "mac".into(),
+                "macos".into(),
+                tx,
+            )
+            .await;
+        state
+            .agent
+            .set_peer_capabilities("mac", vec!["session.status".into()])
+            .await;
+        assert!(
+            !state
+                .agent
+                .supports_for_user("u2", "mac", "session.status")
+                .await
+        );
         for status in ["running", "completed", "error", "cancelled"] {
             let task_state = state.clone();
             let task = tokio::spawn(async move {
-                run_session_status(&task_state, "u1", "mac-chat", "mobile-refresh", "visible-session").await
+                run_session_status(
+                    &task_state,
+                    "u1",
+                    "mac-chat",
+                    "mobile-refresh",
+                    "visible-session",
+                )
+                .await
             });
-            let AgentCommand::Send(request) = rx.recv().await.unwrap() else { panic!("expected request"); };
+            let AgentCommand::Send(request) = rx.recv().await.unwrap() else {
+                panic!("expected request");
+            };
             let encoded = serde_json::to_string(&request).unwrap();
-            let GatewayMessage::SessionInfo { request_id, conversation_id, .. } = protocol::parse_message(&encoded).unwrap() else { panic!("status must not submit a model message"); };
+            let GatewayMessage::SessionInfo {
+                request_id,
+                conversation_id,
+                ..
+            } = protocol::parse_message(&encoded).unwrap()
+            else {
+                panic!("status must not submit a model message");
+            };
             let reply = serde_json::json!({"version":1,"type":"session.reply","request_id":request_id,"conversation_id":conversation_id,"status":status,"message":"公开进度摘要"});
             let reply = protocol::parse_message(&reply.to_string()).unwrap();
-            assert!(!state.agent.resolve_reply_for_device("aozora", reply.clone()).await);
+            assert!(
+                !state
+                    .agent
+                    .resolve_reply_for_device("aozora", reply.clone())
+                    .await
+            );
             assert!(state.agent.resolve_reply_for_device("mac", reply).await);
             let response = task.await.unwrap().unwrap();
             assert_eq!(response["kind"], "session.status");
@@ -949,9 +1026,20 @@ mod mobile_connection_tests {
             assert_eq!(response["status"], status);
             assert_eq!(response["message"], "公开进度摘要");
         }
-        assert_eq!(sqlx::query_scalar::<_, i64>("SELECT count(*) FROM messages").fetch_one(&state.pool).await.unwrap(), 0);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM messages")
+                .fetch_one(&state.pool)
+                .await
+                .unwrap(),
+            0
+        );
         state.agent.remove_connection("cm-status").await;
-        assert!(!state.agent.supports_for_user("u1", "mac", "session.status").await);
+        assert!(
+            !state
+                .agent
+                .supports_for_user("u1", "mac", "session.status")
+                .await
+        );
     }
 
     #[tokio::test]
@@ -960,13 +1048,27 @@ mod mobile_connection_tests {
         let state = memory_state().await;
         let _ = bind(&state, "mac-chat", "mac").await.unwrap();
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        state.agent.register_connection("legacy-status".into(), "u1".into(), "mac".into(), "macos".into(), tx).await;
-        let response = run_session_status(&state, "u1", "mac-chat", "legacy-refresh", "mac-chat").await.unwrap();
+        state
+            .agent
+            .register_connection(
+                "legacy-status".into(),
+                "u1".into(),
+                "mac".into(),
+                "macos".into(),
+                tx,
+            )
+            .await;
+        let response = run_session_status(&state, "u1", "mac-chat", "legacy-refresh", "mac-chat")
+            .await
+            .unwrap();
         assert!(rx.try_recv().is_err());
         assert_eq!(response["status"], "unknown");
         assert_eq!(response["requestId"], "legacy-refresh");
         assert_eq!(response["conversationId"], "mac-chat");
-        assert_eq!(response["message"], "当前设备尚未提供实时处理状态，请更新设备端插件。");
+        assert_eq!(
+            response["message"],
+            "当前设备尚未提供实时处理状态，请更新设备端插件。"
+        );
     }
 
     #[tokio::test]
