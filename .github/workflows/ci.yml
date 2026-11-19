@@ -222,6 +222,19 @@ jobs:
           path: ${{ runner.temp }}/Orialis-*-ios-self-sign.ipa
           if-no-files-found: error
           retention-days: 7
+      - name: Launch Orialis on the iOS 27.2 simulator
+        working-directory: mobile
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl list devices available -j | jq -er '
+            .devices["com.apple.CoreSimulator.SimRuntime.iOS-27-2"]
+            | map(select(.name | startswith("iPhone")))
+            | first.udid
+          ')"
+          flutter build ios --simulator --debug --no-pub
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl install "$device" build/ios/iphonesimulator/Runner.app
+          xcrun simctl launch "$device" top.jxcz.orialis
 
   macos-client:
     needs: changes
