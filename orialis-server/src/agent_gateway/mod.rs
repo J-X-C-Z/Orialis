@@ -649,8 +649,7 @@ impl AgentRegistry {
     }
 
     /// Queue a structured event for a device and assign its server sequence.
-    /// Current callers may still use the durable message queue; this method is
-    /// the transport hook for future server-originated session/tool events.
+    #[cfg(test)]
     pub(crate) async fn send_event_for_user(
         &self,
         user_id: &str,

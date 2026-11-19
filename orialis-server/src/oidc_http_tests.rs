@@ -39,6 +39,7 @@ type FixtureToken = IdToken<
     CoreJwsSigningAlgorithm,
 >;
 type FixtureTokenClaims = IdTokenClaims<FixtureClaims, CoreGenderClaim>;
+type AuthorizationCodes = HashMap<String, (String, String, String, bool)>;
 
 const CLIENT: &str = "isolated-client";
 const SECRET: &str = "isolated-secret-not-a-production-credential";
@@ -46,7 +47,7 @@ const SECRET: &str = "isolated-secret-not-a-production-credential";
 struct FakeProvider {
     issuer: String,
     callback: String,
-    codes: Arc<Mutex<HashMap<String, (String, String, String, bool)>>>,
+    codes: Arc<Mutex<AuthorizationCodes>>,
 }
 
 async fn discovery(State(fake): State<FakeProvider>) -> Json<serde_json::Value> {

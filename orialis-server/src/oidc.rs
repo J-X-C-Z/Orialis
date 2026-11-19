@@ -277,7 +277,7 @@ fn verified_subject(
 
 fn study_scope_granted(requested: bool, scopes: Option<&Vec<Scope>>) -> bool {
     requested
-        && scopes.map_or(true, |scopes| {
+        && scopes.is_none_or(|scopes| {
             scopes
                 .iter()
                 .any(|scope| scope.as_str() == "study_identity")
