@@ -1,10 +1,10 @@
-# Orialis iOS 1.4.0
+# Orialis iOS 1.5.1
 
-此版本用于个人自签安装，不通过 App Store 或 TestFlight 分发。最低 iOS 15.0，iPhone/iPad，包标识 `top.jxcz.orialis`，版本 `1.4.0 (55)`。
+此版本用于个人自签安装。最低 iOS 15.0，支持 iPhone 和 iPad，包标识为 `top.jxcz.orialis`，版本为 `1.5.1 (80)`。
 
 ## 个人安装
 
-交付的 `Orialis-1.4.0-ios-self-sign.ipa` 使用标准 `Payload/Runner.app` 结构，仍需用你自己的 Apple ID 重新签名；文件名中的 self-sign 表示交给个人签名工具使用，不表示已获得可安装的 Apple 签名。
+`Orialis-1.5.1-ios-self-sign.ipa` 使用标准 `Payload/Runner.app` 结构。请用自己的 Apple ID 重新签名后安装。
 
 1. 在 Mac 上安装 [Sideloadly](https://sideloadly.io/index.html)，用 USB 连接并信任你的 iPhone。
 2. 将 IPA 拖入 Sideloadly，选择手机，输入你自己的 Apple ID，执行签名安装。Apple ID 与验证信息只在工具中输入，不写入项目。
@@ -20,11 +20,11 @@ Android 的辅助截屏、快捷设置磁贴、外部分享接收、系统通知
 
 ## 从源码构建
 
-需要与项目匹配的 Flutter、Xcode、CocoaPods。在 `mobile/` 下执行：
+使用 Flutter 3.47.4、Xcode 27.2 和 CocoaPods。在 `mobile/` 下执行：
 
 ```sh
-flutter pub get
-flutter build ios --release --no-codesign
+flutter pub get --enforce-lockfile
+flutter build ios --release --no-codesign --no-pub
 ```
 
 结果为 `build/ios/iphoneos/Runner.app`。无签名 `.app` 或 ZIP 不能直接安装到普通 iPhone。用于重签的 IPA 可将该目录放到 `Payload/Runner.app` 后压缩 `Payload` 文件夹生成；必须保留目录、可执行文件和框架。
