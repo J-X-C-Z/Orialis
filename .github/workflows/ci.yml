@@ -254,6 +254,33 @@ jobs:
       - working-directory: mobile
         run: flutter build macos --debug --target lib/main_desktop.dart
 
+  windows-client:
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.4"
+          channel: stable
+          cache: true
+      - working-directory: mobile
+        run: flutter pub get --enforce-lockfile
+      - working-directory: mobile
+        run: flutter build windows --release --no-pub --target lib/main_desktop.dart
+      - name: Package the Windows x64 application
+        working-directory: mobile
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version: ([^+]+)').Matches[0].Groups[1].Value
+          Compress-Archive -Path 'build/windows/x64/runner/Release/*' -DestinationPath "$env:RUNNER_TEMP/Orialis-$version-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orialis-windows-x64
+          path: ${{ runner.temp }}/Orialis-*-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7
+
   website:
     needs: changes
     if: needs.changes.outputs.website == 'true'
